@@ -1,0 +1,539 @@
+{
+  "format": "modbus-read-responses/1",
+  "description": "What a collector makes of the bytes it receives after sending a read. Frames are built independently of either collector (CRC-16/MODBUS, check value 0x4B37); each outcome follows the documented rules. expected: the request the reply must answer (transaction_id is 0 and unused for rtu_over_tcp). skipped: every step that drops bytes ahead of the reply, in order: stale (TCP: a whole frame with another transaction id), noise (RTU: a byte that cannot start the reply), bad_crc (RTU: one byte of what began like the reply but failed its CRC). result: the registers read, a Modbus exception code, incomplete (more bytes needed), or an error: malformed_frame, unexpected_response (TCP: the right transaction from another unit), or malformed_response (a frame that is not the reply to this read). rest: the bytes after the reply, or, for incomplete, malformed_frame or unexpected_response, what the buffer still holds when stepping stops. Every implementation that reads meters must give every outcome.",
+  "cases": [
+    {
+      "why": "a whole reply",
+      "framing": "tcp",
+      "expected": {
+        "transaction_id": 7,
+        "unit_id": 1,
+        "table": "holding",
+        "count": 2
+      },
+      "buffer": "00070000000701030447f12000",
+      "skipped": [],
+      "result": {
+        "words": [
+          18417,
+          8192
+        ]
+      },
+      "rest": ""
+    },
+    {
+      "why": "bytes after the reply are left as the rest",
+      "framing": "tcp",
+      "expected": {
+        "transaction_id": 7,
+        "unit_id": 1,
+        "table": "holding",
+        "count": 2
+      },
+      "buffer": "00070000000701030447f120000008",
+      "skipped": [],
+      "result": {
+        "words": [
+          18417,
+          8192
+        ]
+      },
+      "rest": "0008"
+    },
+    {
+      "why": "a late reply to another transaction is skipped as stale",
+      "framing": "tcp",
+      "expected": {
+        "transaction_id": 8,
+        "unit_id": 1,
+        "table": "holding",
+        "count": 2
+      },
+      "buffer": "0007000000070103040001000200080000000701030447f12000",
+      "skipped": [
+        "stale"
+      ],
+      "result": {
+        "words": [
+          18417,
+          8192
+        ]
+      },
+      "rest": ""
+    },
+    {
+      "why": "the right transaction from another unit is unexpected",
+      "framing": "tcp",
+      "expected": {
+        "transaction_id": 7,
+        "unit_id": 1,
+        "table": "holding",
+        "count": 2
+      },
+      "buffer": "00070000000702030447f12000",
+      "skipped": [],
+      "result": {
+        "error": "unexpected_response"
+      },
+      "rest": "00070000000702030447f12000"
+    },
+    {
+      "why": "an exception reply",
+      "framing": "tcp",
+      "expected": {
+        "transaction_id": 7,
+        "unit_id": 1,
+        "table": "holding",
+        "count": 2
+      },
+      "buffer": "000700000003018302",
+      "skipped": [],
+      "result": {
+        "exception": 2
+      },
+      "rest": ""
+    },
+    {
+      "why": "an input-register reply",
+      "framing": "tcp",
+      "expected": {
+        "transaction_id": 65535,
+        "unit_id": 247,
+        "table": "input",
+        "count": 2
+      },
+      "buffer": "ffff00000007f7040447f12000",
+      "skipped": [],
+      "result": {
+        "words": [
+          18417,
+          8192
+        ]
+      },
+      "rest": ""
+    },
+    {
+      "why": "half a reply is incomplete",
+      "framing": "tcp",
+      "expected": {
+        "transaction_id": 7,
+        "unit_id": 1,
+        "table": "holding",
+        "count": 2
+      },
+      "buffer": "000700000007010304",
+      "skipped": [],
+      "result": "incomplete",
+      "rest": "000700000007010304"
+    },
+    {
+      "why": "half a header is incomplete",
+      "framing": "tcp",
+      "expected": {
+        "transaction_id": 7,
+        "unit_id": 1,
+        "table": "holding",
+        "count": 2
+      },
+      "buffer": "0007000000",
+      "skipped": [],
+      "result": "incomplete",
+      "rest": "0007000000"
+    },
+    {
+      "why": "an empty buffer is incomplete",
+      "framing": "tcp",
+      "expected": {
+        "transaction_id": 7,
+        "unit_id": 1,
+        "table": "holding",
+        "count": 2
+      },
+      "buffer": "",
+      "skipped": [],
+      "result": "incomplete",
+      "rest": ""
+    },
+    {
+      "why": "a length below 2 is malformed",
+      "framing": "tcp",
+      "expected": {
+        "transaction_id": 7,
+        "unit_id": 1,
+        "table": "holding",
+        "count": 2
+      },
+      "buffer": "0007000000010103",
+      "skipped": [],
+      "result": {
+        "error": "malformed_frame"
+      },
+      "rest": "0007000000010103"
+    },
+    {
+      "why": "a length above 254 is malformed",
+      "framing": "tcp",
+      "expected": {
+        "transaction_id": 7,
+        "unit_id": 1,
+        "table": "holding",
+        "count": 2
+      },
+      "buffer": "0007000000ff01",
+      "skipped": [],
+      "result": {
+        "error": "malformed_frame"
+      },
+      "rest": "0007000000ff01"
+    },
+    {
+      "why": "a protocol id other than 0 is malformed",
+      "framing": "tcp",
+      "expected": {
+        "transaction_id": 7,
+        "unit_id": 1,
+        "table": "holding",
+        "count": 2
+      },
+      "buffer": "00070001000701030447f12000",
+      "skipped": [],
+      "result": {
+        "error": "malformed_frame"
+      },
+      "rest": "00070001000701030447f12000"
+    },
+    {
+      "why": "a reply with the wrong function code is malformed",
+      "framing": "tcp",
+      "expected": {
+        "transaction_id": 7,
+        "unit_id": 1,
+        "table": "holding",
+        "count": 2
+      },
+      "buffer": "00070000000701040447f12000",
+      "skipped": [],
+      "result": {
+        "error": "malformed_response"
+      },
+      "rest": ""
+    },
+    {
+      "why": "a reply with the wrong register count is malformed",
+      "framing": "tcp",
+      "expected": {
+        "transaction_id": 7,
+        "unit_id": 1,
+        "table": "holding",
+        "count": 2
+      },
+      "buffer": "000700000009010306000100020003",
+      "skipped": [],
+      "result": {
+        "error": "malformed_response"
+      },
+      "rest": ""
+    },
+    {
+      "why": "exception code 0 is malformed",
+      "framing": "tcp",
+      "expected": {
+        "transaction_id": 7,
+        "unit_id": 1,
+        "table": "holding",
+        "count": 2
+      },
+      "buffer": "000700000003018300",
+      "skipped": [],
+      "result": {
+        "error": "malformed_response"
+      },
+      "rest": ""
+    },
+    {
+      "why": "a byte count that disagrees with the length is malformed",
+      "framing": "tcp",
+      "expected": {
+        "transaction_id": 7,
+        "unit_id": 1,
+        "table": "holding",
+        "count": 2
+      },
+      "buffer": "00070000000701030600010002",
+      "skipped": [],
+      "result": {
+        "error": "malformed_response"
+      },
+      "rest": ""
+    },
+    {
+      "why": "a whole reply",
+      "framing": "rtu_over_tcp",
+      "expected": {
+        "transaction_id": 0,
+        "unit_id": 1,
+        "table": "holding",
+        "count": 2
+      },
+      "buffer": "01030447f12000a6b4",
+      "skipped": [],
+      "result": {
+        "words": [
+          18417,
+          8192
+        ]
+      },
+      "rest": ""
+    },
+    {
+      "why": "bytes after the reply are left as the rest",
+      "framing": "rtu_over_tcp",
+      "expected": {
+        "transaction_id": 0,
+        "unit_id": 1,
+        "table": "holding",
+        "count": 2
+      },
+      "buffer": "01030447f12000a6b401",
+      "skipped": [],
+      "result": {
+        "words": [
+          18417,
+          8192
+        ]
+      },
+      "rest": "01"
+    },
+    {
+      "why": "bus-turnaround noise ahead of the reply is skipped a byte at a time",
+      "framing": "rtu_over_tcp",
+      "expected": {
+        "transaction_id": 0,
+        "unit_id": 1,
+        "table": "holding",
+        "count": 2
+      },
+      "buffer": "00ff01030447f12000a6b4",
+      "skipped": [
+        "noise",
+        "noise"
+      ],
+      "result": {
+        "words": [
+          18417,
+          8192
+        ]
+      },
+      "rest": ""
+    },
+    {
+      "why": "an exception reply",
+      "framing": "rtu_over_tcp",
+      "expected": {
+        "transaction_id": 0,
+        "unit_id": 1,
+        "table": "holding",
+        "count": 2
+      },
+      "buffer": "018302c0f1",
+      "skipped": [],
+      "result": {
+        "exception": 2
+      },
+      "rest": ""
+    },
+    {
+      "why": "an input-register reply",
+      "framing": "rtu_over_tcp",
+      "expected": {
+        "transaction_id": 0,
+        "unit_id": 247,
+        "table": "input",
+        "count": 2
+      },
+      "buffer": "f7040447f12000310c",
+      "skipped": [],
+      "result": {
+        "words": [
+          18417,
+          8192
+        ]
+      },
+      "rest": ""
+    },
+    {
+      "why": "a reply with a bad CRC loses one byte; a good reply behind it is still found",
+      "framing": "rtu_over_tcp",
+      "expected": {
+        "transaction_id": 0,
+        "unit_id": 1,
+        "table": "holding",
+        "count": 2
+      },
+      "buffer": "01030447f12000a7b401030447f12000a6b4",
+      "skipped": [
+        "bad_crc",
+        "noise",
+        "noise",
+        "noise",
+        "noise",
+        "noise",
+        "noise",
+        "noise",
+        "noise"
+      ],
+      "result": {
+        "words": [
+          18417,
+          8192
+        ]
+      },
+      "rest": ""
+    },
+    {
+      "why": "a lone bad reply drains as noise to incomplete",
+      "framing": "rtu_over_tcp",
+      "expected": {
+        "transaction_id": 0,
+        "unit_id": 1,
+        "table": "holding",
+        "count": 2
+      },
+      "buffer": "018302c1f1",
+      "skipped": [
+        "bad_crc",
+        "noise",
+        "noise",
+        "noise",
+        "noise"
+      ],
+      "result": "incomplete",
+      "rest": ""
+    },
+    {
+      "why": "another unit's reply is noise",
+      "framing": "rtu_over_tcp",
+      "expected": {
+        "transaction_id": 0,
+        "unit_id": 1,
+        "table": "holding",
+        "count": 2
+      },
+      "buffer": "02030400050006593001030447f12000a6b4",
+      "skipped": [
+        "noise",
+        "noise",
+        "noise",
+        "noise",
+        "noise",
+        "noise",
+        "noise",
+        "noise",
+        "noise"
+      ],
+      "result": {
+        "words": [
+          18417,
+          8192
+        ]
+      },
+      "rest": ""
+    },
+    {
+      "why": "our unit with another function code is noise",
+      "framing": "rtu_over_tcp",
+      "expected": {
+        "transaction_id": 0,
+        "unit_id": 1,
+        "table": "holding",
+        "count": 2
+      },
+      "buffer": "010601030447f12000a6b4",
+      "skipped": [
+        "noise",
+        "noise"
+      ],
+      "result": {
+        "words": [
+          18417,
+          8192
+        ]
+      },
+      "rest": ""
+    },
+    {
+      "why": "half a reply is incomplete",
+      "framing": "rtu_over_tcp",
+      "expected": {
+        "transaction_id": 0,
+        "unit_id": 1,
+        "table": "holding",
+        "count": 2
+      },
+      "buffer": "01030447f1",
+      "skipped": [],
+      "result": "incomplete",
+      "rest": "01030447f1"
+    },
+    {
+      "why": "our unit alone is incomplete",
+      "framing": "rtu_over_tcp",
+      "expected": {
+        "transaction_id": 0,
+        "unit_id": 1,
+        "table": "holding",
+        "count": 2
+      },
+      "buffer": "01",
+      "skipped": [],
+      "result": "incomplete",
+      "rest": "01"
+    },
+    {
+      "why": "an empty buffer is incomplete",
+      "framing": "rtu_over_tcp",
+      "expected": {
+        "transaction_id": 0,
+        "unit_id": 1,
+        "table": "holding",
+        "count": 2
+      },
+      "buffer": "",
+      "skipped": [],
+      "result": "incomplete",
+      "rest": ""
+    },
+    {
+      "why": "a reply with the wrong register count is malformed",
+      "framing": "rtu_over_tcp",
+      "expected": {
+        "transaction_id": 0,
+        "unit_id": 1,
+        "table": "holding",
+        "count": 2
+      },
+      "buffer": "010306000100020003fd74",
+      "skipped": [],
+      "result": {
+        "error": "malformed_response"
+      },
+      "rest": ""
+    },
+    {
+      "why": "exception code 0 is malformed",
+      "framing": "rtu_over_tcp",
+      "expected": {
+        "transaction_id": 0,
+        "unit_id": 1,
+        "table": "holding",
+        "count": 2
+      },
+      "buffer": "0183004130",
+      "skipped": [],
+      "result": {
+        "error": "malformed_response"
+      },
+      "rest": ""
+    }
+  ]
+}

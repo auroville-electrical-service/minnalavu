@@ -1,0 +1,126 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { z } from "zod";
+import { type Profile, parseProfile } from "../src/index";
+
+/** The shared contract, read as the collectors read it. */
+export const contract = join(import.meta.dir, "..", "..", "contract");
+
+const json = (path: string): unknown => JSON.parse(readFileSync(join(contract, path), "utf8"));
+
+export const loadProfiles = (): ReadonlyMap<string, Profile> =>
+  new Map(
+    readdirSync(join(contract, "profiles"))
+      .filter((f) => f.endsWith(".json"))
+      .map((f) => {
+        const parsed = parseProfile(json(join("profiles", f)));
+        if (!parsed.ok) throw new Error(`${f}: ${parsed.error}`);
+        return [parsed.value.profile, parsed.value] as const;
+      }),
+  );
+
+const words = z.array(z.int().min(0).max(0xffff));
+
+const decodeFixture = z.object({
+  format: z.literal("register-decode/1"),
+  profiles: z.array(
+    z.object({
+      profile: z.string(),
+      register_key: z.string(),
+      raw_words: words,
+      value: z.string(),
+      unit: z.string(),
+      why: z.string(),
+    }),
+  ),
+  types: z.array(
+    z.object({
+      type: z.enum(["u16", "i16", "u32", "i32", "u64", "f32", "f64"]),
+      word_order: z.enum(["high_first", "low_first"]),
+      decimals: z.int(),
+      raw_words: words,
+      value: z.string(),
+      why: z.string(),
+    }),
+  ),
+  no_value: z.array(
+    z.object({
+      profile: z.string(),
+      register_key: z.string(),
+      raw_words: words,
+      error: z.enum(["wrong_word_count", "not_finite"]),
+      why: z.string(),
+    }),
+  ),
+});
+
+const requestFixture = z.object({
+  format: z.literal("modbus-read-requests/1"),
+  requests: z.array(
+    z.object({
+      framing: z.enum(["tcp", "rtu_over_tcp"]),
+      transaction_id: z.int(),
+      unit_id: z.int(),
+      table: z.string(),
+      address: z.int(),
+      count: z.int(),
+      frame: z.string(),
+    }),
+  ),
+  no_request: z.array(z.object({ table: z.string(), address: z.int(), count: z.int(), why: z.string() })),
+});
+
+const responseFixture = z.object({
+  format: z.literal("modbus-read-responses/1"),
+  cases: z.array(
+    z.object({
+      why: z.string(),
+      framing: z.enum(["tcp", "rtu_over_tcp"]),
+      expected: z.object({
+        transaction_id: z.int(),
+        unit_id: z.int(),
+        table: z.enum(["holding", "input"]),
+        count: z.int(),
+      }),
+      buffer: z.string(),
+      skipped: z.array(z.enum(["stale", "noise", "bad_crc"])),
+      result: z.union([
+        z.literal("incomplete"),
+        z.object({ words: z.array(z.int()) }),
+        z.object({ exception: z.int() }),
+        z.object({ error: z.enum(["malformed_frame", "unexpected_response", "malformed_response"]) }),
+      ]),
+      rest: z.string(),
+    }),
+  ),
+});
+
+export const loadResponseFixture = () => responseFixture.parse(json("fixtures/modbus-read-responses.v1.json"));
+const readResult = z.union([
+  z.object({ words: z.array(z.int()) }),
+  z.object({ exception: z.int() }),
+  z.object({ error: z.string() }),
+]);
+
+const identityFixture = z.object({
+  format: z.literal("identity-checks/1"),
+  reads: z.record(
+    z.string(),
+    z.array(z.tuple([z.enum(["product_code", "energy_unit"]), z.string(), z.int(), z.int()])),
+  ),
+  cases: z.array(
+    z.object({
+      why: z.string(),
+      profile: z.string(),
+      results: z.partialRecord(z.enum(["product_code", "energy_unit"]), readResult),
+      verdict: z.union([
+        z.enum(["ok", "mismatch"]),
+        z.object({ read_failed: z.union([z.object({ exception: z.int() }), z.object({ error: z.string() })]) }),
+      ]),
+    }),
+  ),
+});
+
+export const loadIdentityFixture = () => identityFixture.parse(json("fixtures/identity-checks.v1.json"));
+export const loadDecodeFixture = () => decodeFixture.parse(json("fixtures/register-decode.v1.json"));
+export const loadRequestFixture = () => requestFixture.parse(json("fixtures/modbus-read-requests.v1.json"));

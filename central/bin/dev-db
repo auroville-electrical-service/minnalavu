@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+if ((BASH_VERSINFO[0] < 5)); then
+  echo "needs bash 5+, found $BASH_VERSION" >&2
+  exit 1
+fi
+set -euo pipefail
+
+# Dev only: migrate the dev database and let PostgREST log in as
+# authenticator with the dev password, both from compose.yaml's environment.
+# Without --apply, list the pending migrations.
+#   bin/dev central bin/dev-db --apply
+usage="usage: bin/dev-db [--apply]"
+
+if (($# > 1)) || { (($# == 1)) && [[ $1 != --apply ]]; }; then
+  printf '%s\n' "$usage" >&2
+  exit 2
+fi
+
+url=${MINNALAVU_DB_URL:?set by compose.yaml}
+password=${AUTHENTICATOR_PASSWORD:?set by compose.yaml}
+bin=$(cd "$(dirname "$0")" && pwd -P)
+
+"$bin/migrate" "$url" "$@"
+if (($# == 1)); then
+  # psql substitutes :'password' (quoted) in a script, not in -c.
+  printf '%s\n' "ALTER ROLE authenticator LOGIN PASSWORD :'password';" |
+    psql "$url" -X -q -v ON_ERROR_STOP=1 -v password="$password"
+fi

@@ -1,0 +1,199 @@
+defmodule Alavi.PollerTest do
+  use ExUnit.Case, async: true
+
+  import Alavi.PollerCase
+
+  alias Alavi.{MissedRead, Reading}
+
+  @moduletag :capture_log
+  @active ["active_energy_import", "active_energy_export"]
+  @keys %{
+    "elite_440" => @active,
+    "elite_500" => @active ++ ["reactive_energy_import", "reactive_energy_export"]
+  }
+  @contract Path.expand("../../../contract", __DIR__)
+
+  describe "start_link/1" do
+    for framing <- ["tcp", "rtu_over_tcp"] do
+      test "#{framing}: reads every register of every meter on the chain, in order, as Decimal" do
+        {_sim, port} = start_sim!(String.to_existing_atom(unquote(framing)))
+        meters = [meter(1, "elite_440"), meter(2, "elite_440"), meter(3, "elite_500")]
+        clock = fn -> ~U[2026-11-01 00:00:00Z] end
+        start_pollers!([endpoint(port, unquote(framing), meters)], clock)
+
+        rounds = for _ <- 1..3, do: recorded!()
+
+        assert Enum.map(rounds, &hd(&1).unit_id) == [1, 2, 3]
+
+        for events <- rounds do
+          assert Enum.map(events, & &1.register_key) == @keys[hd(events).profile]
+          assert Enum.all?(events, &match?(%Reading{timestamp: ~U[2026-11-01 00:00:00Z]}, &1))
+        end
+
+        [import_ | _] = hd(rounds)
+        assert import_.value == Decimal.new("123456.000")
+        assert %{meter_serial: "SIM-elite_440-1", profile: "elite_440", unit: "kWh"} = import_
+        assert import_.endpoint == %{host: "127.0.0.1", port: port}
+        assert [_, _] = import_.raw_words
+      end
+
+      test "#{framing}: a silent meter is missed after its retries and the rest of the chain is read" do
+        {sim, port} = start_sim!(String.to_existing_atom(unquote(framing)))
+        Simulator.faults(sim, silent_units: [2])
+        meters = [meter(1, "elite_440"), meter(2, "elite_440"), meter(3, "elite_500")]
+        start_pollers!([endpoint(port, unquote(framing), meters, %{"timeout_ms" => 50})])
+
+        assert [%Reading{unit_id: 1} | _] = recorded!()
+        assert [first | rest] = recorded!()
+        # RTU over TCP closes on every timeout; a quick reconnect may be refused
+        # while the endpoint still holds the old connection.
+        assert %MissedRead{unit_id: 2, attempts: 3, reason: reason} = first
+        assert reason in [:timeout, :closed]
+        assert Enum.all?(rest, &match?(%MissedRead{attempts: 0, reason: ^reason}, &1))
+        assert [%Reading{unit_id: 3} | _] = recorded!()
+      end
+    end
+
+    test "a reading leaves in the shape of the batch schema" do
+      {_sim, port} = start_sim!(:tcp)
+      start_pollers!([endpoint(port, "tcp", [meter(3, "elite_500")])])
+      readings = Enum.map(recorded!(), &Reading.to_wire/1)
+
+      schema =
+        @contract |> Path.join("schema/batch.v1.schema.json") |> File.read!() |> JSON.decode!()
+
+      batch =
+        @contract
+        |> Path.join("fixtures/batch.v1.basic.json")
+        |> File.read!()
+        |> JSON.decode!()
+        |> Map.put("readings", readings)
+
+      assert {:ok, _} = JSV.validate(batch, JSV.build!(schema, formats: true))
+      assert hd(readings)["value"] == "1234.500"
+    end
+
+    test "exception 0B is a missed read with no retry, and the next meter is read" do
+      {_sim, port} = start_sim!(:tcp, missing_units: :gateway_error)
+      start_pollers!([endpoint(port, "tcp", [meter(9, "elite_440"), meter(1, "elite_440")])])
+
+      assert [first | rest] = recorded!()
+      assert %MissedRead{unit_id: 9, reason: {:exception, 0x0B}, attempts: 1} = first
+      assert Enum.all?(rest, &match?(%MissedRead{reason: {:exception, 0x0B}, attempts: 0}, &1))
+      assert [%Reading{unit_id: 1} | _] = recorded!()
+    end
+
+    test "exception 06 backs off before each retry, then the meter is missed until it clears" do
+      {sim, port} = start_sim!(:tcp)
+      Simulator.faults(sim, busy: true)
+      started = System.monotonic_time(:millisecond)
+
+      start_pollers!([
+        endpoint(port, "tcp", [meter(1, "elite_440")], %{
+          "busy_backoff_ms" => 60,
+          "interval_ms" => 10
+        })
+      ])
+
+      assert [%MissedRead{reason: {:exception, 6}, attempts: 3} | _] = recorded!()
+      assert System.monotonic_time(:millisecond) - started >= 120
+
+      Simulator.clear_faults(sim)
+      await_unit!(1, &match?([%Reading{} | _], &1))
+    end
+
+    test "an unreachable endpoint is missed, and polling resumes once it is back" do
+      port = free_port()
+      meters = [meter(1, "elite_440")]
+      start_pollers!([endpoint(port, "tcp", meters, %{"interval_ms" => 10})])
+
+      assert [first | rest] = recorded!()
+      assert %MissedRead{reason: {:unreachable, {:socket, :econnrefused}}, attempts: 1} = first
+      assert Enum.all?(rest, &match?(%MissedRead{attempts: 0}, &1))
+
+      sim = start_sim!(:tcp, port: port) |> elem(0)
+      await_unit!(1, &match?([%Reading{} | _], &1))
+
+      :ok = GenServer.stop(sim)
+      await_unit!(1, &match?([%MissedRead{} | _], &1))
+
+      start_sim!(:tcp, port: port)
+      await_unit!(1, &match?([%Reading{} | _], &1))
+    end
+
+    test "a meter's own interval overrides its endpoint's" do
+      {_sim, port} = start_sim!(:tcp)
+
+      start_pollers!([
+        endpoint(
+          port,
+          "tcp",
+          [meter(1, "elite_440"), meter(2, "elite_440", %{"interval_ms" => 60_000})],
+          %{
+            "interval_ms" => 20
+          }
+        )
+      ])
+
+      units = for _ <- 1..6, do: hd(recorded!()).unit_id
+      assert Enum.count(units, &(&1 == 2)) == 1
+      assert Enum.count(units, &(&1 == 1)) == 5
+    end
+
+    test "a sink that refuses events does not stop the poller" do
+      {_sim, port} = start_sim!(:tcp)
+      endpoints = [endpoint(port, "tcp", [meter(1, "elite_440")], %{"interval_ms" => 5})]
+
+      opts = [
+        config: config!(endpoints),
+        sink: {Alavi.RefusingSink, self()},
+        clock: &DateTime.utc_now/0,
+        raw_log: raw_log()
+      ]
+
+      sup = start_supervised!({Alavi.Pollers, opts})
+      [{_, pid, _, _}] = Supervisor.which_children(sup)
+
+      for _ <- 1..3, do: assert([%Reading{} | _] = recorded!())
+      assert [{_, ^pid, _, _}] = Supervisor.which_children(sup)
+    end
+  end
+
+  describe "Pollers.start_link/1" do
+    test "never connects to an endpoint polled by another system" do
+      {:ok, listen} = :gen_tcp.listen(0, ip: {127, 0, 0, 1}, active: false)
+      {:ok, other_port} = :inet.port(listen)
+      {_sim, port} = start_sim!(:tcp)
+
+      sup =
+        start_pollers!([
+          endpoint(other_port, "tcp", [meter(1, "elite_440", %{"serial" => "OTHER-1"})], %{
+            "polled_by_other_system" => true,
+            "interval_ms" => 1
+          }),
+          endpoint(port, "tcp", [meter(1, "elite_440")], %{"interval_ms" => 5})
+        ])
+
+      for _ <- 1..5, do: assert([%Reading{endpoint: %{port: ^port}} | _] = recorded!())
+      assert {:error, :timeout} = :gen_tcp.accept(listen, 0)
+
+      running = for {_, pid, _, _} <- Supervisor.which_children(sup), is_pid(pid), do: pid
+      assert length(running) == 1
+    end
+
+    test "endpoints are polled in parallel: a slow chain does not hold up another" do
+      {slow, slow_port} = start_sim!(:tcp)
+      Simulator.faults(slow, delay_ms: 300)
+      {_sim, port} = start_sim!(:tcp)
+
+      start_pollers!([
+        endpoint(slow_port, "tcp", [meter(1, "elite_440", %{"serial" => "SLOW-1"})], %{
+          "timeout_ms" => 1_000
+        }),
+        endpoint(port, "tcp", [meter(1, "elite_440")])
+      ])
+
+      assert [%Reading{endpoint: %{port: ^port}} | _] = recorded!(250)
+    end
+  end
+end

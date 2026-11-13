@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "profile": "elite_500",
+  "models": [
+    "Elite 500"
+  ],
+  "sources": [
+    "elite_500-a"
+  ],
+  "identity": {
+    "energy_unit": {
+      "table": "holding",
+      "address": 1957,
+      "part": "word",
+      "expect": 3,
+      "absent_ok": false,
+      "source": "elite_500-a"
+    }
+  },
+  "registers": [
+    {
+      "key": "active_energy_import",
+      "table": "holding",
+      "address": 11149,
+      "type": "f64",
+      "word_order": "low_first",
+      "decimals": 3,
+      "unit": "kWh",
+      "source": "elite_500-a",
+      "placeholder": false,
+      "verified_on_device": null
+    },
+    {
+      "key": "active_energy_export",
+      "table": "holding",
+      "address": 11153,
+      "type": "f64",
+      "word_order": "low_first",
+      "decimals": 3,
+      "unit": "kWh",
+      "source": "elite_500-a",
+      "placeholder": false,
+      "verified_on_device": null
+    },
+    {
+      "key": "reactive_energy_import",
+      "table": "holding",
+      "address": 11189,
+      "type": "f64",
+      "word_order": "low_first",
+      "decimals": 3,
+      "unit": "kvarh",
+      "source": "elite_500-a",
+      "placeholder": false,
+      "verified_on_device": null
+    },
+    {
+      "key": "reactive_energy_export",
+      "table": "holding",
+      "address": 11193,
+      "type": "f64",
+      "word_order": "low_first",
+      "decimals": 3,
+      "unit": "kvarh",
+      "source": "elite_500-a",
+      "placeholder": false,
+      "verified_on_device": null
+    }
+  ]
+}

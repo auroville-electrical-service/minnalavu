@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://minnalavu.invalid/contract/batch.v1.schema.json",
+  "title": "Collector reading batch, version 1 (draft until the first collector ships)",
+  "description": "The collector is identified by the token the batch is sent with, never by anything in the batch.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "batch_id", "sent_at", "clock", "backlog", "readings", "missed_reads"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "batch_id": { "type": "string", "format": "uuid" },
+    "sent_at": {
+      "description": "The collector's clock when this copy of the batch was sent; a resent batch carries a later time.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "clock": {
+      "description": "The collector's clock status when every event in the batch was recorded.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "last_sync_at"],
+      "properties": {
+        "source": { "enum": ["ntp", "rtc", "unsynced"] },
+        "last_sync_at": { "type": ["string", "null"], "format": "date-time" }
+      }
+    },
+    "backlog": {
+      "description": "The collector's buffer when the batch was sent, this batch included.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "events",
+        "bytes",
+        "batches",
+        "oldest",
+        "max_bytes",
+        "refused",
+        "discarded_files",
+        "quarantined"
+      ],
+      "properties": {
+        "events": { "$ref": "#/$defs/count" },
+        "bytes": { "$ref": "#/$defs/count" },
+        "batches": { "$ref": "#/$defs/count" },
+        "oldest": {
+          "description": "Earliest event timestamp waiting to be sent.",
+          "type": ["string", "null"],
+          "format": "date-time"
+        },
+        "max_bytes": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "refused": {
+          "description": "Events refused since the collector started, because the buffer was full or a write failed.",
+          "$ref": "#/$defs/count"
+        },
+        "discarded_files": { "$ref": "#/$defs/count" },
+        "quarantined": {
+          "description": "Batches set aside on the collector because the server rejected them permanently.",
+          "$ref": "#/$defs/count"
+        }
+      }
+    },
+    "readings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/reading" }
+    },
+    "missed_reads": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/missed_read" }
+    }
+  },
+  "$defs": {
+    "count": {
+      "description": "At most 2^53 - 1, the largest integer every JSON implementation holds exactly.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "port"],
+      "properties": {
+        "host": { "type": "string", "minLength": 1 },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      }
+    },
+    "unit_id": { "type": "integer", "minimum": 1, "maximum": 247 },
+    "word": { "type": "integer", "minimum": 0, "maximum": 65535 },
+    "reading": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "endpoint",
+        "unit_id",
+        "meter_serial",
+        "profile",
+        "register_key",
+        "timestamp",
+        "raw_words",
+        "value",
+        "unit"
+      ],
+      "properties": {
+        "endpoint": { "$ref": "#/$defs/endpoint" },
+        "unit_id": { "$ref": "#/$defs/unit_id" },
+        "meter_serial": { "type": "string", "minLength": 1 },
+        "profile": { "type": "string", "minLength": 1 },
+        "register_key": { "type": "string", "minLength": 1 },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "raw_words": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": { "$ref": "#/$defs/word" }
+        },
+        "value": {
+          "description": "Decoded value as a decimal string; never a JSON number, so no float ever carries energy.",
+          "type": "string",
+          "pattern": "^-?[0-9]+(\\.[0-9]+)?$"
+        },
+        "unit": { "enum": ["Wh", "kWh", "varh", "kvarh"] }
+      }
+    },
+    "missed_read": {
+      "description": "A register the collector was due to read and did not.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "endpoint",
+        "unit_id",
+        "meter_serial",
+        "profile",
+        "register_key",
+        "timestamp",
+        "reason",
+        "exception_code",
+        "detail",
+        "attempts",
+        "raw_words"
+      ],
+      "properties": {
+        "endpoint": { "$ref": "#/$defs/endpoint" },
+        "unit_id": { "$ref": "#/$defs/unit_id" },
+        "meter_serial": { "type": "string", "minLength": 1 },
+        "profile": { "type": "string", "minLength": 1 },
+        "register_key": { "type": "string", "minLength": 1 },
+        "timestamp": {
+          "description": "When the read was due and given up on.",
+          "type": "string",
+          "format": "date-time"
+        },
+        "reason": {
+          "description": "unreachable: the endpoint could not be connected to; decode: the meter answered with words that do not decode; profile_mismatch: the meter's product code or energy unit setting is not its profile's, so none of its registers were read (see detail); exception: a Modbus exception response (see exception_code); the others are failures of the read itself.",
+          "enum": [
+            "timeout",
+            "closed",
+            "exception",
+            "invalid_request",
+            "unexpected_response",
+            "malformed_response",
+            "bad_crc",
+            "malformed_frame",
+            "socket",
+            "unreachable",
+            "decode",
+            "profile_mismatch"
+          ]
+        },
+        "exception_code": {
+          "description": "The Modbus exception code when reason is exception, else null.",
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "maximum": 255
+        },
+        "detail": {
+          "description": "More about the reason, for people (a socket error, a decode error), or null.",
+          "type": ["string", "null"],
+          "maxLength": 200
+        },
+        "attempts": {
+          "description": "Times the read was tried; 0 when the meter or endpoint was already known to be unreachable.",
+          "$ref": "#/$defs/count"
+        },
+        "raw_words": {
+          "description": "What the meter sent when its words did not decode, else null.",
+          "type": ["array", "null"],
+          "maxItems": 125,
+          "items": { "$ref": "#/$defs/word" }
+        }
+      }
+    }
+  }
+}

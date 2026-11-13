@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+if ((BASH_VERSINFO[0] < 5)); then
+  echo "needs bash 5+, found $BASH_VERSION" >&2
+  exit 1
+fi
+set -euo pipefail
+
+# Print a token (JWT, HS256) naming the role of a collector registered with
+# admin.create_collector; it expires after <days> days, or never. JWT_SECRET is
+# PostgREST's jwt-secret. openssl receives it as an argument, so other users of
+# this machine can briefly see it in the process list: run this where only the
+# operator works.
+#   JWT_SECRET=... bin/collector-token pilot_01 365
+usage="usage: bin/collector-token <collector-id> <days|never>"
+
+if (($# != 2)); then
+  printf '%s\n' "$usage" >&2
+  exit 2
+fi
+
+id=$1
+days=$2
+secret=${JWT_SECRET:?JWT_SECRET must be PostgREST\'s jwt-secret}
+
+if [[ ! $id =~ ^[a-z][a-z0-9_]{0,39}$ ]]; then
+  printf 'collector id %s: expected a lower-case letter, then up to 39 of a-z, 0-9, _\n' "$id" >&2
+  exit 2
+fi
+
+if [[ $days == never ]]; then
+  payload=$(printf '{"role":"collector_%s"}' "$id")
+elif [[ $days =~ ^[1-9][0-9]{0,4}$ ]]; then
+  now=$(date +%s)
+  payload=$(printf '{"role":"collector_%s","exp":%d}' "$id" "$((now + days * 86400))")
+else
+  printf 'days %s: expected a whole number of days from 1, or never\n' "$days" >&2
+  exit 2
+fi
+
+b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+
+header=$(printf '{"alg":"HS256","typ":"JWT"}' | b64url)
+body=$(printf '%s' "$payload" | b64url)
+signature=$(printf '%s.%s' "$header" "$body" | openssl dgst -sha256 -hmac "$secret" -binary | b64url)
+printf '%s.%s.%s\n' "$header" "$body" "$signature"

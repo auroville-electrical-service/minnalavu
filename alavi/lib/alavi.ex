@@ -1,0 +1,2 @@
+defmodule Alavi do
+end

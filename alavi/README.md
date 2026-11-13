@@ -1,0 +1,66 @@
+# alavi (அளவி)
+
+On-site meter collector. Polls Secure Elite meters over read-only Modbus
+(TCP or RTU over TCP), keeps every reading in a disk buffer, and sends the
+buffered batches over HTTPS to the central server, deleting each only once the
+server has stored it. A plain OTP app: runs on Windows, Linux, macOS, and later
+on Nerves hardware.
+
+Tests run against `../simulator`: `bin/dev alavi mix check` from the repo root.
+
+## Settings
+
+A release reads all its settings from one file, `settings.json` in the release
+root (the directory holding `bin/`), and from nowhere else; see
+`Alavi.Settings` for every key. Every key is required, unknown keys are
+rejected, and an invalid file stops startup with an error naming the key.
+`settings.example.json`, beside it in the release, has every key with invented
+values; copy it to `settings.json` and fill it in. In JSON a Windows path's
+backslashes are doubled (`"C:\\alavi\\buffer"`), or written as `/`.
+
+**The file holds the collector's token**, which is its identity to the
+server. Restrict its ACL (or mode) so that only the account the service runs
+as, and administrators, can read it. A new release does not bring a
+`settings.json`: copy the old one into the new release root.
+
+A batch the server rejects for good is moved to `<buffer dir>/quarantine/`
+with the server's reason beside it, and never deleted; see `Alavi.Uplink.Response`
+for which answers count as that.
+
+## Logs
+
+A release logs to `alavi.log` in the settings' `log.dir`, rotated at
+`log.max_file_bytes` with `log.max_files` older files kept (`alavi.log.0` is
+the newest of them), timestamps in UTC. Process crashes are logged with their
+reason, stacktrace, last message and state; the collector's token is never
+shown in them. An invalid settings file stops startup before the log file is
+known, so that error goes to standard output (on Windows, see erlsrv's
+`-debugtype`). Dev and test log to the console.
+
+When an endpoint sends bytes that are not a usable reply (noise, a bad CRC, a
+stale transaction id, a reply that does not parse), they are logged in hex
+with the endpoint and unit, so a misbehaving device can be diagnosed from the
+log alone. `raw_bytes_log` in the settings caps this per endpoint: bytes shown
+per line, and lines per window, then one line counting what was suppressed.
+
+## Clock
+
+On Windows each batch's clock status comes from the Windows Time service:
+`w32tm /query /status /verbose`, run every `clock.refresh_ms` and cached. An
+NTP peer is `ntp`, the local CMOS clock `rtc`, and a free-running clock, a
+failure, or output not recognised is `unsynced`, logged once as a warning with
+the raw output. Only English output is recognised: the labels change with the
+display language. Elsewhere the status is always `unsynced`.
+
+## No listening ports
+
+A collector only connects outwards, so its release runs with Erlang
+distribution off (`rel/env.sh.eex`, `rel/env.bat.eex`) and starts no epmd.
+The Windows service is the exception: erlsrv always runs a named node, so
+`rel/vm.args.eex` adds `-dist_listen false -start_epmd false`, which keep any
+node from listening or starting epmd.
+
+So `bin/alavi remote`, `rpc`, `stop`, `restart` and `pid` do not work: they
+need distribution. Stop a collector with its service manager (or SIGTERM on
+Linux and macOS). To see what a running collector is doing, read its log file,
+and the server's health views for what has reached the server.

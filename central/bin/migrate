@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+if ((BASH_VERSINFO[0] < 5)); then
+  echo "needs bash 5+, found $BASH_VERSION" >&2
+  exit 1
+fi
+set -euo pipefail
+
+# Apply central/migrations, in order, to the database at <url>, then tell
+# PostgREST to reload its schema cache. Without --apply, list what is pending.
+#   bin/migrate postgres://postgres:...@host:5432/minnalavu?sslmode=... --apply
+usage="usage: bin/migrate <database-url> [--apply]"
+
+if (($# < 1 || $# > 2)) || { (($# == 2)) && [[ $2 != --apply ]]; }; then
+  printf '%s\n' "$usage" >&2
+  exit 2
+fi
+
+url=$1
+central=$(cd "$(dirname "$0")/.." && pwd -P)
+dbmate=(dbmate --url "$url" --migrations-dir "$central/migrations" --no-dump-schema --wait)
+
+if (($# == 1)); then
+  "${dbmate[@]}" status
+  printf 'dry run: nothing applied; add --apply to migrate\n' >&2
+  exit 0
+fi
+
+"${dbmate[@]}" up
+psql "$url" -X -q -v ON_ERROR_STOP=1 -c "NOTIFY pgrst, 'reload schema'"

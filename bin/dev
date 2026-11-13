@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+if ((BASH_VERSINFO[0] < 5)); then
+  echo "needs bash 5+, found $BASH_VERSION" >&2
+  exit 1
+fi
+set -euo pipefail
+
+# Run a command in the dev container, inside one project folder.
+#   bin/dev alavi mix test
+usage="usage: bin/dev <alavi|kai_alavi|simulator|central|contract|.> <command...>"
+
+if (($# < 2)); then
+  printf '%s\n' "$usage" >&2
+  exit 2
+fi
+
+project=$1
+shift
+case "$project" in
+  alavi | kai_alavi | simulator | central | contract | .) ;;
+  *)
+    printf 'unknown project: %s\n%s\n' "$project" "$usage" >&2
+    exit 2
+    ;;
+esac
+
+root=$(cd "$(dirname "$0")/.." && pwd -P)
+exec docker compose --project-directory "$root" run --rm -w "/work/$project" dev "$@"

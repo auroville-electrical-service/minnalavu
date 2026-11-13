@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "profile": "elite_440",
+  "models": [
+    "Elite 445",
+    "Elite 446"
+  ],
+  "sources": [
+    "elite_440-a"
+  ],
+  "identity": {
+    "product_code": {
+      "table": "holding",
+      "address": 19,
+      "count": 6,
+      "accept": [
+        "ELITE440-445",
+        "ELITE440-446"
+      ],
+      "source": "elite_440-a"
+    },
+    "energy_unit": {
+      "table": "holding",
+      "address": 35,
+      "part": "high_byte",
+      "expect": 1,
+      "absent_ok": true,
+      "source": "elite_440-a"
+    }
+  },
+  "registers": [
+    {
+      "key": "active_energy_import",
+      "table": "holding",
+      "address": 199,
+      "type": "f32",
+      "word_order": "low_first",
+      "decimals": 3,
+      "unit": "kWh",
+      "source": "elite_440-a",
+      "placeholder": false,
+      "verified_on_device": null
+    },
+    {
+      "key": "active_energy_export",
+      "table": "holding",
+      "address": 201,
+      "type": "f32",
+      "word_order": "low_first",
+      "decimals": 3,
+      "unit": "kWh",
+      "source": "elite_440-a",
+      "placeholder": false,
+      "verified_on_device": null
+    }
+  ]
+}

@@ -1,0 +1,79 @@
+-- Assertions for the SQL tests, as functions in this session's temporary
+-- schema. A passing assertion prints a notice "ok - <name>"; a failing one
+-- raises "not ok - <name>", which stops the file (bin/test counts both).
+-- Query results are not wanted; only the notices and errors are.
+
+\o /dev/null
+
+CREATE FUNCTION pg_temp.ok(passed boolean, name text) RETURNS void
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF passed IS NOT TRUE THEN
+    RAISE EXCEPTION 'not ok - %', name;
+  END IF;
+  RAISE NOTICE 'ok - %', name;
+END
+$$;
+
+CREATE FUNCTION pg_temp.is(got anycompatible, want anycompatible, name text) RETURNS void
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF got IS DISTINCT FROM want THEN
+    RAISE EXCEPTION 'not ok - %: got %, want %', name, coalesce(got::text, 'NULL'),
+      coalesce(want::text, 'NULL');
+  END IF;
+  RAISE NOTICE 'ok - %', name;
+END
+$$;
+
+-- Run sql as role and return its SQLSTATE: '00000' if it succeeded. Whatever
+-- it did is undone either way.
+CREATE FUNCTION pg_temp.sqlstate_as(role text, sql text) RETURNS text
+LANGUAGE plpgsql AS $$
+BEGIN
+  EXECUTE format('SET LOCAL ROLE %I', role);
+  EXECUTE sql;
+  RAISE SQLSTATE 'TT000';
+EXCEPTION
+  WHEN SQLSTATE 'TT000' THEN
+    RESET ROLE;
+    RETURN '00000';
+  WHEN OTHERS THEN
+    RETURN SQLSTATE;
+END
+$$;
+
+-- Call api.ingest as a collector's role, as PostgREST does after SET ROLE.
+CREATE FUNCTION pg_temp.ingest_as(role text, batch jsonb) RETURNS jsonb
+LANGUAGE plpgsql AS $$
+DECLARE
+  answer jsonb;
+BEGIN
+  EXECUTE format('SET LOCAL ROLE %I', role);
+  answer := api.ingest(batch);
+  RESET ROLE;
+  RETURN answer;
+END
+$$;
+
+-- The error api.ingest raises for batch, as 'SQLSTATE: message', or 'ok'.
+CREATE FUNCTION pg_temp.ingest_error(role text, batch jsonb) RETURNS text
+LANGUAGE plpgsql AS $$
+BEGIN
+  PERFORM pg_temp.ingest_as(role, batch);
+  RETURN 'ok';
+EXCEPTION
+  WHEN OTHERS THEN
+    RETURN SQLSTATE || ': ' || SQLERRM;
+END
+$$;
+
+-- Apply one change from contract/fixtures/batch.v1.cases.json to a batch.
+CREATE FUNCTION pg_temp.changed(batch jsonb, change jsonb) RETURNS jsonb
+LANGUAGE sql AS $$
+  SELECT CASE
+    WHEN change ? 'delete' THEN batch #- path
+    ELSE jsonb_set(batch, path, change -> 'value', true)
+  END
+  FROM (SELECT ARRAY(SELECT jsonb_array_elements_text(change -> 'path')) AS path) p
+$$;

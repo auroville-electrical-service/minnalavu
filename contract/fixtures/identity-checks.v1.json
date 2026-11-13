@@ -1,0 +1,380 @@
+{
+  "format": "identity-checks/1",
+  "description": "The identity check a collector runs on each connection before trusting a meter's energy registers, under the profiles in contract/profiles. reads: what each profile reads, in order, as [check, table, address, count]. cases: what each read returned (words, a Modbus exception code, or another failure such as a timeout) and the verdict: ok, mismatch (the meter is not read; a missed read with reason profile_mismatch), or read_failed with the failure, treated like any failed read. The first check that fails decides. Every implementation that reads meters must give every verdict.",
+  "reads": {
+    "elite_440": [
+      [
+        "product_code",
+        "holding",
+        19,
+        6
+      ],
+      [
+        "energy_unit",
+        "holding",
+        35,
+        1
+      ]
+    ],
+    "elite_500": [
+      [
+        "energy_unit",
+        "holding",
+        1957,
+        1
+      ]
+    ]
+  },
+  "cases": [
+    {
+      "why": "the expected product code, filling all six registers, and energy in kWh",
+      "profile": "elite_440",
+      "results": {
+        "product_code": {
+          "words": [
+            17740,
+            18772,
+            17716,
+            13360,
+            11572,
+            13365
+          ]
+        },
+        "energy_unit": {
+          "words": [
+            257
+          ]
+        }
+      },
+      "verdict": "ok"
+    },
+    {
+      "why": "the other accepted model",
+      "profile": "elite_440",
+      "results": {
+        "product_code": {
+          "words": [
+            17740,
+            18772,
+            17716,
+            13360,
+            11572,
+            13366
+          ]
+        },
+        "energy_unit": {
+          "words": [
+            257
+          ]
+        }
+      },
+      "verdict": "ok"
+    },
+    {
+      "why": "the power unit in the low byte is ignored",
+      "profile": "elite_440",
+      "results": {
+        "product_code": {
+          "words": [
+            17740,
+            18772,
+            17716,
+            13360,
+            11572,
+            13365
+          ]
+        },
+        "energy_unit": {
+          "words": [
+            511
+          ]
+        }
+      },
+      "verdict": "ok"
+    },
+    {
+      "why": "a model not in the profile",
+      "profile": "elite_440",
+      "results": {
+        "product_code": {
+          "words": [
+            17740,
+            18772,
+            17716,
+            13360,
+            11572,
+            13367
+          ]
+        },
+        "energy_unit": {
+          "words": [
+            257
+          ]
+        }
+      },
+      "verdict": "mismatch"
+    },
+    {
+      "why": "another meter family, NUL-padded",
+      "profile": "elite_440",
+      "results": {
+        "product_code": {
+          "words": [
+            17740,
+            18772,
+            17717,
+            12336,
+            0,
+            0
+          ]
+        },
+        "energy_unit": {
+          "words": [
+            257
+          ]
+        }
+      },
+      "verdict": "mismatch"
+    },
+    {
+      "why": "another meter family, space-padded",
+      "profile": "elite_440",
+      "results": {
+        "product_code": {
+          "words": [
+            17740,
+            18772,
+            17717,
+            12336,
+            8224,
+            8224
+          ]
+        },
+        "energy_unit": {
+          "words": [
+            257
+          ]
+        }
+      },
+      "verdict": "mismatch"
+    },
+    {
+      "why": "case matters",
+      "profile": "elite_440",
+      "results": {
+        "product_code": {
+          "words": [
+            25964,
+            26996,
+            25908,
+            13360,
+            11572,
+            13365
+          ]
+        },
+        "energy_unit": {
+          "words": [
+            257
+          ]
+        }
+      },
+      "verdict": "mismatch"
+    },
+    {
+      "why": "a NUL inside the code is not padding",
+      "profile": "elite_440",
+      "results": {
+        "product_code": {
+          "words": [
+            17740,
+            18772,
+            17716,
+            13360,
+            52,
+            13365
+          ]
+        },
+        "energy_unit": {
+          "words": [
+            257
+          ]
+        }
+      },
+      "verdict": "mismatch"
+    },
+    {
+      "why": "energy in another unit (code 2 in the high byte)",
+      "profile": "elite_440",
+      "results": {
+        "product_code": {
+          "words": [
+            17740,
+            18772,
+            17716,
+            13360,
+            11572,
+            13365
+          ]
+        },
+        "energy_unit": {
+          "words": [
+            513
+          ]
+        }
+      },
+      "verdict": "mismatch"
+    },
+    {
+      "why": "no unit setting (exception 02) is accepted where absent_ok",
+      "profile": "elite_440",
+      "results": {
+        "product_code": {
+          "words": [
+            17740,
+            18772,
+            17716,
+            13360,
+            11572,
+            13365
+          ]
+        },
+        "energy_unit": {
+          "exception": 2
+        }
+      },
+      "verdict": "ok"
+    },
+    {
+      "why": "another exception on the unit register is a failed read",
+      "profile": "elite_440",
+      "results": {
+        "product_code": {
+          "words": [
+            17740,
+            18772,
+            17716,
+            13360,
+            11572,
+            13365
+          ]
+        },
+        "energy_unit": {
+          "exception": 3
+        }
+      },
+      "verdict": {
+        "read_failed": {
+          "exception": 3
+        }
+      }
+    },
+    {
+      "why": "exception 02 on the product code is a failed read: it has no absent_ok",
+      "profile": "elite_440",
+      "results": {
+        "product_code": {
+          "exception": 2
+        },
+        "energy_unit": {
+          "words": [
+            257
+          ]
+        }
+      },
+      "verdict": {
+        "read_failed": {
+          "exception": 2
+        }
+      }
+    },
+    {
+      "why": "a timeout is a failed read",
+      "profile": "elite_440",
+      "results": {
+        "product_code": {
+          "error": "timeout"
+        },
+        "energy_unit": {
+          "words": [
+            257
+          ]
+        }
+      },
+      "verdict": {
+        "read_failed": {
+          "error": "timeout"
+        }
+      }
+    },
+    {
+      "why": "the product code is judged first",
+      "profile": "elite_440",
+      "results": {
+        "product_code": {
+          "words": [
+            17740,
+            18772,
+            17717,
+            12336,
+            0,
+            0
+          ]
+        },
+        "energy_unit": {
+          "exception": 3
+        }
+      },
+      "verdict": "mismatch"
+    },
+    {
+      "why": "energy in kWh (code 3)",
+      "profile": "elite_500",
+      "results": {
+        "energy_unit": {
+          "words": [
+            3
+          ]
+        }
+      },
+      "verdict": "ok"
+    },
+    {
+      "why": "the whole word is the code",
+      "profile": "elite_500",
+      "results": {
+        "energy_unit": {
+          "words": [
+            259
+          ]
+        }
+      },
+      "verdict": "mismatch"
+    },
+    {
+      "why": "energy in another unit",
+      "profile": "elite_500",
+      "results": {
+        "energy_unit": {
+          "words": [
+            4
+          ]
+        }
+      },
+      "verdict": "mismatch"
+    },
+    {
+      "why": "exception 02 is a failed read where absent_ok is false",
+      "profile": "elite_500",
+      "results": {
+        "energy_unit": {
+          "exception": 2
+        }
+      },
+      "verdict": {
+        "read_failed": {
+          "exception": 2
+        }
+      }
+    }
+  ]
+}

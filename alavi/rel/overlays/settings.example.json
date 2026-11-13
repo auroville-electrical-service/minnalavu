@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "polling_config": "C:\\alavi\\polling.json",
+  "profiles_dir": "C:\\alavi\\profiles",
+  "buffer": {
+    "dir": "C:\\alavi\\buffer",
+    "max_bytes": 2000000000,
+    "max_batch_events": 1000
+  },
+  "server": {
+    "url": "https://store.example.org/",
+    "token": "replace.with-this-collectors.token"
+  },
+  "uplink": {
+    "idle_ms": 60000,
+    "timeout_ms": 30000,
+    "backoff_ms": { "min": 1000, "max": 300000 }
+  },
+  "log": {
+    "dir": "C:\\alavi\\log",
+    "max_file_bytes": 10000000,
+    "max_files": 10
+  },
+  "raw_bytes_log": {
+    "max_frame_bytes": 64,
+    "max_lines": 10,
+    "window_ms": 60000
+  },
+  "clock": {
+    "refresh_ms": 300000
+  }
+}

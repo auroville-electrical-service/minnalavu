@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+if ((BASH_VERSINFO[0] < 5)); then
+  echo "needs bash 5+, found $BASH_VERSION" >&2
+  exit 1
+fi
+set -euo pipefail
+
+# The SQL tests: recreate the test database, apply every migration, then run
+# each test/*.sql file in a transaction that is rolled back. Prints each
+# assertion and a count; exits non-zero on the first failure.
+#   bin/dev central bin/test
+if (($# != 0)); then
+  printf 'usage: bin/test\n' >&2
+  exit 2
+fi
+
+url=${MINNALAVU_TEST_DB_URL:?set by compose.yaml}
+central=$(cd "$(dirname "$0")/.." && pwd -P)
+cd "$central"
+
+dbmate --url "$url" --wait drop >/dev/null
+dbmate --url "$url" create >/dev/null
+bin/migrate "$url" --apply >/dev/null
+
+passed=0
+for file in test/*.sql; do
+  printf '# %s\n' "$file"
+  if ! output=$(psql "$url" -X -q -v ON_ERROR_STOP=1 -f "$file" 2>&1); then
+    printf '%s\n' "$output" | sed -n 's/.*NOTICE:  //p'
+    printf '%s\n' "$output" | grep -v 'NOTICE:  ok - ' >&2
+    printf 'FAILED in %s after %d passing assertions\n' "$file" "$passed" >&2
+    exit 1
+  fi
+  printf '%s\n' "$output" | sed -n 's/.*NOTICE:  //p'
+  passed=$((passed + $(printf '%s\n' "$output" | grep -c 'NOTICE:  ok - ' || true)))
+done
+printf '%d assertions passed\n' "$passed"

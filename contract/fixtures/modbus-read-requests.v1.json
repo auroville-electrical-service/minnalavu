@@ -1,0 +1,125 @@
+{
+  "format": "modbus-read-requests/1",
+  "description": "Read requests a collector sends to a meter. requests: the exact frame each read must produce, computed independently of either collector (CRC-16/MODBUS, check value 0x4B37). no_request: inputs for which no request may be built at all. Every implementation that talks Modbus must produce every frame and refuse every no_request.",
+  "requests": [
+    {
+      "framing": "rtu_over_tcp",
+      "transaction_id": 0,
+      "unit_id": 1,
+      "table": "input",
+      "address": 0,
+      "count": 2,
+      "frame": "01040000000271cb"
+    },
+    {
+      "framing": "rtu_over_tcp",
+      "transaction_id": 0,
+      "unit_id": 1,
+      "table": "holding",
+      "address": 199,
+      "count": 2,
+      "frame": "010300c7000275f6"
+    },
+    {
+      "framing": "rtu_over_tcp",
+      "transaction_id": 0,
+      "unit_id": 3,
+      "table": "holding",
+      "address": 11149,
+      "count": 4,
+      "frame": "03032b8d0004dc24"
+    },
+    {
+      "framing": "rtu_over_tcp",
+      "transaction_id": 0,
+      "unit_id": 247,
+      "table": "input",
+      "address": 65535,
+      "count": 1,
+      "frame": "f704ffff00012578"
+    },
+    {
+      "framing": "rtu_over_tcp",
+      "transaction_id": 0,
+      "unit_id": 16,
+      "table": "holding",
+      "address": 65411,
+      "count": 125,
+      "frame": "1003ff83007d4756"
+    },
+    {
+      "framing": "tcp",
+      "transaction_id": 0,
+      "unit_id": 1,
+      "table": "holding",
+      "address": 199,
+      "count": 2,
+      "frame": "000000000006010300c70002"
+    },
+    {
+      "framing": "tcp",
+      "transaction_id": 4660,
+      "unit_id": 3,
+      "table": "holding",
+      "address": 11149,
+      "count": 4,
+      "frame": "12340000000603032b8d0004"
+    },
+    {
+      "framing": "tcp",
+      "transaction_id": 65535,
+      "unit_id": 247,
+      "table": "input",
+      "address": 0,
+      "count": 125,
+      "frame": "ffff00000006f7040000007d"
+    },
+    {
+      "framing": "tcp",
+      "transaction_id": 1,
+      "unit_id": 1,
+      "table": "input",
+      "address": 9000,
+      "count": 2,
+      "frame": "000100000006010423280002"
+    }
+  ],
+  "no_request": [
+    {
+      "table": "coil",
+      "address": 0,
+      "count": 1,
+      "why": "function code 01"
+    },
+    {
+      "table": "discrete_input",
+      "address": 0,
+      "count": 1,
+      "why": "function code 02"
+    },
+    {
+      "table": "holding",
+      "address": 0,
+      "count": 0,
+      "why": "count below 1"
+    },
+    {
+      "table": "holding",
+      "address": 0,
+      "count": 126,
+      "why": "count above 125"
+    },
+    {
+      "table": "input",
+      "address": 65535,
+      "count": 2,
+      "why": "runs past the last register"
+    },
+    {
+      "table": "input",
+      "address": 65536,
+      "count": 1,
+      "why": "address above 65535"
+    }
+  ]
+}

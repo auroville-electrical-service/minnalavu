@@ -1,0 +1,82 @@
+# Dev environment: run everything through bin/dev (see CLAUDE.md).
+# deps/, _build/ and node_modules/ live in named volumes so Linux builds never mix with the host.
+#
+# The central store runs as two services, apart from dev, so the collector's
+# uplink and the SQL tests cross a network to reach them: timescale (the
+# database) and postgrest (the collectors' API). Start them with
+#   docker compose up -d timescale postgrest
+# The names avoid db and server, which earlier work used on this machine.
+#
+# mailpit catches the mail central/bin/alert sends in its tests; nothing it
+# receives goes further. Start it with the others when running
+# central/bin/test-alert.
+#
+# The passwords and JWT secret here are for this dev environment only.
+
+x-dev-secrets:
+  jwt_secret: &jwt_secret dev-only-jwt-secret-not-for-production-0123456789
+  authenticator_password: &authenticator_password dev-only-authenticator
+
+services:
+  dev:
+    build: dev
+    working_dir: /work
+    environment:
+      # Admin connection (migrations, collector setup, test assertions).
+      MINNALAVU_DB_URL: postgres://postgres:dev@timescale:5432/minnalavu?sslmode=disable
+      MINNALAVU_TEST_DB_URL: postgres://postgres:dev@timescale:5432/minnalavu_test?sslmode=disable
+      MINNALAVU_ALERT_TEST_DB_URL: postgres://postgres:dev@timescale:5432/minnalavu_alert_test?sslmode=disable
+      MAILPIT_URL: http://mailpit:8025
+      MAILPIT_SMTP_URL: smtp://mailpit:1025
+      MINNALAVU_API_URL: http://postgrest:3000
+      AUTHENTICATOR_PASSWORD: *authenticator_password
+      JWT_SECRET: *jwt_secret
+    volumes:
+      - .:/work
+      - hex:/root/.hex/packages
+      - alavi_deps:/work/alavi/deps
+      - alavi_build:/work/alavi/_build
+      - simulator_deps:/work/simulator/deps
+      - simulator_build:/work/simulator/_build
+      - kai_alavi_node_modules:/work/kai_alavi/node_modules
+
+  timescale:
+    image: timescale/timescaledb:2.31.0-pg18
+    environment:
+      POSTGRES_PASSWORD: dev
+      POSTGRES_DB: minnalavu
+    volumes:
+      - timescale_data:/var/lib/postgresql
+
+  postgrest:
+    image: postgrest/postgrest:v16.5
+    depends_on:
+      - timescale
+    # It exits when it cannot log in, e.g. before central/bin/dev-db has run.
+    restart: unless-stopped
+    environment:
+      # The database is a connection string, so it can live on another machine.
+      PGRST_DB_URI: postgres://authenticator@timescale:5432/minnalavu?sslmode=disable
+      PGPASSWORD: *authenticator_password
+      PGRST_DB_SCHEMAS: api
+      # No anonymous role: a request without a valid token is refused.
+      PGRST_JWT_SECRET: *jwt_secret
+      # Collectors need no description of the API.
+      PGRST_OPENAPI_MODE: disabled
+      PGRST_SERVER_PORT: "3000"
+
+  mailpit:
+    image: axllent/mailpit:v1.32.0
+    environment:
+      # The alert job always logs in; accept any login, without TLS.
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
+
+volumes:
+  hex:
+  alavi_deps:
+  alavi_build:
+  simulator_deps:
+  simulator_build:
+  kai_alavi_node_modules:
+  timescale_data:

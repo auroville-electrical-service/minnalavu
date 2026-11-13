@@ -1,0 +1,206 @@
+defmodule Alavi.Modbus.Client do
+  @moduledoc """
+  A read-only Modbus client for one TCP endpoint, one request in flight at a
+  time. Reconnecting is not free: small bridges may hold a closed connection's
+  slot for a while and refuse the next one.
+  """
+
+  alias Alavi.Modbus.{Framing, PDU}
+
+  @enforce_keys [:socket, :framing, :timeout, :max_timeouts]
+  defstruct [
+    :socket,
+    :framing,
+    :timeout,
+    :max_timeouts,
+    transaction_id: 0,
+    timeouts: 0,
+    buffer: <<>>,
+    anomalies: []
+  ]
+
+  @typedoc "`timeouts` counts timeouts in a row; `anomalies` are those not yet taken, newest first."
+  @type t :: %__MODULE__{
+          socket: :gen_tcp.socket() | nil,
+          framing: Framing.t(),
+          timeout: pos_integer(),
+          max_timeouts: pos_integer(),
+          transaction_id: Framing.transaction_id(),
+          timeouts: non_neg_integer(),
+          buffer: binary(),
+          anomalies: [anomaly()]
+        }
+
+  @typedoc """
+  Bytes from the endpoint that were not a usable reply, during a read of
+  `unit_id`. `:skipped` is what was dropped ahead of the reply (or of the
+  timeout, if none came); `:rejected` is what was in hand when the read failed
+  on it. `bytes` is not capped here; capping what is logged is the caller's.
+  """
+  @type anomaly ::
+          %{
+            kind: :skipped,
+            unit_id: 1..247,
+            reasons: [Framing.skipped(), ...],
+            bytes: binary()
+          }
+          | %{kind: :rejected, unit_id: 1..247, reason: error(), bytes: binary()}
+
+  @typedoc "`timeout` is in ms, for the connect and for each request."
+  @type option :: {:timeout, pos_integer()} | {:max_timeouts, pos_integer()}
+
+  @type error ::
+          {:exception, PDU.exception_code()}
+          | :invalid_request
+          | :closed
+          | :timeout
+          | :unexpected_response
+          | Framing.decode_error()
+          | :malformed_response
+          | {:socket, term()}
+
+  @socket_opts [:binary, active: false, packet: :raw, nodelay: true]
+
+  @spec connect(String.t(), :inet.port_number(), Framing.t(), [option()]) ::
+          {:ok, t()} | {:error, {:socket, term()}}
+  def connect(host, port, framing, opts) when framing in [:tcp, :rtu_over_tcp] do
+    timeout = Keyword.fetch!(opts, :timeout)
+    max_timeouts = max_timeouts(framing, opts)
+
+    case :gen_tcp.connect(String.to_charlist(host), port, @socket_opts, timeout) do
+      {:ok, socket} ->
+        {:ok,
+         %__MODULE__{
+           socket: socket,
+           framing: framing,
+           timeout: timeout,
+           max_timeouts: max_timeouts
+         }}
+
+      {:error, reason} ->
+        {:error, {:socket, reason}}
+    end
+  end
+
+  @spec close(t()) :: t()
+  def close(%__MODULE__{socket: nil} = client), do: client
+
+  def close(%__MODULE__{socket: socket} = client) do
+    :ok = :gen_tcp.close(socket)
+    %{client | socket: nil, timeouts: 0, buffer: <<>>}
+  end
+
+  # contract: test/alavi/modbus/client_test.exs "take_anomalies/1"
+  @spec take_anomalies(t()) :: {[anomaly()], t()}
+  def take_anomalies(%__MODULE__{anomalies: anomalies} = client),
+    do: {Enum.reverse(anomalies), %{client | anomalies: []}}
+
+  # contract: test/alavi/modbus/client_test.exs "read/5"
+  @doc "`address` is zero-based."
+  @spec read(t(), 1..247, PDU.table(), non_neg_integer(), pos_integer()) ::
+          {:ok, [PDU.word()], t()} | {:error, error(), t()}
+  def read(%__MODULE__{socket: nil} = client, _unit_id, _table, _address, _count),
+    do: {:error, :closed, client}
+
+  def read(client, unit_id, table, address, count) when unit_id in 1..247 do
+    case PDU.read_request(table, address, count) do
+      {:ok, request} ->
+        client |> exchange(unit_id, table, request) |> parse(unit_id, table, count)
+
+      {:error, :invalid_request} ->
+        {:error, :invalid_request, client}
+    end
+  end
+
+  def read(client, _unit_id, _table, _address, _count), do: {:error, :invalid_request, client}
+
+  defp max_timeouts(:tcp, opts), do: Keyword.fetch!(opts, :max_timeouts)
+  # RTU frames carry no transaction id, so a late reply could not be told from the next one.
+  defp max_timeouts(:rtu_over_tcp, _opts), do: 1
+
+  defp exchange(client, unit_id, table, request) do
+    tid = client.transaction_id
+    client = %{client | transaction_id: rem(tid + 1, 0x10000)}
+    expected = %{transaction_id: tid, unit_id: unit_id, function_code: PDU.function_code(table)}
+    frame = Framing.encode(client.framing, tid, unit_id, request)
+
+    case :gen_tcp.send(client.socket, frame) do
+      :ok -> await(client, expected, deadline(client.timeout), nil)
+      {:error, reason} -> {:error, socket_error(reason), client}
+    end
+  end
+
+  defp parse({:ok, pdu, client}, unit_id, table, count) do
+    case PDU.parse_response(table, count, pdu) do
+      {:ok, words} -> {:ok, words, %{client | timeouts: 0}}
+      {:error, {:exception, _} = reason} -> fail(client, reason)
+      {:error, reason} -> client |> rejected(unit_id, reason, pdu) |> fail(reason)
+    end
+  end
+
+  defp parse({:error, reason, client}, _unit_id, _table, _count), do: fail(client, reason)
+
+  # A deadline reached after a bad CRC reports the corruption, not a plain timeout.
+  defp await(client, expected, deadline, skipped) do
+    case Framing.take_reply(client.framing, client.buffer, expected) do
+      {:ok, pdu, _rest} ->
+        {:ok, pdu, %{client | buffer: <<>>} |> noted(expected, skipped)}
+
+      {:skip, why, rest} ->
+        dropped = binary_part(client.buffer, 0, byte_size(client.buffer) - byte_size(rest))
+        await(%{client | buffer: rest}, expected, deadline, skip(skipped, why, dropped))
+
+      :incomplete ->
+        receive_more(client, expected, deadline, skipped)
+
+      {:error, reason} ->
+        client =
+          client |> noted(expected, skipped) |> rejected(expected.unit_id, reason, client.buffer)
+
+        {:error, reason, client}
+    end
+  end
+
+  defp receive_more(client, expected, deadline, skipped) do
+    remaining = deadline - System.monotonic_time(:millisecond)
+
+    with true <- remaining > 0,
+         {:ok, bytes} <- :gen_tcp.recv(client.socket, 0, remaining) do
+      await(%{client | buffer: client.buffer <> bytes}, expected, deadline, skipped)
+    else
+      false -> {:error, expired(skipped), noted(client, expected, skipped)}
+      {:error, :timeout} -> {:error, expired(skipped), noted(client, expected, skipped)}
+      {:error, reason} -> {:error, socket_error(reason), noted(client, expected, skipped)}
+    end
+  end
+
+  defp skip(nil, why, dropped), do: %{reasons: [why], bytes: dropped}
+
+  defp skip(%{reasons: reasons, bytes: bytes}, why, dropped),
+    do: %{reasons: Enum.uniq(reasons ++ [why]), bytes: bytes <> dropped}
+
+  defp noted(client, _expected, nil), do: client
+
+  defp noted(client, %{unit_id: unit_id}, %{reasons: reasons, bytes: bytes}),
+    do: note(client, %{kind: :skipped, unit_id: unit_id, reasons: reasons, bytes: bytes})
+
+  defp rejected(client, unit_id, reason, bytes),
+    do: note(client, %{kind: :rejected, unit_id: unit_id, reason: reason, bytes: bytes})
+
+  defp note(client, anomaly), do: %{client | anomalies: [anomaly | client.anomalies]}
+
+  defp deadline(timeout), do: System.monotonic_time(:millisecond) + timeout
+
+  defp expired(nil), do: :timeout
+  defp expired(%{reasons: reasons}), do: if(:bad_crc in reasons, do: :bad_crc, else: :timeout)
+
+  defp socket_error(:closed), do: :closed
+  defp socket_error(reason), do: {:socket, reason}
+
+  defp fail(client, {:exception, _} = reason), do: {:error, reason, %{client | timeouts: 0}}
+
+  defp fail(%{timeouts: timeouts, max_timeouts: max} = client, :timeout) when timeouts + 1 < max,
+    do: {:error, :timeout, %{client | timeouts: timeouts + 1}}
+
+  defp fail(client, reason), do: {:error, reason, close(client)}
+end

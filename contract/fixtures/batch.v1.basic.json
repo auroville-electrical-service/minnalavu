@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "batch_id": "0b6f8d2e-5c1a-4e7b-9a3d-2f4c6e8a0b1c",
+  "sent_at": "2026-11-01T00:05:00Z",
+  "clock": { "source": "ntp", "last_sync_at": "2026-11-01T00:00:12Z" },
+  "backlog": {
+    "events": 4,
+    "bytes": 412,
+    "batches": 1,
+    "oldest": "2026-11-01T00:00:00Z",
+    "max_bytes": 2000000000,
+    "refused": 0,
+    "discarded_files": 0,
+    "quarantined": 0
+  },
+  "readings": [
+    {
+      "endpoint": { "host": "10.0.0.21", "port": 502 },
+      "unit_id": 1,
+      "meter_serial": "SIM-445-0001",
+      "profile": "elite_440",
+      "register_key": "active_energy_import",
+      "timestamp": "2026-11-01T00:00:00Z",
+      "raw_words": [20480, 17562],
+      "value": "1234.500",
+      "unit": "kWh"
+    },
+    {
+      "endpoint": { "host": "10.0.0.21", "port": 502 },
+      "unit_id": 3,
+      "meter_serial": "SIM-500-0001",
+      "profile": "elite_500",
+      "register_key": "active_energy_export",
+      "timestamp": "2026-11-01T00:00:01Z",
+      "raw_words": [0, 0, 18944, 16531],
+      "value": "1234.500",
+      "unit": "kWh"
+    }
+  ],
+  "missed_reads": [
+    {
+      "endpoint": { "host": "10.0.0.21", "port": 502 },
+      "unit_id": 9,
+      "meter_serial": "SIM-445-0009",
+      "profile": "elite_440",
+      "register_key": "active_energy_import",
+      "timestamp": "2026-11-01T00:00:02Z",
+      "reason": "exception",
+      "exception_code": 11,
+      "detail": null,
+      "attempts": 3,
+      "raw_words": null
+    },
+    {
+      "endpoint": { "host": "10.0.0.22", "port": 502 },
+      "unit_id": 1,
+      "meter_serial": "SIM-445-0010",
+      "profile": "elite_440",
+      "register_key": "active_energy_import",
+      "timestamp": "2026-11-01T00:00:03Z",
+      "reason": "unreachable",
+      "exception_code": null,
+      "detail": "econnrefused",
+      "attempts": 0,
+      "raw_words": null
+    }
+  ]
+}

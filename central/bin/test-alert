@@ -1,0 +1,170 @@
+#!/usr/bin/env bash
+if ((BASH_VERSINFO[0] < 5)); then
+  echo "needs bash 5+, found $BASH_VERSION" >&2
+  exit 1
+fi
+set -euo pipefail
+
+# Test bin/alert against a fresh database and the mailpit mail catcher: a
+# clean state sends nothing, each change in the problems sends exactly one
+# mail, an unchanged state sends none, and bad config stops it before it reads
+# or sends anything. Clears mailpit's mailbox.
+#   docker compose up -d timescale mailpit
+#   bin/dev central bin/test-alert
+if (($# != 0)); then
+  printf 'usage: bin/test-alert\n' >&2
+  exit 2
+fi
+
+url=${MINNALAVU_ALERT_TEST_DB_URL:?set by compose.yaml}
+mailpit=${MAILPIT_URL:?set by compose.yaml}
+smtp=${MAILPIT_SMTP_URL:?set by compose.yaml}
+central=$(cd "$(dirname "$0")/.." && pwd -P)
+cd "$central"
+
+dbmate --url "$url" --wait drop >/dev/null
+dbmate --url "$url" create >/dev/null
+bin/migrate "$url" --apply >/dev/null
+
+tmp=$(mktemp -d)
+trap 'rm -rf -- "$tmp"' EXIT
+
+sql() { psql "$url" -X -q -v ON_ERROR_STOP=1 "$@" >/dev/null; }
+
+# A collector with one meter on one endpoint, read just now. The collector is
+# inserted as the owner, without the role admin.create_collector would make:
+# roles outlive this database.
+sql <<'SQL'
+SELECT admin.set_health_thresholds(collector_silent_after => '1 hour',
+  meter_silent_intervals => 4, backlog_near_capacity => 0.8, lookback => '1 day');
+INSERT INTO store.collectors (id) VALUES ('alert_test');
+SELECT admin.register_endpoint(endpoint_id => 'alert_test_ep', valid_from => now() - interval '2 days',
+  collector_id => 'alert_test', host => '10.0.0.1', port => 502, framing => 'tcp',
+  polled_by_other_system => false, timeout_ms => 1000, max_timeouts => 3, retries => 2,
+  busy_backoff_ms => 500, reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000,
+  interval_ms => 900000);
+SELECT admin.register_meter(serial => 'ALERT-0001', valid_from => now() - interval '2 days',
+  endpoint_id => 'alert_test_ep', unit_id => 1, profile => 'elite_440', interval_ms => NULL);
+CREATE FUNCTION public.alert_test_reading(serial text) RETURNS void
+LANGUAGE plpgsql AS $$
+DECLARE
+  id uuid := gen_random_uuid();
+BEGIN
+  INSERT INTO store.batches VALUES (id, 'alert_test', now(), 'ntp', now(), 1, 0);
+  INSERT INTO store.uploads
+    (batch_id, collector_id, received_at, sent_at, backlog_events, backlog_bytes, backlog_batches,
+     backlog_oldest, backlog_max_bytes, backlog_refused, backlog_discarded_files,
+     backlog_quarantined, readings_inserted, readings_duplicate, readings_conflicting,
+     missed_reads_inserted, missed_reads_duplicate)
+  VALUES (id, 'alert_test', now(), now(), 0, 0, 0, NULL, 1000, 0, 0, 0, 1, 0, 0, 0, 0);
+  INSERT INTO store.readings VALUES (serial, 'active_energy_import', now(), 1.0, 'Wh', '{0,0}',
+    'elite_440', '10.0.0.1', 502, 1, 'alert_test', id);
+END
+$$;
+SELECT alert_test_reading('ALERT-0001');
+SQL
+
+# The job as it runs on the VPS, but reading as the role monitor.
+export ALERT_DB_URL="$url&options=-c%20role%3Dmonitor"
+export ALERT_SMTP_URL=$smtp ALERT_SMTP_TLS=none ALERT_SMTP_USER=alert-test
+export ALERT_SMTP_PASSWORD='dev-only "quoted" \pass'
+export ALERT_FROM=alerts@example.invalid ALERT_TO=ops@example.invalid,oncall@example.invalid
+export ALERT_STATE_FILE=$tmp/state
+
+curl -fsS -X DELETE "$mailpit/api/v1/messages" >/dev/null
+latest() { curl -fsS "$mailpit/api/v1/messages?limit=1"; }
+mails() { latest | grep -o '"total":[0-9]*' | cut -d: -f2; }
+subject() { latest | grep -o '"Subject":"[^"]*"' | head -1 | cut -d'"' -f4; }
+
+passed=0
+is() {
+  if [[ $2 != "$3" ]]; then
+    printf 'not ok - %s: got %q, want %q\n' "$1" "$2" "$3" >&2
+    printf 'FAILED after %d passing assertions\n' "$passed" >&2
+    exit 1
+  fi
+  printf 'ok - %s\n' "$1"
+  passed=$((passed + 1))
+}
+
+# Run bin/alert; print its exit status. Its stdout goes to $tmp/out.
+alert() {
+  local status=0
+  bin/alert "$@" >"$tmp/out" 2>"$tmp/err" || status=$?
+  printf '%s' "$status"
+}
+
+is 'a clean state: the run succeeds' "$(alert --apply)" 0
+is 'a clean state sends no mail' "$(mails)" 0
+
+sql -c "SELECT admin.register_meter(serial => 'ALERT-0002', valid_from => now() - interval '1 day',
+  endpoint_id => 'alert_test_ep', unit_id => 2, profile => 'elite_440', interval_ms => NULL)"
+
+is 'a dry run succeeds' "$(alert)" 0
+is 'a dry run prints the mail' "$(grep -c '^  meter_silent ALERT-0002: no reading since' "$tmp/out")" 1
+is 'a dry run sends nothing' "$(mails)" 0
+is 'a dry run keeps no state' "$([[ -e $ALERT_STATE_FILE ]] && echo kept || echo none)" none
+
+is 'a new problem: the run succeeds' "$(alert --apply)" 0
+is 'a new problem sends one mail' "$(mails)" 1
+is 'the mail counts it' "$(subject)" 'minnalavu health: 1 open, 1 new, 0 cleared'
+is 'the mail goes to every recipient' \
+  "$(latest | grep -o '"Address":"[a-z]*@example.invalid"' | sort -u | tr '\n' ' ')" \
+  '"Address":"alerts@example.invalid" "Address":"oncall@example.invalid" "Address":"ops@example.invalid" '
+
+alert --apply >/dev/null
+alert --apply >/dev/null
+is 'the same problem again sends nothing more' "$(mails)" 1
+
+sql -c "SELECT alert_test_reading('ALERT-STRAY')"
+alert --apply >/dev/null
+is 'a second problem sends one more mail' "$(mails)" 2
+is 'listing both' "$(subject)" 'minnalavu health: 2 open, 1 new, 0 cleared'
+
+sql -c "SELECT alert_test_reading('ALERT-0002')"
+sql -c "SELECT admin.register_meter(serial => 'ALERT-STRAY', valid_from => now() - interval '1 day',
+  endpoint_id => 'alert_test_ep', unit_id => 3, profile => 'elite_440', interval_ms => NULL)"
+alert --apply >/dev/null
+is 'recovery sends one mail' "$(mails)" 3
+is 'saying what cleared' "$(subject)" 'minnalavu health: 0 open, 0 new, 2 cleared'
+alert --apply >/dev/null
+is 'all clear again sends nothing' "$(mails)" 3
+
+good_db=$ALERT_DB_URL
+ALERT_DB_URL="${url/minnalavu_alert_test/minnalavu_absent}"
+is 'unreadable health views: the run fails' "$(alert --apply)" 1
+is 'and mails once' "$(mails)" 4
+is 'saying so' "$(subject)" 'minnalavu health: 1 open, 1 new, 0 cleared'
+is 'still unreadable: the run fails again' "$(alert --apply)" 1
+is 'but sends nothing more' "$(mails)" 4
+ALERT_DB_URL=$good_db
+alert --apply >/dev/null
+is 'readable again sends one mail' "$(mails)" 5
+is 'saying it cleared' "$(subject)" 'minnalavu health: 0 open, 0 new, 1 cleared'
+
+sql -c "SELECT alert_test_reading('ALERT-STRAY-2')"
+good_smtp=$ALERT_SMTP_URL
+ALERT_SMTP_URL=smtp://mailpit:1
+is 'mail that cannot be sent: the run fails' "$(alert --apply)" 1
+is 'and keeps the old state' "$(wc -c <"$ALERT_STATE_FILE" | tr -d ' ')" 0
+ALERT_SMTP_URL=$good_smtp
+alert --apply >/dev/null
+is 'so the next run sends it' "$(mails)" 6
+
+# Bad config: stopped with status 2 before reading or sending anything.
+sql -c "SELECT alert_test_reading('ALERT-STRAY-3')"
+reported=$(<"$ALERT_STATE_FILE")
+for name in ALERT_DB_URL ALERT_SMTP_URL ALERT_SMTP_TLS ALERT_SMTP_USER ALERT_SMTP_PASSWORD \
+  ALERT_FROM ALERT_TO ALERT_STATE_FILE; do
+  is "without $name: refused" "$(env -u "$name" bin/alert --apply 2>&1 >/dev/null || true)" \
+    "bin/alert: not set: $name (each is described at the top of bin/alert)"
+done
+for setting in ALERT_SMTP_TLS=maybe ALERT_SMTP_URL=http://mailpit:1025 \
+  ALERT_FROM='a@b.invalid, c@d.invalid' ALERT_TO='ops@example.invalid, x@example.invalid' \
+  ALERT_TO=$'ops@example.invalid\nBcc: x@example.invalid' ALERT_STATE_FILE=/absent/state; do
+  is "with $setting: refused with status 2" "$(env "$setting" bin/alert --apply >/dev/null 2>&1 || echo $?)" 2
+done
+is 'bad config sends nothing' "$(mails)" 6
+is 'nor changes the state' "$(<"$ALERT_STATE_FILE")" "$reported"
+
+printf '%d assertions passed\n' "$passed"
