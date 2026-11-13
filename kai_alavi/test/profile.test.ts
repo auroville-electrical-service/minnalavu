@@ -12,11 +12,20 @@ describe("parseProfile", () => {
     expect([parsed("elite_440").ok, parsed("elite_500").ok]).toEqual([true, true]);
   });
 
-  test("an empty accepted product code is refused, as alavi refuses it", () => {
+  test("an accepted product code must be non-empty printable ASCII, as alavi requires", () => {
     const p = parsed("elite_440");
     if (!p.ok || !p.value.identity.product_code) throw new Error("elite_440 has no product code check");
-    const product_code = { ...p.value.identity.product_code, accept: [""] };
-    expect(parseProfile({ ...p.value, identity: { ...p.value.identity, product_code } }).ok).toBe(false);
+    const { value } = p;
+    const product = value.identity.product_code;
+    const parsedWith = (code: string) =>
+      parseProfile({ ...value, identity: { ...value.identity, product_code: { ...product, accept: [code] } } });
+    expect(["", "ELITE\u00b7440", "ELITE\t440", "ELITE 440"].map((c) => parsedWith(c).ok)).toEqual([
+      false,
+      false,
+      false,
+      true,
+    ]);
+    expect(parsedWith("ELITE\u00b7440")).toMatchObject({ ok: false, error: expect.stringContaining("accept") });
   });
 
   test("a source must be an ID listed in sources, once", () => {

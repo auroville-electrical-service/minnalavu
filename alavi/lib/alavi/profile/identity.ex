@@ -238,9 +238,9 @@ defmodule Alavi.Profile.Identity do
   end
 
   defp accept(%{"accept" => [_ | _] = codes}) do
-    if Enum.all?(codes, &(is_binary(&1) and &1 != "")),
+    if Enum.all?(codes, &(is_binary(&1) and printable(&1) != nil)),
       do: {:ok, codes},
-      else: {:error, "accept must list non-empty strings"}
+      else: {:error, "accept must list non-empty strings of printable ASCII"}
   end
 
   defp accept(_json), do: {:error, "accept must be a non-empty list"}

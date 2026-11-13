@@ -8,6 +8,8 @@ const table = z.enum(["holding", "input"]);
 const address = z.int().min(0).max(0xffff);
 const count = z.int().min(1).max(125);
 const verified_on_device = z.iso.date().nullable();
+// What a product code read must be for the poller to file it: alavi's rule too.
+const printable = z.string().regex(/^[\x20-\x7e]+$/, "must be non-empty printable ASCII");
 
 const register = z
   .object({
@@ -30,7 +32,7 @@ const register = z
 
 const identity = z.strictObject({
   product_code: z
-    .strictObject({ table, address, count, accept: z.array(text).min(1), source, verified_on_device })
+    .strictObject({ table, address, count, accept: z.array(printable).min(1), source, verified_on_device })
     .optional(),
   serial: z.strictObject({ table, address, count, source, verified_on_device }).optional(),
   energy_unit: z

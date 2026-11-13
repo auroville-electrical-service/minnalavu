@@ -157,7 +157,7 @@ defmodule Alavi.Profile.IdentityTest do
   end
 
   describe "parse/1" do
-    test "parse rejects unknown fields, a missing source and an empty accept list" do
+    test "parse rejects unknown fields, a missing source and an accept list that cannot match" do
       assert {:error, "unknown field" <> _} = Identity.parse(%{"model" => %{}})
 
       assert {:error, "identity.energy_unit: source" <> _} =
@@ -168,6 +168,11 @@ defmodule Alavi.Profile.IdentityTest do
 
       assert {:error, "identity.product_code: accept" <> _} =
                Identity.parse(%{"product_code" => %{@product | "accept" => []}})
+
+      for code <- ["ELITE·440", "ELITE\t440", ""] do
+        assert {:error, "identity.product_code: accept must list" <> _} =
+                 Identity.parse(%{"product_code" => %{@product | "accept" => [code]}})
+      end
 
       assert {:error, "identity.serial: unknown field(s) accept"} =
                Identity.parse(%{"serial" => Map.put(@serial, "accept", ["X"])})
