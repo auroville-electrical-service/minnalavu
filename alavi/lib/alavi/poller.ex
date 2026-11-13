@@ -132,8 +132,12 @@ defmodule Alavi.Poller do
       end
     end)
     |> case do
-      {{:missed, _reason, _n} = missed, state} -> {missed, state}
-      {results, state} -> judged(Identity.verdict(identity, results), unit, state)
+      {{:missed, _reason, _n} = missed, state} ->
+        {missed, state}
+
+      {results, state} ->
+        {outcome, _observed} = Identity.verdict(identity, results)
+        judged(outcome, unit, state)
     end
   end
 

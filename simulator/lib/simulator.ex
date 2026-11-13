@@ -45,7 +45,7 @@ defmodule Simulator do
   def put(sim, unit_id, key, value), do: GenServer.call(sim, {:put, unit_id, key, value})
 
   @doc "Set what the meter at `unit_id` reports for an identity check. See `Simulator.Meter`."
-  @spec identify(GenServer.server(), 1..247, :product_code | :energy_unit, term()) :: :ok
+  @spec identify(GenServer.server(), 1..247, Meter.check(), term()) :: :ok
   def identify(sim, unit_id, check, value),
     do: GenServer.call(sim, {:identify, unit_id, check, value})
 

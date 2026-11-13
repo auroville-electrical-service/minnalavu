@@ -29,8 +29,13 @@ defmodule Alavi.Profile.IdentityChecksTest do
       results =
         Map.new(c["results"], fn {check, r} -> {String.to_existing_atom(check), result(r)} end)
 
-      verdict = Identity.verdict(ctx.profiles[c["profile"]].identity, results)
-      assert wire(verdict) == c["verdict"], "#{c["profile"]}: #{c["why"]}"
+      {outcome, observed} = Identity.verdict(ctx.profiles[c["profile"]].identity, results)
+      label = "#{c["profile"]}: #{c["why"]}"
+      assert wire(outcome) == c["verdict"], label
+
+      assert %{"serial" => observed.serial, "product_code" => observed.product_code} ==
+               c["observed"],
+             label
     end
   end
 

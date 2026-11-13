@@ -4,8 +4,9 @@ defmodule Simulator.Meter do
   simulate a meter configured differently from its manual.
 
   `identity` overrides, per check, what the profile's identity registers hold:
-  a product code, an energy unit code, or `:absent` to leave the register
-  unmapped (exception 02), as on a meter with no unit setting.
+  a product code, a serial, an energy unit code, or `:absent` to leave the
+  register unmapped (exception 02), as on a meter with no unit setting. A new
+  meter's serial is `SIM-<unit_id>`, an invented value.
   """
 
   alias Simulator.{Encode, Profile}
@@ -13,19 +14,26 @@ defmodule Simulator.Meter do
   @enforce_keys [:unit_id, :profile, :values]
   defstruct [:unit_id, :profile, :values, word_order: nil, identity: %{}]
 
+  @type check :: :product_code | :serial | :energy_unit
   @type t :: %__MODULE__{
           unit_id: 1..247,
           profile: Profile.t(),
           values: %{String.t() => Decimal.t()},
           word_order: :high_first | :low_first | nil,
-          identity: %{optional(atom()) => String.t() | 0..0xFFFF | :absent}
+          identity: %{optional(check()) => String.t() | 0..0xFFFF | :absent}
         }
 
   @doc "A meter whose registers all start at zero, then take `values`."
   @spec new(1..247, Profile.t(), %{String.t() => Decimal.t()}) :: t()
   def new(unit_id, %Profile{} = profile, values \\ %{}) do
     zeros = Map.new(profile.registers, fn {key, _} -> {key, Decimal.new(0)} end)
-    %__MODULE__{unit_id: unit_id, profile: profile, values: Map.merge(zeros, values)}
+
+    %__MODULE__{
+      unit_id: unit_id,
+      profile: profile,
+      values: Map.merge(zeros, values),
+      identity: %{serial: "SIM-#{unit_id}"}
+    }
   end
 
   @doc "Set one register's value."
@@ -34,9 +42,9 @@ defmodule Simulator.Meter do
     do: %{meter | values: Map.put(values, key, value)}
 
   @doc "Override what the meter reports for one identity check (`:absent` unmaps it)."
-  @spec identify(t(), :product_code | :energy_unit, String.t() | 0..0xFFFF | :absent) :: t()
+  @spec identify(t(), check(), String.t() | 0..0xFFFF | :absent) :: t()
   def identify(%__MODULE__{identity: identity} = meter, check, value)
-      when check in [:product_code, :energy_unit],
+      when check in [:product_code, :serial, :energy_unit],
       do: %{meter | identity: Map.put(identity, check, value)}
 
   @doc "The words at `count` consecutive addresses, or `:unmapped` if any address holds nothing."
@@ -59,15 +67,15 @@ defmodule Simulator.Meter do
 
   defp identity_bank(%__MODULE__{profile: profile, identity: overrides}, table) do
     for {check, %{table: ^table} = spec} <- profile.identity,
-        value = Map.get(overrides, check, spec.value),
+        value = Map.get_lazy(overrides, check, fn -> spec.value end),
         value != :absent,
         {word, offset} <- Enum.with_index(identity_words(check, spec, value)),
         into: %{},
         do: {spec.address + offset, word}
   end
 
-  defp identity_words(:product_code, %{count: count}, code) do
-    padded = String.pad_trailing(code, count * 2, <<0>>)
+  defp identity_words(check, %{count: count}, text) when check in [:product_code, :serial] do
+    padded = String.pad_trailing(text, count * 2, <<0>>)
     for <<word::16 <- binary_part(padded, 0, count * 2)>>, do: word
   end
 

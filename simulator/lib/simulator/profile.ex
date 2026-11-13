@@ -18,7 +18,8 @@ defmodule Simulator.Profile do
   @typedoc """
   The identity registers a meter of this profile answers, by check: where they
   are and what a matching meter holds there (the first accepted product code,
-  the expected energy unit code).
+  the expected energy unit code). A serial has no profile value: each meter
+  has its own (`Simulator.Meter`).
   """
   @type identity :: %{
           optional(:product_code) => %{
@@ -27,6 +28,7 @@ defmodule Simulator.Profile do
             count: pos_integer(),
             value: String.t()
           },
+          optional(:serial) => %{table: table(), address: 0..0xFFFF, count: pos_integer()},
           optional(:energy_unit) => %{
             table: table(),
             address: 0..0xFFFF,
@@ -76,6 +78,10 @@ defmodule Simulator.Profile do
        count: entry["count"],
        value: hd(entry["accept"])
      }}
+  end
+
+  defp identity_spec({"serial", entry}) do
+    {:serial, %{table: table(entry["table"]), address: entry["address"], count: entry["count"]}}
   end
 
   defp identity_spec({"energy_unit", entry}) do

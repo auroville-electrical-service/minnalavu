@@ -1,6 +1,6 @@
 {
   "format": "identity-checks/1",
-  "description": "The identity check a collector runs on each connection before trusting a meter's energy registers, under the profiles in contract/profiles. reads: what each profile reads, in order, as [check, table, address, count]. cases: what each read returned (words, a Modbus exception code, or another failure such as a timeout) and the verdict: ok, mismatch (the meter is not read; a missed read with reason profile_mismatch), or read_failed with the failure, treated like any failed read. The first check that fails decides. Every implementation that reads meters must give every verdict.",
+  "description": "The identity check a collector runs on each connection before trusting a meter's energy registers, under the profiles in contract/profiles. reads: what each profile reads, in order, as [check, table, address, count]. cases: what each read returned (words, a Modbus exception code, or another failure such as a timeout), the verdict, and what was observed. verdict: ok, mismatch (the meter is not read; a missed read with reason profile_mismatch), or read_failed with the failure, treated like any failed read. The first check that fails decides. A product code must be one the profile accepts. A serial is never compared with anything here; it must only be readable as a label: printable ASCII, not empty. Both are decoded as ASCII, two bytes per register, high byte first, with trailing NULs and then surrounding spaces trimmed. observed: the serial and product code as decoded, whatever the verdict, or null where the read failed or the text is empty or not printable ASCII. Every implementation that reads meters must give every verdict and observe every value.",
   "reads": {
     "elite_440": [
       [
@@ -10,6 +10,12 @@
         6
       ],
       [
+        "serial",
+        "holding",
+        0,
+        4
+      ],
+      [
         "energy_unit",
         "holding",
         35,
@@ -17,6 +23,18 @@
       ]
     ],
     "elite_500": [
+      [
+        "product_code",
+        "holding",
+        2021,
+        6
+      ],
+      [
+        "serial",
+        "holding",
+        1999,
+        8
+      ],
       [
         "energy_unit",
         "holding",
@@ -40,13 +58,25 @@
             13365
           ]
         },
+        "serial": {
+          "words": [
+            21321,
+            19764,
+            13360,
+            12337
+          ]
+        },
         "energy_unit": {
           "words": [
             257
           ]
         }
       },
-      "verdict": "ok"
+      "verdict": "ok",
+      "observed": {
+        "serial": "SIM44001",
+        "product_code": "ELITE440-445"
+      }
     },
     {
       "why": "the other accepted model",
@@ -62,13 +92,25 @@
             13366
           ]
         },
+        "serial": {
+          "words": [
+            21321,
+            19764,
+            13360,
+            12337
+          ]
+        },
         "energy_unit": {
           "words": [
             257
           ]
         }
       },
-      "verdict": "ok"
+      "verdict": "ok",
+      "observed": {
+        "serial": "SIM44001",
+        "product_code": "ELITE440-446"
+      }
     },
     {
       "why": "the power unit in the low byte is ignored",
@@ -84,13 +126,25 @@
             13365
           ]
         },
+        "serial": {
+          "words": [
+            21321,
+            19764,
+            13360,
+            12337
+          ]
+        },
         "energy_unit": {
           "words": [
             511
           ]
         }
       },
-      "verdict": "ok"
+      "verdict": "ok",
+      "observed": {
+        "serial": "SIM44001",
+        "product_code": "ELITE440-445"
+      }
     },
     {
       "why": "a model not in the profile",
@@ -106,13 +160,25 @@
             13367
           ]
         },
+        "serial": {
+          "words": [
+            21321,
+            19764,
+            13360,
+            12337
+          ]
+        },
         "energy_unit": {
           "words": [
             257
           ]
         }
       },
-      "verdict": "mismatch"
+      "verdict": "mismatch",
+      "observed": {
+        "serial": "SIM44001",
+        "product_code": "ELITE440-447"
+      }
     },
     {
       "why": "another meter family, NUL-padded",
@@ -128,13 +194,25 @@
             0
           ]
         },
+        "serial": {
+          "words": [
+            21321,
+            19764,
+            13360,
+            12337
+          ]
+        },
         "energy_unit": {
           "words": [
             257
           ]
         }
       },
-      "verdict": "mismatch"
+      "verdict": "mismatch",
+      "observed": {
+        "serial": "SIM44001",
+        "product_code": "ELITE500"
+      }
     },
     {
       "why": "another meter family, space-padded",
@@ -150,13 +228,25 @@
             8224
           ]
         },
+        "serial": {
+          "words": [
+            21321,
+            19764,
+            13360,
+            12337
+          ]
+        },
         "energy_unit": {
           "words": [
             257
           ]
         }
       },
-      "verdict": "mismatch"
+      "verdict": "mismatch",
+      "observed": {
+        "serial": "SIM44001",
+        "product_code": "ELITE500"
+      }
     },
     {
       "why": "case matters",
@@ -172,13 +262,25 @@
             13365
           ]
         },
+        "serial": {
+          "words": [
+            21321,
+            19764,
+            13360,
+            12337
+          ]
+        },
         "energy_unit": {
           "words": [
             257
           ]
         }
       },
-      "verdict": "mismatch"
+      "verdict": "mismatch",
+      "observed": {
+        "serial": "SIM44001",
+        "product_code": "elite440-445"
+      }
     },
     {
       "why": "a NUL inside the code is not padding",
@@ -194,13 +296,25 @@
             13365
           ]
         },
+        "serial": {
+          "words": [
+            21321,
+            19764,
+            13360,
+            12337
+          ]
+        },
         "energy_unit": {
           "words": [
             257
           ]
         }
       },
-      "verdict": "mismatch"
+      "verdict": "mismatch",
+      "observed": {
+        "serial": "SIM44001",
+        "product_code": null
+      }
     },
     {
       "why": "energy in another unit (code 2 in the high byte)",
@@ -216,13 +330,25 @@
             13365
           ]
         },
+        "serial": {
+          "words": [
+            21321,
+            19764,
+            13360,
+            12337
+          ]
+        },
         "energy_unit": {
           "words": [
             513
           ]
         }
       },
-      "verdict": "mismatch"
+      "verdict": "mismatch",
+      "observed": {
+        "serial": "SIM44001",
+        "product_code": "ELITE440-445"
+      }
     },
     {
       "why": "no unit setting (exception 02) is accepted where absent_ok",
@@ -238,11 +364,23 @@
             13365
           ]
         },
+        "serial": {
+          "words": [
+            21321,
+            19764,
+            13360,
+            12337
+          ]
+        },
         "energy_unit": {
           "exception": 2
         }
       },
-      "verdict": "ok"
+      "verdict": "ok",
+      "observed": {
+        "serial": "SIM44001",
+        "product_code": "ELITE440-445"
+      }
     },
     {
       "why": "another exception on the unit register is a failed read",
@@ -258,6 +396,14 @@
             13365
           ]
         },
+        "serial": {
+          "words": [
+            21321,
+            19764,
+            13360,
+            12337
+          ]
+        },
         "energy_unit": {
           "exception": 3
         }
@@ -266,6 +412,10 @@
         "read_failed": {
           "exception": 3
         }
+      },
+      "observed": {
+        "serial": "SIM44001",
+        "product_code": "ELITE440-445"
       }
     },
     {
@@ -275,6 +425,14 @@
         "product_code": {
           "exception": 2
         },
+        "serial": {
+          "words": [
+            21321,
+            19764,
+            13360,
+            12337
+          ]
+        },
         "energy_unit": {
           "words": [
             257
@@ -285,6 +443,10 @@
         "read_failed": {
           "exception": 2
         }
+      },
+      "observed": {
+        "serial": "SIM44001",
+        "product_code": null
       }
     },
     {
@@ -293,6 +455,14 @@
       "results": {
         "product_code": {
           "error": "timeout"
+        },
+        "serial": {
+          "words": [
+            21321,
+            19764,
+            13360,
+            12337
+          ]
         },
         "energy_unit": {
           "words": [
@@ -304,6 +474,10 @@
         "read_failed": {
           "error": "timeout"
         }
+      },
+      "observed": {
+        "serial": "SIM44001",
+        "product_code": null
       }
     },
     {
@@ -320,52 +494,463 @@
             0
           ]
         },
+        "serial": {
+          "words": [
+            21321,
+            19764,
+            13360,
+            12337
+          ]
+        },
         "energy_unit": {
           "exception": 3
         }
       },
-      "verdict": "mismatch"
+      "verdict": "mismatch",
+      "observed": {
+        "serial": "SIM44001",
+        "product_code": "ELITE500"
+      }
     },
     {
-      "why": "energy in kWh (code 3)",
+      "why": "a serial shorter than its registers, NUL-padded",
+      "profile": "elite_440",
+      "results": {
+        "product_code": {
+          "words": [
+            17740,
+            18772,
+            17716,
+            13360,
+            11572,
+            13365
+          ]
+        },
+        "serial": {
+          "words": [
+            21321,
+            19757,
+            14080,
+            0
+          ]
+        },
+        "energy_unit": {
+          "words": [
+            257
+          ]
+        }
+      },
+      "verdict": "ok",
+      "observed": {
+        "serial": "SIM-7",
+        "product_code": "ELITE440-445"
+      }
+    },
+    {
+      "why": "a serial shorter than its registers, space-padded",
+      "profile": "elite_440",
+      "results": {
+        "product_code": {
+          "words": [
+            17740,
+            18772,
+            17716,
+            13360,
+            11572,
+            13365
+          ]
+        },
+        "serial": {
+          "words": [
+            21321,
+            19757,
+            14112,
+            8224
+          ]
+        },
+        "energy_unit": {
+          "words": [
+            257
+          ]
+        }
+      },
+      "verdict": "ok",
+      "observed": {
+        "serial": "SIM-7",
+        "product_code": "ELITE440-445"
+      }
+    },
+    {
+      "why": "a serial is not compared with anything: any printable serial passes",
+      "profile": "elite_440",
+      "results": {
+        "product_code": {
+          "words": [
+            17740,
+            18772,
+            17716,
+            13360,
+            11572,
+            13365
+          ]
+        },
+        "serial": {
+          "words": [
+            20768,
+            12333,
+            14639,
+            31358
+          ]
+        },
+        "energy_unit": {
+          "words": [
+            257
+          ]
+        }
+      },
+      "verdict": "ok",
+      "observed": {
+        "serial": "Q 0-9/z~",
+        "product_code": "ELITE440-445"
+      }
+    },
+    {
+      "why": "a serial with a byte outside printable ASCII is a mismatch: it cannot label a reading",
+      "profile": "elite_440",
+      "results": {
+        "product_code": {
+          "words": [
+            17740,
+            18772,
+            17716,
+            13360,
+            11572,
+            13365
+          ]
+        },
+        "serial": {
+          "words": [
+            21321,
+            19913,
+            13360,
+            12337
+          ]
+        },
+        "energy_unit": {
+          "words": [
+            257
+          ]
+        }
+      },
+      "verdict": "mismatch",
+      "observed": {
+        "serial": null,
+        "product_code": "ELITE440-445"
+      }
+    },
+    {
+      "why": "a NUL inside the serial is not padding",
+      "profile": "elite_440",
+      "results": {
+        "product_code": {
+          "words": [
+            17740,
+            18772,
+            17716,
+            13360,
+            11572,
+            13365
+          ]
+        },
+        "serial": {
+          "words": [
+            21321,
+            19712,
+            13360,
+            12337
+          ]
+        },
+        "energy_unit": {
+          "words": [
+            257
+          ]
+        }
+      },
+      "verdict": "mismatch",
+      "observed": {
+        "serial": null,
+        "product_code": "ELITE440-445"
+      }
+    },
+    {
+      "why": "a serial of only padding is a mismatch: there is no serial",
+      "profile": "elite_440",
+      "results": {
+        "product_code": {
+          "words": [
+            17740,
+            18772,
+            17716,
+            13360,
+            11572,
+            13365
+          ]
+        },
+        "serial": {
+          "words": [
+            0,
+            0,
+            8224,
+            0
+          ]
+        },
+        "energy_unit": {
+          "words": [
+            257
+          ]
+        }
+      },
+      "verdict": "mismatch",
+      "observed": {
+        "serial": null,
+        "product_code": "ELITE440-445"
+      }
+    },
+    {
+      "why": "a timeout on the serial is a failed read",
+      "profile": "elite_440",
+      "results": {
+        "product_code": {
+          "words": [
+            17740,
+            18772,
+            17716,
+            13360,
+            11572,
+            13365
+          ]
+        },
+        "serial": {
+          "error": "timeout"
+        },
+        "energy_unit": {
+          "words": [
+            257
+          ]
+        }
+      },
+      "verdict": {
+        "read_failed": {
+          "error": "timeout"
+        }
+      },
+      "observed": {
+        "serial": null,
+        "product_code": "ELITE440-445"
+      }
+    },
+    {
+      "why": "exception 02 on the serial is a failed read: it has no absent_ok",
+      "profile": "elite_440",
+      "results": {
+        "product_code": {
+          "words": [
+            17740,
+            18772,
+            17716,
+            13360,
+            11572,
+            13365
+          ]
+        },
+        "serial": {
+          "exception": 2
+        },
+        "energy_unit": {
+          "words": [
+            257
+          ]
+        }
+      },
+      "verdict": {
+        "read_failed": {
+          "exception": 2
+        }
+      },
+      "observed": {
+        "serial": null,
+        "product_code": "ELITE440-445"
+      }
+    },
+    {
+      "why": "the product code is judged before the serial",
+      "profile": "elite_440",
+      "results": {
+        "product_code": {
+          "words": [
+            17740,
+            18772,
+            17716,
+            13360,
+            11572,
+            13364
+          ]
+        },
+        "serial": {
+          "error": "timeout"
+        },
+        "energy_unit": {
+          "words": [
+            257
+          ]
+        }
+      },
+      "verdict": "mismatch",
+      "observed": {
+        "serial": null,
+        "product_code": "ELITE440-444"
+      }
+    },
+    {
+      "why": "the 500's only known product code, an 8-character serial in 16 bytes, NUL-padded, and energy in kWh (code 3)",
       "profile": "elite_500",
       "results": {
+        "product_code": {
+          "words": [
+            17717,
+            12336,
+            17197,
+            13617,
+            12338,
+            0
+          ]
+        },
+        "serial": {
+          "words": [
+            21321,
+            19765,
+            12336,
+            12337,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
         "energy_unit": {
           "words": [
             3
           ]
         }
       },
-      "verdict": "ok"
+      "verdict": "ok",
+      "observed": {
+        "serial": "SIM50001",
+        "product_code": "E500C-5102"
+      }
     },
     {
       "why": "the whole word is the code",
       "profile": "elite_500",
       "results": {
+        "product_code": {
+          "words": [
+            17717,
+            12336,
+            17197,
+            13617,
+            12338,
+            0
+          ]
+        },
+        "serial": {
+          "words": [
+            21321,
+            19765,
+            12336,
+            12337,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
         "energy_unit": {
           "words": [
             259
           ]
         }
       },
-      "verdict": "mismatch"
+      "verdict": "mismatch",
+      "observed": {
+        "serial": "SIM50001",
+        "product_code": "E500C-5102"
+      }
     },
     {
       "why": "energy in another unit",
       "profile": "elite_500",
       "results": {
+        "product_code": {
+          "words": [
+            17717,
+            12336,
+            17197,
+            13617,
+            12338,
+            0
+          ]
+        },
+        "serial": {
+          "words": [
+            21321,
+            19765,
+            12336,
+            12337,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
         "energy_unit": {
           "words": [
             4
           ]
         }
       },
-      "verdict": "mismatch"
+      "verdict": "mismatch",
+      "observed": {
+        "serial": "SIM50001",
+        "product_code": "E500C-5102"
+      }
     },
     {
       "why": "exception 02 is a failed read where absent_ok is false",
       "profile": "elite_500",
       "results": {
+        "product_code": {
+          "words": [
+            17717,
+            12336,
+            17197,
+            13617,
+            12338,
+            0
+          ]
+        },
+        "serial": {
+          "words": [
+            21321,
+            19765,
+            12336,
+            12337,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
         "energy_unit": {
           "exception": 2
         }
@@ -374,6 +959,235 @@
         "read_failed": {
           "exception": 2
         }
+      },
+      "observed": {
+        "serial": "SIM50001",
+        "product_code": "E500C-5102"
+      }
+    },
+    {
+      "why": "an 8-character serial in 16 bytes, space-padded",
+      "profile": "elite_500",
+      "results": {
+        "product_code": {
+          "words": [
+            17717,
+            12336,
+            17197,
+            13617,
+            12338,
+            0
+          ]
+        },
+        "serial": {
+          "words": [
+            21321,
+            19765,
+            12336,
+            12337,
+            8224,
+            8224,
+            8224,
+            8224
+          ]
+        },
+        "energy_unit": {
+          "words": [
+            3
+          ]
+        }
+      },
+      "verdict": "ok",
+      "observed": {
+        "serial": "SIM50001",
+        "product_code": "E500C-5102"
+      }
+    },
+    {
+      "why": "a serial filling all 16 bytes",
+      "profile": "elite_500",
+      "results": {
+        "product_code": {
+          "words": [
+            17717,
+            12336,
+            17197,
+            13617,
+            12338,
+            0
+          ]
+        },
+        "serial": {
+          "words": [
+            21321,
+            19765,
+            12336,
+            12336,
+            12336,
+            12336,
+            12336,
+            12337
+          ]
+        },
+        "energy_unit": {
+          "words": [
+            3
+          ]
+        }
+      },
+      "verdict": "ok",
+      "observed": {
+        "serial": "SIM5000000000001",
+        "product_code": "E500C-5102"
+      }
+    },
+    {
+      "why": "another 500 variant is a mismatch until its code is added",
+      "profile": "elite_500",
+      "results": {
+        "product_code": {
+          "words": [
+            17717,
+            12336,
+            17197,
+            13617,
+            12339,
+            0
+          ]
+        },
+        "serial": {
+          "words": [
+            21321,
+            19765,
+            12336,
+            12337,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "energy_unit": {
+          "words": [
+            3
+          ]
+        }
+      },
+      "verdict": "mismatch",
+      "observed": {
+        "serial": "SIM50001",
+        "product_code": "E500C-5103"
+      }
+    },
+    {
+      "why": "an Elite 440's code on a 500 profile",
+      "profile": "elite_500",
+      "results": {
+        "product_code": {
+          "words": [
+            17740,
+            18772,
+            17716,
+            13360,
+            11572,
+            13365
+          ]
+        },
+        "serial": {
+          "words": [
+            21321,
+            19765,
+            12336,
+            12337,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "energy_unit": {
+          "words": [
+            3
+          ]
+        }
+      },
+      "verdict": "mismatch",
+      "observed": {
+        "serial": "SIM50001",
+        "product_code": "ELITE440-445"
+      }
+    },
+    {
+      "why": "a non-ASCII byte in the 500's serial",
+      "profile": "elite_500",
+      "results": {
+        "product_code": {
+          "words": [
+            17717,
+            12336,
+            17197,
+            13617,
+            12338,
+            0
+          ]
+        },
+        "serial": {
+          "words": [
+            21321,
+            19765,
+            65328,
+            12337,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "energy_unit": {
+          "words": [
+            3
+          ]
+        }
+      },
+      "verdict": "mismatch",
+      "observed": {
+        "serial": null,
+        "product_code": "E500C-5102"
+      }
+    },
+    {
+      "why": "exception 02 on the 500's product code is a failed read",
+      "profile": "elite_500",
+      "results": {
+        "product_code": {
+          "exception": 2
+        },
+        "serial": {
+          "words": [
+            21321,
+            19765,
+            12336,
+            12337,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "energy_unit": {
+          "words": [
+            3
+          ]
+        }
+      },
+      "verdict": {
+        "read_failed": {
+          "exception": 2
+        }
+      },
+      "observed": {
+        "serial": "SIM50001",
+        "product_code": null
       }
     }
   ]

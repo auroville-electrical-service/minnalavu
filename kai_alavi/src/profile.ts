@@ -6,6 +6,8 @@ const text = z.string().min(1);
 const source = z.string().regex(/^[a-z0-9][a-z0-9_-]*$/, "a source is an ID: lowercase letters, digits, - and _");
 const table = z.enum(["holding", "input"]);
 const address = z.int().min(0).max(0xffff);
+const count = z.int().min(1).max(125);
+const verified_on_device = z.iso.date().nullable();
 
 const register = z
   .object({
@@ -19,7 +21,7 @@ const register = z
     unit: z.enum(["Wh", "kWh", "varh", "kvarh"]),
     source: source.nullable(),
     placeholder: z.boolean(),
-    verified_on_device: z.iso.date().nullable(),
+    verified_on_device,
   })
   .readonly()
   .refine((r) => r.source !== null || r.placeholder, {
@@ -28,8 +30,9 @@ const register = z
 
 const identity = z.strictObject({
   product_code: z
-    .strictObject({ table, address, count: z.int().min(1).max(125), accept: z.array(text).min(1), source })
+    .strictObject({ table, address, count, accept: z.array(text).min(1), source, verified_on_device })
     .optional(),
+  serial: z.strictObject({ table, address, count, source, verified_on_device }).optional(),
   energy_unit: z
     .strictObject({
       table,
@@ -38,6 +41,7 @@ const identity = z.strictObject({
       expect: z.int().min(0).max(0xffff),
       absent_ok: z.boolean(),
       source,
+      verified_on_device,
     })
     .optional(),
 });
@@ -45,11 +49,14 @@ const identity = z.strictObject({
 const usedSources = (p: {
   readonly identity: {
     readonly product_code?: { readonly source: string } | undefined;
+    readonly serial?: { readonly source: string } | undefined;
     readonly energy_unit?: { readonly source: string } | undefined;
   };
   readonly registers: readonly { readonly source: string | null }[];
 }): string[] => [
-  ...[p.identity.product_code, p.identity.energy_unit].flatMap((check) => (check ? [check.source] : [])),
+  ...[p.identity.product_code, p.identity.serial, p.identity.energy_unit].flatMap((check) =>
+    check ? [check.source] : [],
+  ),
   ...p.registers.flatMap((r) => (r.source === null ? [] : [r.source])),
 ];
 

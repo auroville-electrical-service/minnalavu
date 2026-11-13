@@ -18,6 +18,8 @@ export {
   type IdentityRead,
   identityReads,
   identityVerdict,
+  type Observed,
+  type Outcome,
   type ReadFailure,
   type ReadResult,
   type Verdict,

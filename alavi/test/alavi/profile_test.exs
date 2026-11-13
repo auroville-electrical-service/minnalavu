@@ -33,7 +33,8 @@ defmodule Alavi.ProfileTest do
         "part" => "word",
         "expect" => 1,
         "absent_ok" => false,
-        "source" => "y"
+        "source" => "y",
+        "verified_on_device" => nil
       }
 
       json = %{profile_json(%{}) | "identity" => %{"energy_unit" => unit}}

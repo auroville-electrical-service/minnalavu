@@ -24,8 +24,9 @@ What the collector and the server share. Nothing else is shared between them.
   CRCs), then the registers, an exception or an error. Its frames are built
   independently of any collector, too.
   `identity-checks.v1.json` gives, under each profile, what the identity
-  check reads and the verdict on what came back: ok, a mismatch, or a failed
-  read. Every implementation that reads meters must give each verdict.
+  check reads, the verdict on what came back (ok, a mismatch, or a failed
+  read) and the serial and product code it observed. Every implementation
+  that reads meters must give each verdict and observe each value.
   `register-decode.v1.json` gives raw words and the decimal string each must
   decode to, for the profiles' entries and for every data type and word
   order, and words that must decode to no value. Also computed independently

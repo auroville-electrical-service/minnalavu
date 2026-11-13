@@ -102,21 +102,21 @@ const readResult = z.union([
   z.object({ error: z.string() }),
 ]);
 
+const check = z.enum(["product_code", "serial", "energy_unit"]);
+
 const identityFixture = z.object({
   format: z.literal("identity-checks/1"),
-  reads: z.record(
-    z.string(),
-    z.array(z.tuple([z.enum(["product_code", "energy_unit"]), z.string(), z.int(), z.int()])),
-  ),
+  reads: z.record(z.string(), z.array(z.tuple([check, z.string(), z.int(), z.int()]))),
   cases: z.array(
     z.object({
       why: z.string(),
       profile: z.string(),
-      results: z.partialRecord(z.enum(["product_code", "energy_unit"]), readResult),
+      results: z.partialRecord(check, readResult),
       verdict: z.union([
         z.enum(["ok", "mismatch"]),
         z.object({ read_failed: z.union([z.object({ exception: z.int() }), z.object({ error: z.string() })]) }),
       ]),
+      observed: z.strictObject({ serial: z.string().nullable(), product_code: z.string().nullable() }),
     }),
   ),
 });

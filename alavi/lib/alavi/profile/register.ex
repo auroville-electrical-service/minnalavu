@@ -62,7 +62,7 @@ defmodule Alavi.Profile.Register do
          {:ok, decimals} <- integer(entry, "decimals", 0..9),
          {:ok, unit} <- one_of(entry, "unit", @units),
          {:ok, placeholder} <- boolean(entry, "placeholder"),
-         {:ok, verified} <- verified(entry),
+         {:ok, verified} <- parse_verified(entry),
          {:ok, source} <- source(entry, placeholder) do
       {:ok,
        %__MODULE__{
@@ -92,6 +92,19 @@ defmodule Alavi.Profile.Register do
 
   def parse_source(_id), do: {:error, "source must be a source ID"}
 
+  @spec parse_verified(map()) :: {:ok, Date.t() | nil} | {:error, String.t()}
+  def parse_verified(%{"verified_on_device" => nil}), do: {:ok, nil}
+
+  def parse_verified(%{"verified_on_device" => date}) when is_binary(date) do
+    case Date.from_iso8601(date) do
+      {:ok, day} -> {:ok, day}
+      {:error, _} -> parse_verified(%{})
+    end
+  end
+
+  def parse_verified(_entry),
+    do: {:error, "verified_on_device must be null or a YYYY-MM-DD date"}
+
   defp source(%{"source" => nil}, true), do: {:ok, nil}
 
   defp source(%{"source" => nil}, false),
@@ -99,17 +112,6 @@ defmodule Alavi.Profile.Register do
 
   defp source(%{"source" => id}, _placeholder), do: parse_source(id)
   defp source(_entry, _placeholder), do: {:error, "source must be a source ID or null"}
-
-  defp verified(%{"verified_on_device" => nil}), do: {:ok, nil}
-
-  defp verified(%{"verified_on_device" => date}) when is_binary(date) do
-    case Date.from_iso8601(date) do
-      {:ok, day} -> {:ok, day}
-      {:error, _} -> verified(%{})
-    end
-  end
-
-  defp verified(_entry), do: {:error, "verified_on_device must be null or a YYYY-MM-DD date"}
 
   defp string(map, field) do
     case Map.fetch(map, field) do

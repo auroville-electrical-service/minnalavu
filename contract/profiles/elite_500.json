@@ -8,13 +8,31 @@
     "elite_500-a"
   ],
   "identity": {
+    "product_code": {
+      "table": "holding",
+      "address": 2021,
+      "count": 6,
+      "accept": [
+        "E500C-5102"
+      ],
+      "source": "elite_500-a",
+      "verified_on_device": null
+    },
+    "serial": {
+      "table": "holding",
+      "address": 1999,
+      "count": 8,
+      "source": "elite_500-a",
+      "verified_on_device": null
+    },
     "energy_unit": {
       "table": "holding",
       "address": 1957,
       "part": "word",
       "expect": 3,
       "absent_ok": false,
-      "source": "elite_500-a"
+      "source": "elite_500-a",
+      "verified_on_device": null
     }
   },
   "registers": [
