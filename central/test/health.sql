@@ -33,20 +33,22 @@ BEGIN
 END
 $$;
 
-CREATE FUNCTION pg_temp.reading(serial text, batch uuid, ago interval) RETURNS void
+-- Readings and missed reads at 10.0.0.1:502, from the batch's collector.
+CREATE FUNCTION pg_temp.reading(serial text, batch uuid, ago interval, unit integer) RETURNS void
 LANGUAGE sql AS $$
   INSERT INTO store.readings
   SELECT serial, 'active_energy_import', now() - ago, 1.0, 'Wh', '{0,0}', 'elite_440', '10.0.0.1',
-         502, 1, b.collector_id, batch
+         502, unit, b.collector_id, batch
   FROM store.batches b WHERE b.batch_id = batch
 $$;
 
-CREATE FUNCTION pg_temp.missed(serial text, batch uuid, ago interval, reason store.missed_reason)
+CREATE FUNCTION pg_temp.missed(serial text, batch uuid, ago interval, reason store.missed_reason,
+                               unit integer)
 RETURNS void
 LANGUAGE sql AS $$
   INSERT INTO store.missed_reads
   SELECT serial, 'active_energy_import', now() - ago, reason, NULL, NULL, 3, NULL, 'elite_440',
-         '10.0.0.1', 502, 1, b.collector_id, batch
+         '10.0.0.1', 502, unit, b.collector_id, batch
   FROM store.batches b WHERE b.batch_id = batch
 $$;
 
@@ -93,22 +95,36 @@ INSERT INTO b VALUES
   ('sqlh_c', pg_temp.upload('sqlh_c', '3 hours', 990, 4, 4, 4)),
   ('sqlh_d', pg_temp.upload('sqlh_d', '1 minute', 100, 7, 1, 0));
 
-SELECT pg_temp.reading('SQLH-0001', (SELECT batch FROM b WHERE collector = 'sqlh_a'), '5 minutes');
-SELECT pg_temp.reading('SQLH-0002', (SELECT batch FROM b WHERE collector = 'sqlh_a'), '2 hours');
-SELECT pg_temp.reading('SQLH-0003', (SELECT batch FROM b WHERE collector = 'sqlh_a'), '2 hours');
-SELECT pg_temp.reading('SQLH-0008', (SELECT batch FROM b WHERE collector = 'sqlh_a'), '47 hours');
-SELECT pg_temp.reading('SQLH-STRAY', (SELECT batch FROM b WHERE collector = 'sqlh_a'), '1 hour');
-SELECT pg_temp.reading('SQLH-OLD-STRAY', (SELECT batch FROM b WHERE collector = 'sqlh_a'), '3 days');
-SELECT pg_temp.missed('SQLH-0002', (SELECT batch FROM b WHERE collector = 'sqlh_a'), i, r)
-FROM (VALUES ('10 minutes'::interval, 'timeout'::store.missed_reason), ('20 minutes', 'timeout'),
-             ('30 minutes', 'exception'), ('2 days', 'timeout')) v (i, r);
+SELECT pg_temp.reading('SQLH-0001', (SELECT batch FROM b WHERE collector = 'sqlh_a'), '5 minutes', 1);
+SELECT pg_temp.reading('SQLH-0002', (SELECT batch FROM b WHERE collector = 'sqlh_a'), '2 hours', 2);
+SELECT pg_temp.reading('SQLH-0003', (SELECT batch FROM b WHERE collector = 'sqlh_a'), '2 hours', 3);
+SELECT pg_temp.reading('SQLH-0008', (SELECT batch FROM b WHERE collector = 'sqlh_a'), '47 hours', 8);
+SELECT pg_temp.reading('SQLH-STRAY', (SELECT batch FROM b WHERE collector = 'sqlh_a'), '1 hour', 9);
+SELECT pg_temp.reading('SQLH-OLD-STRAY', (SELECT batch FROM b WHERE collector = 'sqlh_a'), '3 days', 9);
+-- SQLH-0002 at its own unit; one with no serial read at its address; one
+-- at its address whose serial read was another meter's.
+SELECT pg_temp.missed(s, (SELECT batch FROM b WHERE collector = 'sqlh_a'), i, r, 2)
+FROM (VALUES ('SQLH-0002', '10 minutes'::interval, 'timeout'::store.missed_reason),
+             ('SQLH-0002', '20 minutes', 'timeout'), (NULL, '30 minutes', 'exception'),
+             ('SQLH-0001', '40 minutes', 'exception'), ('SQLH-0002', '2 days', 'timeout')) v (s, i, r);
+-- With no serial read, at an address with no meter registered: no meter's.
+SELECT pg_temp.missed(NULL, (SELECT batch FROM b WHERE collector = 'sqlh_a'), '10 minutes',
+                      'timeout', 9);
+
+-- SQLH-0003 read at unit 7 of its own endpoint; SQLH-0007 read through
+-- sqlh_d at the host and port its endpoint has under sqlh_b; SQLH-0005 read
+-- at unit 9 before it was registered, which is not judged.
+SELECT pg_temp.reading('SQLH-0003', (SELECT batch FROM b WHERE collector = 'sqlh_a'), '3 hours', 7);
+SELECT pg_temp.reading('SQLH-0003', (SELECT batch FROM b WHERE collector = 'sqlh_a'), '4 hours', 7);
+SELECT pg_temp.reading('SQLH-0007', (SELECT batch FROM b WHERE collector = 'sqlh_d'), '5 hours', 1);
+SELECT pg_temp.reading('SQLH-0005', (SELECT batch FROM b WHERE collector = 'sqlh_a'), '1 hour', 9);
 
 SELECT pg_temp.is(
   (SELECT string_agg(format('%s %s', kind, subject), '; ' ORDER BY kind, subject)
    FROM health.problems),
   'backlog_discarded sqlh_d; backlog_near_capacity sqlh_a; backlog_quarantined sqlh_a; '
   || 'backlog_refused sqlh_d; collector_silent sqlh_b; meter_silent SQLH-0002; '
-  || 'unregistered_serial SQLH-STRAY',
+  || 'misplaced_serial SQLH-0003; misplaced_serial SQLH-0007; unregistered_serial SQLH-STRAY',
   'exactly the problems there are are flagged');
 
 SELECT pg_temp.is(
@@ -130,7 +146,44 @@ SELECT pg_temp.is(
                  missed_by_reason, expected_interval)
    FROM health.meters WHERE serial = 'SQLH-0002'),
   't 3 {"timeout": 2, "exception": 1} 00:15:00',
-  'a meter shows its last reading and its missed reads within the lookback, by reason');
+  'a meter shows its last reading and its missed reads within the lookback, by reason, '
+  || 'counting those at its address with no serial read');
+
+SELECT pg_temp.is(
+  (SELECT format('%s %s', missed_reads, missed_by_reason) FROM health.meters
+   WHERE serial = 'SQLH-0001'),
+  '1 {"exception": 1}',
+  'a missed read counts for the meter whose serial was read on it, wherever it was');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s %s %s:%s %s %s %s %s', serial, collector_id, endpoint_host,
+                            endpoint_port, unit_id, readings,
+                            last_reading_at = now() - interval '3 hours', registered_at),
+                     '; ' ORDER BY serial)
+   FROM health.misplaced_serials),
+  'SQLH-0003 sqlh_a 10.0.0.1:502 7 2 t {"sqlh_a_ep unit 3"}; '
+  || 'SQLH-0007 sqlh_d 10.0.0.1:502 1 1 f {"sqlh_b_ep unit 1"}',
+  'a registered serial read where the registry did not place it is listed, per place read');
+
+SELECT pg_temp.is(
+  (SELECT detail FROM health.problems WHERE kind = 'misplaced_serial' AND subject = 'SQLH-0007'),
+  format('1 readings, the last at %s, at 10.0.0.1:502 unit 1 via sqlh_d (registered at sqlh_b_ep unit 1)',
+         now() - interval '5 hours'),
+  'a misplaced serial''s problem says where it was read and where it is registered');
+
+SELECT admin.change_meter('SQLH-0003', now() - interval '5 hours', 'sqlh_a_ep', 7, 'elite_440',
+                          86400000);
+
+SELECT pg_temp.is(
+  (SELECT string_agg(serial, ', ' ORDER BY serial) FROM health.misplaced_serials),
+  'SQLH-0003, SQLH-0007',
+  'readings are judged by where the registry placed the meter when each was taken');
+
+SELECT pg_temp.is(
+  (SELECT format('%s %s', readings, registered_at) FROM health.misplaced_serials
+   WHERE serial = 'SQLH-0003'),
+  '1 {"sqlh_a_ep unit 7"}',
+  'after a move recorded from before them, only the readings at the old place are misplaced');
 
 SELECT pg_temp.is(
   (SELECT format('%s %s %s %s %s %s %s %s', in_service, endpoints,
@@ -138,7 +191,7 @@ SELECT pg_temp.is(
                  last_reading_at = now() - interval '5 minutes', clock_source, backlog_used,
                  missed_reads, missed_by_reason)
    FROM health.collectors WHERE collector_id = 'sqlh_a'),
-  't 2 t t ntp 0.8500 3 {"timeout": 2, "exception": 1}',
+  't 2 t t ntp 0.8500 5 {"timeout": 3, "exception": 2}',
   'a collector shows its last upload and reading, clock, backlog and missed reads');
 
 SELECT pg_temp.is(

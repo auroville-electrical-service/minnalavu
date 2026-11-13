@@ -18,6 +18,13 @@
     { "name": "port 0", "path": ["readings", 0, "endpoint", "port"], "value": 0 },
     { "name": "an empty host", "path": ["readings", 0, "endpoint", "host"], "value": "" },
     { "name": "an empty meter serial", "path": ["readings", 0, "meter_serial"], "value": "" },
+    { "name": "a reading with no serial read", "path": ["readings", 0, "meter_serial"], "value": null },
+    { "name": "an empty product code", "path": ["readings", 0, "product_code"], "value": "" },
+    { "name": "a null product code", "path": ["readings", 0, "product_code"], "value": null },
+    { "name": "a product code as a number", "path": ["readings", 0, "product_code"], "value": 445 },
+    { "name": "a product code on a missed read", "path": ["missed_reads", 0, "product_code"], "value": "ELITE440-445" },
+    { "name": "an empty missed-read serial", "path": ["missed_reads", 0, "meter_serial"], "value": "" },
+    { "name": "a missing missed-read serial", "path": ["missed_reads", 0, "meter_serial"], "delete": true },
     { "name": "no raw words", "path": ["readings", 0, "raw_words"], "value": [] },
     { "name": "five raw words", "path": ["readings", 0, "raw_words"], "value": [0, 0, 0, 0, 0] },
     { "name": "a raw word above 0xFFFF", "path": ["readings", 0, "raw_words"], "value": [65536, 0] },
@@ -56,6 +63,8 @@
     { "name": "a detail of exactly 200 characters", "changes": [{ "path": ["missed_reads", 1, "detail"], "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" }] },
     { "name": "an integer written with a zero fraction", "changes": [{ "path": ["readings", 0, "endpoint", "port"], "value": 502.0 }] },
     { "name": "a timestamp in lower case", "changes": [{ "path": ["sent_at"], "value": "2026-11-01t00:05:00z" }] },
+    { "name": "a reading with the product code read", "changes": [{ "path": ["readings", 0, "product_code"], "value": "ELITE440-445" }, { "path": ["readings", 1, "product_code"], "value": "E500C-5102" }] },
+    { "name": "a missed read with no serial read", "changes": [{ "path": ["missed_reads", 1, "meter_serial"], "value": null }] },
     { "name": "a value with many digits", "changes": [{ "path": ["readings", 0, "value"], "value": "-123456789012345678901234.123456789012" }] }
   ]
 }

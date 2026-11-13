@@ -136,6 +136,86 @@ SELECT pg_temp.is(
   'a 36-digit value is stored exactly, and a microsecond timestamp kept');
 
 SELECT pg_temp.is(
+  (SELECT string_agg(coalesce(product_code, 'NULL'), ' ') FROM store.readings
+   WHERE batch_id = '0b6f8d2e-5c1a-4e7b-9a3d-2f4c6e8a0b1c'),
+  'NULL NULL',
+  'a reading without a product code is stored with none');
+
+-- A batch of one reading, with the product code read, and missed reads at
+-- addresses the basic batch's are not at.
+CREATE TEMP TABLE coded (batch jsonb);
+INSERT INTO coded SELECT pg_temp.changed(pg_temp.changed(pg_temp.changed(:'basic',
+  '{"path": ["batch_id"], "value": "66666666-6666-4666-8666-666666666666"}'),
+  '{"path": ["readings"], "value": [{"endpoint": {"host": "10.0.0.40", "port": 502},
+     "unit_id": 4, "meter_serial": "SIM-445-0004", "product_code": "ELITE440-445",
+     "profile": "elite_440", "register_key": "active_energy_import",
+     "timestamp": "2026-11-02T00:00:00Z", "raw_words": [0, 0], "value": "0.0", "unit": "Wh"}]}'),
+  '{"path": ["missed_reads"], "value": [
+     {"endpoint": {"host": "10.0.0.40", "port": 502}, "unit_id": 5, "meter_serial": null,
+      "profile": "elite_440", "register_key": "active_energy_import",
+      "timestamp": "2026-11-02T00:00:00Z", "reason": "timeout", "exception_code": null,
+      "detail": null, "attempts": 3, "raw_words": null},
+     {"endpoint": {"host": "10.0.0.40", "port": 502}, "unit_id": 6, "meter_serial": null,
+      "profile": "elite_440", "register_key": "active_energy_import",
+      "timestamp": "2026-11-02T00:00:00Z", "reason": "timeout", "exception_code": null,
+      "detail": null, "attempts": 3, "raw_words": null},
+     {"endpoint": {"host": "10.0.0.41", "port": 502}, "unit_id": 5, "meter_serial": "SIM-445-0007",
+      "profile": "elite_440", "register_key": "active_energy_import",
+      "timestamp": "2026-11-02T00:00:00Z", "reason": "exception", "exception_code": 2,
+      "detail": null, "attempts": 3, "raw_words": null},
+     {"endpoint": {"host": "10.0.0.42", "port": 502}, "unit_id": 5, "meter_serial": "SIM-445-0007",
+      "profile": "elite_440", "register_key": "active_energy_import",
+      "timestamp": "2026-11-02T00:00:00Z", "reason": "exception", "exception_code": 2,
+      "detail": null, "attempts": 3, "raw_words": null}]}');
+
+SELECT pg_temp.is(
+  pg_temp.ingest_as('collector_sqltest_a', (SELECT batch FROM coded)) - 'first_received_at',
+  '{"batch_id": "66666666-6666-4666-8666-666666666666", "resent": false,
+    "readings": {"received": 1, "inserted": 1, "duplicate": 0, "conflicting": 0},
+    "missed_reads": {"received": 4, "inserted": 4, "duplicate": 0}}'::jsonb,
+  'missed reads at different addresses are each stored, with or without the serial read');
+
+SELECT pg_temp.is(
+  (SELECT product_code FROM store.readings WHERE meter_serial = 'SIM-445-0004'),
+  'ELITE440-445',
+  'a reading keeps the product code read');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s %s %s', endpoint_host, unit_id, coalesce(meter_serial, 'NULL')),
+                     '; ' ORDER BY endpoint_host, unit_id)
+   FROM store.missed_reads WHERE batch_id = '66666666-6666-4666-8666-666666666666'),
+  '10.0.0.40 5 NULL; 10.0.0.40 6 NULL; 10.0.0.41 5 SIM-445-0007; 10.0.0.42 5 SIM-445-0007',
+  'a missed read keeps the serial read in its round, or none');
+
+SELECT pg_temp.is(
+  pg_temp.ingest_as('collector_sqltest_a',
+    jsonb_set((SELECT batch FROM coded), '{batch_id}', '"77777777-7777-4777-8777-777777777777"'))
+    -> 'missed_reads',
+  '{"received": 4, "inserted": 0, "duplicate": 4}',
+  'a missed read already stored at its address is not stored again, whatever serial it carries');
+
+SELECT pg_temp.is(
+  pg_temp.ingest_as('collector_sqltest_b',
+    jsonb_set((SELECT batch FROM coded), '{batch_id}', '"88888888-8888-4888-8888-888888888888"'))
+    -> 'missed_reads',
+  '{"received": 4, "inserted": 4, "duplicate": 0}',
+  'the same address under another collector is another address');
+
+SELECT pg_temp.is(
+  pg_temp.ingest_as('collector_sqltest_a',
+    pg_temp.changed(
+      jsonb_set((SELECT batch FROM coded), '{batch_id}', '"99999999-9999-4999-8999-999999999999"'),
+      '{"path": ["readings", 0, "product_code"], "value": "ELITE440-446"}')) -> 'readings',
+  '{"received": 1, "inserted": 0, "duplicate": 0, "conflicting": 1}',
+  'a reading whose product code differs from the stored one''s is conflicting');
+
+SELECT pg_temp.is(
+  (SELECT product_code FROM store.reading_conflicts
+   WHERE batch_id = '99999999-9999-4999-8999-999999999999'),
+  'ELITE440-446',
+  'the conflicting reading keeps its product code');
+
+SELECT pg_temp.is(
   (SELECT string_agg(format('%s.%s %s', table_name, column_name, data_type), '; '
                      ORDER BY table_name)
    FROM information_schema.columns

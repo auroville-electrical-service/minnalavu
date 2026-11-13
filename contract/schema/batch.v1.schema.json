@@ -103,7 +103,16 @@
       "properties": {
         "endpoint": { "$ref": "#/$defs/endpoint" },
         "unit_id": { "$ref": "#/$defs/unit_id" },
-        "meter_serial": { "type": "string", "minLength": 1 },
+        "meter_serial": {
+          "description": "The serial the meter reported in the round the reading was taken in.",
+          "type": "string",
+          "minLength": 1
+        },
+        "product_code": {
+          "description": "The product code the meter reported in that round, as read.",
+          "type": "string",
+          "minLength": 1
+        },
         "profile": { "type": "string", "minLength": 1 },
         "register_key": { "type": "string", "minLength": 1 },
         "timestamp": { "type": "string", "format": "date-time" },
@@ -141,7 +150,11 @@
       "properties": {
         "endpoint": { "$ref": "#/$defs/endpoint" },
         "unit_id": { "$ref": "#/$defs/unit_id" },
-        "meter_serial": { "type": "string", "minLength": 1 },
+        "meter_serial": {
+          "description": "The serial the meter reported in that round, or null when it could not be read. The server keys a missed read on its address, not on this.",
+          "type": ["string", "null"],
+          "minLength": 1
+        },
         "profile": { "type": "string", "minLength": 1 },
         "register_key": { "type": "string", "minLength": 1 },
         "timestamp": {

@@ -20,8 +20,12 @@ The directory is not named `minnalavu/`, since that is the repo itself.
 
 ## Schemas and roles
 
-- `store`: the data. `readings` and `missed_reads` are hypertables keyed on
-  `(meter_serial, register_key, read_at)`; `batches` (one row per batch, as
+- `store`: the data. `readings` and `missed_reads` are hypertables. A reading
+  is keyed on `(meter_serial, register_key, read_at)`, the serial being the one
+  the meter reported, and carries the product code it reported too. A missed
+  read is a fact about an address, keyed on `(collector_id, endpoint_host,
+  endpoint_port, unit_id, register_key, read_at)`, and carries the serial read
+  in its round, or none. `batches` (one row per batch, as
   first received), `uploads` (every arrival of a batch, with the collector's
   backlog), `reading_conflicts` (a reading whose key was already taken by one
   with other content) and `collectors`. Nothing in `store` can be updated,
@@ -98,9 +102,14 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
 - `health.meters`: per registered meter, where it is, its expected interval,
   last reading, missed reads within the lookback by reason, and whether it is
   silent. A meter is expected to be read while it and its endpoint are in
-  service and no other system polls the endpoint.
+  service and no other system polls the endpoint. A missed read counts for
+  the meter whose serial it carries or, with none, for the meter registered at
+  its address now.
 - `health.unregistered_serials`: serials with readings within the lookback
   that are not in the registry.
+- `health.misplaced_serials`: registered serials read within the lookback at
+  a place (collector, host, port, unit) other than where the registry put them
+  when each reading was taken; one row per serial and place.
 - `health.problems`: one row per problem, `(kind, subject)` naming it and
   `detail` describing it now. Kinds: `collector_silent` (no upload for
   `collector_silent_after`), `meter_silent` (no reading for
@@ -109,7 +118,8 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
   `backlog_near_capacity` (bytes at or above `backlog_near_capacity` of the
   buffer), `backlog_refused`, `backlog_discarded`, `backlog_quarantined` (above
   zero in the latest upload; `refused` counts since the collector started, so
-  it clears on a restart), and `unregistered_serial`.
+  it clears on a restart), `unregistered_serial` and `misplaced_serial` (one
+  per serial, every place it was read in its detail).
 - `health.thresholds`: the thresholds in force, from
   `registry.health_thresholds` (append-only; the last row set holds). Change
   them as the owner:

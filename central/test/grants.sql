@@ -198,8 +198,8 @@ CREATE TEMP VIEW monitor_roles AS
 SELECT pg_temp.is(
   (SELECT string_agg(c.relname::text, ', ' ORDER BY c.relname)
    FROM pg_class c WHERE c.relnamespace = 'health'::regnamespace AND c.relkind = 'v'),
-  'collectors, meters, problems, thresholds, unregistered_serials',
-  'health holds the five health views');
+  'collectors, meters, misplaced_serials, problems, thresholds, unregistered_serials',
+  'health holds the six health views');
 
 SELECT pg_temp.is(
   (SELECT count(*) FROM pg_class c
@@ -282,6 +282,7 @@ FROM unnest(ARRAY[
   'SELECT * FROM health.collectors',
   'SELECT * FROM health.meters',
   'SELECT * FROM health.unregistered_serials',
+  'SELECT * FROM health.misplaced_serials',
   'SELECT * FROM health.thresholds'
 ]) q;
 
