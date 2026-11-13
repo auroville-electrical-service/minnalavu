@@ -81,7 +81,7 @@ defmodule Alavi.Poller.RawLogTest do
       {lines, _port} = poll!(:rtu_over_tcp, [bad_crc: true], limits, 300)
       assert [line | _] = lines
 
-      # The first read on a connection is the identity check: 6 registers of product code.
+      # The first read of each round is the identity check: 6 registers of product code.
       assert line =~
                ~r/unit 1: 17 bytes skipped before the reply \(bad CRC.*\): 01 03 0C( [0-9A-F]{2}){14}$/
     end

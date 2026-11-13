@@ -43,6 +43,14 @@ with the endpoint and unit, so a misbehaving device can be diagnosed from the
 log alone. `raw_bytes_log` in the settings caps this per endpoint: bytes shown
 per line, and lines per window, then one line counting what was suppressed.
 
+A meter's identity (product code, serial, energy unit setting) is read every
+round, before its registers. Readings carry the serial and product code read.
+A serial in the polling config is optional and only an expectation: a
+different one read is logged as a warning, and the readings still go under
+the serial read. A meter whose identity read fails, or whose serial is empty
+or not printable, gives missed reads for that round, with no serial if none
+was read.
+
 ## Clock
 
 On Windows each batch's clock status comes from the Windows Time service:

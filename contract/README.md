@@ -36,7 +36,10 @@ What the collector and the server share. Nothing else is shared between them.
 A batch says nothing about which collector sent it: the server takes that from
 the token the batch is sent with. A batch carries its readings, the reads that
 were due and missed (for the health views), the clock status they were
-recorded under, and the collector's backlog when it was sent.
+recorded under, and the collector's backlog when it was sent. A reading's
+`meter_serial` and `product_code` are what the meter reported in the round it
+was read, never what the collector's config says. A missed read carries the
+serial read in its round, or null when none could be read.
 
 Values are decimal strings, never JSON numbers, so no float ever carries
 energy or money.
