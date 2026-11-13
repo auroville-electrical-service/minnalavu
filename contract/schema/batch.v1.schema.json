@@ -93,6 +93,7 @@
         "endpoint",
         "unit_id",
         "meter_serial",
+        "product_code",
         "profile",
         "register_key",
         "timestamp",

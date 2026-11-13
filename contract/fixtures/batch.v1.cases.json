@@ -19,6 +19,7 @@
     { "name": "an empty host", "path": ["readings", 0, "endpoint", "host"], "value": "" },
     { "name": "an empty meter serial", "path": ["readings", 0, "meter_serial"], "value": "" },
     { "name": "a reading with no serial read", "path": ["readings", 0, "meter_serial"], "value": null },
+    { "name": "a missing product code", "path": ["readings", 0, "product_code"], "delete": true },
     { "name": "an empty product code", "path": ["readings", 0, "product_code"], "value": "" },
     { "name": "a null product code", "path": ["readings", 0, "product_code"], "value": null },
     { "name": "a product code as a number", "path": ["readings", 0, "product_code"], "value": 445 },
@@ -63,7 +64,6 @@
     { "name": "a detail of exactly 200 characters", "changes": [{ "path": ["missed_reads", 1, "detail"], "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" }] },
     { "name": "an integer written with a zero fraction", "changes": [{ "path": ["readings", 0, "endpoint", "port"], "value": 502.0 }] },
     { "name": "a timestamp in lower case", "changes": [{ "path": ["sent_at"], "value": "2026-11-01t00:05:00z" }] },
-    { "name": "a reading without a product code", "changes": [{ "path": ["readings", 0, "product_code"], "delete": true }] },
     { "name": "a missed read with no serial read", "changes": [{ "path": ["missed_reads", 1, "meter_serial"], "value": null }] },
     { "name": "a value with many digits", "changes": [{ "path": ["readings", 0, "value"], "value": "-123456789012345678901234.123456789012" }] }
   ]

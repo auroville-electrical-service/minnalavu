@@ -84,8 +84,9 @@ SELECT pg_temp.ingest_as('collector_sqltest_b',
   pg_temp.changed(
     pg_temp.changed(:'basic', '{"path": ["batch_id"], "value": "22222222-2222-4222-8222-222222222222"}'),
     '{"path": ["readings"], "value": [{"endpoint": {"host": "10.0.0.30", "port": 502},
-       "unit_id": 2, "meter_serial": "SIM-445-0002", "profile": "elite_440",
-       "register_key": "active_energy_import", "timestamp": "2026-11-01T00:00:00Z",
+       "unit_id": 2, "meter_serial": "SIM-445-0002", "product_code": "ELITE440-445",
+       "profile": "elite_440", "register_key": "active_energy_import",
+       "timestamp": "2026-11-01T00:00:00Z",
        "raw_words": [0, 0], "value": "0.0", "unit": "Wh"}]}'));
 
 SELECT pg_temp.is(
@@ -126,11 +127,9 @@ SELECT pg_temp.is(
 SELECT pg_temp.ingest_as('collector_sqltest_a',
   pg_temp.changed(
     pg_temp.changed(
-      pg_temp.changed(
-        pg_temp.changed(:'basic', '{"path": ["batch_id"], "value": "55555555-5555-4555-8555-555555555555"}'),
-        '{"path": ["readings", 0, "value"], "value": "-123456789012345678901234.123456789012"}'),
-      '{"path": ["readings", 0, "timestamp"], "value": "2026-10-01T00:00:00.123456Z"}'),
-    '{"path": ["readings", 0, "product_code"], "delete": true}'));
+      pg_temp.changed(:'basic', '{"path": ["batch_id"], "value": "55555555-5555-4555-8555-555555555555"}'),
+      '{"path": ["readings", 0, "value"], "value": "-123456789012345678901234.123456789012"}'),
+    '{"path": ["readings", 0, "timestamp"], "value": "2026-10-01T00:00:00.123456Z"}'));
 
 SELECT pg_temp.is(
   (SELECT value::text FROM store.readings WHERE read_at = '2026-10-01T00:00:00.123456Z'),
@@ -144,10 +143,28 @@ SELECT pg_temp.is(
   'the basic batch''s readings keep their product codes');
 
 SELECT pg_temp.is(
-  (SELECT coalesce(product_code, 'NULL') FROM store.readings
-   WHERE read_at = '2026-10-01T00:00:00.123456Z'),
-  'NULL',
-  'a reading without a product code is stored with none');
+  pg_temp.ingest_error('collector_sqltest_a',
+    pg_temp.changed(
+      pg_temp.changed(:'basic', '{"path": ["batch_id"], "value": "5a5a5a5a-5a5a-45a5-85a5-5a5a5a5a5a5a"}'),
+      '{"path": ["readings", 1, "product_code"], "delete": true}')),
+  'PT422: batch rejected: batch.readings[1] is missing product_code',
+  'a reading without a product code is rejected, naming the field');
+
+SELECT pg_temp.is(
+  (SELECT count(*) FROM store.batches WHERE batch_id = '5a5a5a5a-5a5a-45a5-85a5-5a5a5a5a5a5a'),
+  0::bigint,
+  'and nothing of its batch is stored');
+
+SELECT pg_temp.is(
+  pg_temp.sqlstate_as('postgres', $$
+    INSERT INTO store.readings
+      (meter_serial, register_key, read_at, value, unit, raw_words, profile, endpoint_host,
+       endpoint_port, unit_id, product_code, collector_id, batch_id)
+    SELECT meter_serial, register_key, read_at + interval '1 second', value, unit, raw_words,
+           profile, endpoint_host, endpoint_port, unit_id, NULL, collector_id, batch_id
+    FROM store.readings LIMIT 1$$),
+  '23502',
+  'the store refuses a reading row without a product code');
 
 -- A batch of one reading, with the product code read, and missed reads at
 -- addresses the basic batch's are not at.

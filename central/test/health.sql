@@ -38,7 +38,7 @@ CREATE FUNCTION pg_temp.reading(serial text, batch uuid, ago interval, unit inte
 LANGUAGE sql AS $$
   INSERT INTO store.readings
   SELECT serial, 'active_energy_import', now() - ago, 1.0, 'Wh', '{0,0}', 'elite_440', '10.0.0.1',
-         502, unit, b.collector_id, batch
+         502, unit, b.collector_id, batch, 'ELITE440-445'
   FROM store.batches b WHERE b.batch_id = batch
 $$;
 
