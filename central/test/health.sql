@@ -118,13 +118,21 @@ SELECT pg_temp.reading('SQLH-0003', (SELECT batch FROM b WHERE collector = 'sqlh
 SELECT pg_temp.reading('SQLH-0003', (SELECT batch FROM b WHERE collector = 'sqlh_a'), '4 hours', 7);
 SELECT pg_temp.reading('SQLH-0007', (SELECT batch FROM b WHERE collector = 'sqlh_d'), '5 hours', 1);
 SELECT pg_temp.reading('SQLH-0005', (SELECT batch FROM b WHERE collector = 'sqlh_a'), '1 hour', 9);
+-- SQLH-TWIN, not registered, read at unit 10 through both sqlh_a and sqlh_d;
+-- SQLH-STRAY read at unit 11 too, outside the lookback.
+SELECT pg_temp.reading('SQLH-TWIN', (SELECT batch FROM b WHERE collector = 'sqlh_a'), '30 minutes', 10);
+SELECT pg_temp.reading('SQLH-TWIN', (SELECT batch FROM b WHERE collector = 'sqlh_a'), '40 minutes', 10);
+SELECT pg_temp.reading('SQLH-TWIN', (SELECT batch FROM b WHERE collector = 'sqlh_d'), '20 minutes', 10);
+SELECT pg_temp.reading('SQLH-STRAY', (SELECT batch FROM b WHERE collector = 'sqlh_a'), '3 days', 11);
 
 SELECT pg_temp.is(
   (SELECT string_agg(format('%s %s', kind, subject), '; ' ORDER BY kind, subject)
    FROM health.problems),
   'backlog_discarded sqlh_d; backlog_near_capacity sqlh_a; backlog_quarantined sqlh_a; '
   || 'backlog_refused sqlh_d; collector_silent sqlh_b; meter_silent SQLH-0002; '
-  || 'misplaced_serial SQLH-0003; misplaced_serial SQLH-0007; unregistered_serial SQLH-STRAY',
+  || 'misplaced_serial SQLH-0003; misplaced_serial SQLH-0007; '
+  || 'serial_at_several_places SQLH-TWIN; unregistered_serial SQLH-STRAY; '
+  || 'unregistered_serial SQLH-TWIN',
   'exactly the problems there are are flagged');
 
 SELECT pg_temp.is(
@@ -202,9 +210,27 @@ SELECT pg_temp.is(
   'a collector is judged only while it has an endpoint in service');
 
 SELECT pg_temp.is(
-  (SELECT format('%s %s', serial, readings) FROM health.unregistered_serials),
-  'SQLH-STRAY 1',
+  (SELECT string_agg(format('%s %s', serial, readings), ', ' ORDER BY serial)
+   FROM health.unregistered_serials),
+  'SQLH-STRAY 1, SQLH-TWIN 3',
   'only serials read within the lookback are listed as unregistered');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s %s %s:%s %s %s', serial, collector_id, endpoint_host,
+                            endpoint_port, unit_id, readings),
+                     '; ' ORDER BY serial, collector_id)
+   FROM health.unregistered_serial_places),
+  'SQLH-STRAY sqlh_a 10.0.0.1:502 9 1; SQLH-TWIN sqlh_a 10.0.0.1:502 10 2; '
+  || 'SQLH-TWIN sqlh_d 10.0.0.1:502 10 1',
+  'an unregistered serial is listed per place read within the lookback');
+
+SELECT pg_temp.is(
+  (SELECT detail FROM health.problems
+   WHERE kind = 'serial_at_several_places' AND subject = 'SQLH-TWIN'),
+  format('2 readings, the last at %s, at 10.0.0.1:502 unit 10 via sqlh_a; '
+         || '1 readings, the last at %s, at 10.0.0.1:502 unit 10 via sqlh_d',
+         now() - interval '30 minutes', now() - interval '20 minutes'),
+  'an unregistered serial read at several places says each place and when it was read there');
 
 SELECT admin.set_health_thresholds(collector_silent_after => '3 hours',
   meter_silent_intervals => 10, backlog_near_capacity => 0.9, lookback => '4 days');
@@ -212,8 +238,10 @@ SELECT admin.set_health_thresholds(collector_silent_after => '3 hours',
 SELECT pg_temp.is(
   (SELECT string_agg(format('%s %s', kind, subject), '; ' ORDER BY kind, subject)
    FROM health.problems WHERE kind IN ('collector_silent', 'meter_silent', 'backlog_near_capacity',
-                                       'unregistered_serial')),
-  'meter_silent SQLH-0007; unregistered_serial SQLH-OLD-STRAY; unregistered_serial SQLH-STRAY',
+                                       'unregistered_serial', 'serial_at_several_places')),
+  'meter_silent SQLH-0007; serial_at_several_places SQLH-STRAY; '
+  || 'serial_at_several_places SQLH-TWIN; unregistered_serial SQLH-OLD-STRAY; '
+  || 'unregistered_serial SQLH-STRAY; unregistered_serial SQLH-TWIN',
   'the latest thresholds set are the ones judged by');
 
 SELECT pg_temp.is(

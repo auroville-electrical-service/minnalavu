@@ -107,6 +107,8 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
   its address now.
 - `health.unregistered_serials`: serials with readings within the lookback
   that are not in the registry.
+- `health.unregistered_serial_places`: the same serials, one row per place
+  (collector, host, port, unit) each was read at within the lookback.
 - `health.misplaced_serials`: registered serials read within the lookback at
   a place (collector, host, port, unit) other than where the registry put them
   when each reading was taken; one row per serial and place.
@@ -118,8 +120,11 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
   `backlog_near_capacity` (bytes at or above `backlog_near_capacity` of the
   buffer), `backlog_refused`, `backlog_discarded`, `backlog_quarantined` (above
   zero in the latest upload; `refused` counts since the collector started, so
-  it clears on a restart), `unregistered_serial` and `misplaced_serial` (one
-  per serial, every place it was read in its detail).
+  it clears on a restart), `unregistered_serial`, `misplaced_serial` (one
+  per serial, every place it was read in its detail) and
+  `serial_at_several_places` (an unregistered serial read at more than one
+  place: two meters reporting one serial, one meter reachable two ways, or a
+  move; every place in its detail).
 - `health.thresholds`: the thresholds in force, from
   `registry.health_thresholds` (append-only; the last row set holds). Change
   them as the owner:
