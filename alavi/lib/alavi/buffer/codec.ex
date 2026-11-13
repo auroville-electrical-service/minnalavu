@@ -1,6 +1,6 @@
 defmodule Alavi.Buffer.Codec do
   @moduledoc false
-  # The on-disk format of a buffer segment, version 1. Pure: binaries in and out.
+  # The on-disk format of a buffer segment, version 2. Pure: binaries in and out.
   #
   #     segment = magic, header frame, record frame*
   #     magic   = "ALAVIBUF", format version (1 byte)
@@ -12,7 +12,7 @@ defmodule Alavi.Buffer.Codec do
 
   alias Alavi.{Clock, MissedRead, Reading, Sink}
 
-  @magic <<"ALAVIBUF", 1>>
+  @magic <<"ALAVIBUF", 2>>
 
   @typedoc "`size` is the length of the longest valid prefix."
   @type parsed :: %{

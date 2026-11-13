@@ -375,5 +375,34 @@ defmodule Alavi.BufferTest do
       assert File.exists?(Path.join(dir, "00000000000000000007.seg.discarded"))
       refute File.exists?(Path.join(dir, "00000000000000000008.seg"))
     end
+
+    test "a segment in format 1, whose readings lack a product code, is set aside",
+         %{tmp_dir: dir} do
+      buffer = start!(dir)
+      :ok = Buffer.record(buffer, meter(1))
+      :ok = stop_supervised(:buffer)
+
+      reading =
+        {:reading, "127.0.0.1", 5020, 2, "SIM-2", "elite_440", "active_energy_import",
+         "2026-11-01T00:00:00Z", [0x4700, 0x0000], {1, 25, -1}, "Wh"}
+
+      v1 =
+        <<"ALAVIBUF", 1>> <>
+          v1_frame({<<0::128>>, {:unsynced, nil}}) <> v1_frame([reading])
+
+      path = Path.join(dir, "00000000000000000007.seg")
+      File.write!(path, v1)
+
+      log = capture_log(fn -> send(self(), {:buffer, start!(dir)}) end)
+      assert_received {:buffer, buffer}
+      assert log =~ "no valid header"
+      assert File.read!(path <> ".discarded") == v1
+      assert %{discarded_files: 1, events: 3} = Buffer.backlog(buffer)
+    end
+  end
+
+  defp v1_frame(term) do
+    payload = :erlang.term_to_binary(term, [:compressed])
+    <<byte_size(payload)::32, :erlang.crc32(payload)::32, payload::binary>>
   end
 end
