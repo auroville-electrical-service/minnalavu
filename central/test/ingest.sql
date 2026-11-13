@@ -126,9 +126,11 @@ SELECT pg_temp.is(
 SELECT pg_temp.ingest_as('collector_sqltest_a',
   pg_temp.changed(
     pg_temp.changed(
-      pg_temp.changed(:'basic', '{"path": ["batch_id"], "value": "55555555-5555-4555-8555-555555555555"}'),
-      '{"path": ["readings", 0, "value"], "value": "-123456789012345678901234.123456789012"}'),
-    '{"path": ["readings", 0, "timestamp"], "value": "2026-10-01T00:00:00.123456Z"}'));
+      pg_temp.changed(
+        pg_temp.changed(:'basic', '{"path": ["batch_id"], "value": "55555555-5555-4555-8555-555555555555"}'),
+        '{"path": ["readings", 0, "value"], "value": "-123456789012345678901234.123456789012"}'),
+      '{"path": ["readings", 0, "timestamp"], "value": "2026-10-01T00:00:00.123456Z"}'),
+    '{"path": ["readings", 0, "product_code"], "delete": true}'));
 
 SELECT pg_temp.is(
   (SELECT value::text FROM store.readings WHERE read_at = '2026-10-01T00:00:00.123456Z'),
@@ -136,9 +138,15 @@ SELECT pg_temp.is(
   'a 36-digit value is stored exactly, and a microsecond timestamp kept');
 
 SELECT pg_temp.is(
-  (SELECT string_agg(coalesce(product_code, 'NULL'), ' ') FROM store.readings
+  (SELECT string_agg(product_code, ' ' ORDER BY product_code) FROM store.readings
    WHERE batch_id = '0b6f8d2e-5c1a-4e7b-9a3d-2f4c6e8a0b1c'),
-  'NULL NULL',
+  'E500C-5102 ELITE440-445',
+  'the basic batch''s readings keep their product codes');
+
+SELECT pg_temp.is(
+  (SELECT coalesce(product_code, 'NULL') FROM store.readings
+   WHERE read_at = '2026-10-01T00:00:00.123456Z'),
+  'NULL',
   'a reading without a product code is stored with none');
 
 -- A batch of one reading, with the product code read, and missed reads at

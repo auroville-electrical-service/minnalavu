@@ -15,9 +15,8 @@ defmodule Alavi.Config do
             "reconnect_backoff_ms": {"min": 1000, "max": 60000},
             "interval_ms": 900000,
             "meters": [
-              {"unit_id": 1, "serial": "SIM-445-0001", "profile": "elite_440"},
-              {"unit_id": 3, "serial": "SIM-500-0001", "profile": "elite_500",
-               "interval_ms": 60000}
+              {"unit_id": 1, "serial": "SIM-0001", "profile": "elite_440"},
+              {"unit_id": 3, "profile": "elite_500", "interval_ms": 60000}
             ]
           }
         ]
@@ -52,7 +51,7 @@ defmodule Alavi.Config do
     with :ok <- Fields.only(json, ["schema_version", "endpoints"]),
          {:ok, endpoints} <- Fields.each(json, "endpoints", &Endpoint.parse(&1, profiles)),
          :ok <- Fields.unique(endpoints, &{&1.host, &1.port}, "endpoint"),
-         :ok <- Fields.unique(Enum.flat_map(endpoints, & &1.meters), & &1.serial, "serial") do
+         :ok <- Fields.unique(expected_serials(endpoints), & &1, "serial") do
       {:ok, %__MODULE__{endpoints: endpoints}}
     end
   end
@@ -62,6 +61,9 @@ defmodule Alavi.Config do
 
   def parse(_json, _profiles),
     do: {:error, "expected an object with schema_version and endpoints"}
+
+  defp expected_serials(endpoints),
+    do: for(%{meters: meters} <- endpoints, %{serial: s} <- meters, s != nil, do: s)
 
   defp read(path) do
     case File.read(path) do

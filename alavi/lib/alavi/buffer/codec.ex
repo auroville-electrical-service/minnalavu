@@ -84,8 +84,8 @@ defmodule Alavi.Buffer.Codec do
   defp encode_event(%Reading{} = r) do
     %Decimal{sign: sign, coef: coef, exp: exp} = r.value
 
-    {:reading, r.endpoint.host, r.endpoint.port, r.unit_id, r.meter_serial, r.profile,
-     r.register_key, iso(r.timestamp), r.raw_words, {sign, coef, exp}, r.unit}
+    {:reading, r.endpoint.host, r.endpoint.port, r.unit_id, r.meter_serial, r.product_code,
+     r.profile, r.register_key, iso(r.timestamp), r.raw_words, {sign, coef, exp}, r.unit}
   end
 
   defp encode_event(%MissedRead{} = m) do
@@ -94,12 +94,14 @@ defmodule Alavi.Buffer.Codec do
   end
 
   defp decode_event(
-         {:reading, host, port, unit_id, serial, profile, key, ts, words, {sign, coef, exp}, unit}
+         {:reading, host, port, unit_id, serial, product_code, profile, key, ts, words,
+          {sign, coef, exp}, unit}
        ) do
     %Reading{
       endpoint: %{host: host, port: port},
       unit_id: unit_id,
       meter_serial: serial,
+      product_code: product_code,
       profile: profile,
       register_key: key,
       timestamp: datetime(ts),

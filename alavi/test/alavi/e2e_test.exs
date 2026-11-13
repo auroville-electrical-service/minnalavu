@@ -87,13 +87,15 @@ defmodule Alavi.EndToEndTest do
     id = "e2e_#{Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)}"
     token = collector!(id)
 
-    {_sim, port} = start_sim!(:tcp, missing_units: :gateway_error)
-    serial = &%{"serial" => "E2E-#{id}-#{&1}"}
+    {sim, port} = start_sim!(:tcp, missing_units: :gateway_error)
+    # What the meters report, not what the config expects, is what gets stored.
+    read_serial = String.upcase(id)
+    :ok = Simulator.identify(sim, 3, :serial, read_serial)
 
     meters = [
-      meter(1, "elite_440", serial.(1)),
-      meter(9, "elite_440", serial.(9)),
-      meter(3, "elite_500", serial.(3))
+      meter(1, "elite_440", %{"serial" => "CFG-1"}),
+      meter(9, "elite_440", %{"serial" => "CFG-9"}),
+      Map.delete(meter(3, "elite_500"), "serial")
     ]
 
     start_collector!(ctx.tmp_dir, [endpoint(port, "tcp", meters)], token)
@@ -110,26 +112,44 @@ defmodule Alavi.EndToEndTest do
 
     readings =
       rows!("""
-      SELECT meter_serial, register_key, value::text AS value, unit::text AS unit, unit_id
+      SELECT meter_serial, product_code, register_key, value::text AS value, unit::text AS unit,
+             unit_id
       FROM store.readings WHERE collector_id = '#{id}'
       """)
 
     by_key = Map.new(readings, &{{&1["meter_serial"], &1["register_key"]}, &1})
-    assert by_key[{"E2E-#{id}-1", "active_energy_import"}]["value"] == "123456.000"
-    assert by_key[{"E2E-#{id}-3", "active_energy_import"}]["value"] == "1234.500"
+    assert by_key[{"SIM-1", "active_energy_import"}]["value"] == "123456.000"
+    assert by_key[{read_serial, "active_energy_import"}]["value"] == "1234.500"
+
+    assert readings
+           |> Enum.map(&{&1["meter_serial"], &1["product_code"]})
+           |> Enum.uniq()
+           |> Enum.sort() ==
+             Enum.sort([{"SIM-1", "ELITE440-445"}, {read_serial, "E500C-5102"}])
 
     # Import and export are separate rows, never a net figure.
-    assert Map.has_key?(by_key, {"E2E-#{id}-1", "active_energy_export"})
+    assert Map.has_key?(by_key, {"SIM-1", "active_energy_export"})
     assert length(readings) == 6
 
     missed =
       rows!("""
-      SELECT meter_serial, reason::text AS reason, exception_code
+      SELECT meter_serial, unit_id, reason::text AS reason, exception_code
       FROM store.missed_reads WHERE collector_id = '#{id}'
       """)
 
-    assert Enum.all?(missed, &match?(%{"reason" => "exception", "exception_code" => 11}, &1))
-    assert missed |> Enum.map(& &1["meter_serial"]) |> Enum.uniq() == ["E2E-#{id}-9"]
+    # Unit 9 never answered, so no serial was read for it.
+    assert Enum.all?(
+             missed,
+             &match?(
+               %{
+                 "unit_id" => 9,
+                 "meter_serial" => nil,
+                 "reason" => "exception",
+                 "exception_code" => 11
+               },
+               &1
+             )
+           )
 
     [upload | _] =
       rows!("""

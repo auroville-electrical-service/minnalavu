@@ -38,6 +38,9 @@ defmodule Alavi.Poller.IdentityTest do
                  &match?(%MissedRead{unit_id: 1, reason: {:profile_mismatch, _}, attempts: 0}, &1)
                )
 
+        # The serial was read all the same, and labels the missed reads.
+        assert Enum.all?(events, &match?(%MissedRead{meter_serial: "SIM-1"}, &1))
+
         assert [%MissedRead{reason: {:profile_mismatch, detail}} | _] = events
         assert detail =~ ~s("ELITE440-444")
         assert [%Reading{unit_id: 2} | _] = recorded!()
@@ -61,9 +64,9 @@ defmodule Alavi.Poller.IdentityTest do
     assert [%Reading{unit_id: 1, unit: "kWh"} | _] = recorded!()
   end
 
-  test "an Elite 500 with no unit register is missed with exception 02" do
+  test "an Elite 500 with no unit register is missed with exception 02, under the serial read" do
     poll!([sim_meter(3, "elite_500", energy_unit: :absent)], [meter(3, "elite_500")])
-    assert [%MissedRead{reason: {:exception, 2}} | _] = recorded!()
+    assert [%MissedRead{reason: {:exception, 2}, meter_serial: "SIM-3"} | _] = recorded!()
   end
 
   test "a mismatched meter is checked every round and read once it matches" do
@@ -81,13 +84,66 @@ defmodule Alavi.Poller.IdentityTest do
     end)
   end
 
-  test "a matching meter is checked once per connection, not every round" do
-    sim = poll!([sim_meter(1, "elite_440")], [meter(1, "elite_440")], %{"interval_ms" => 10})
+  test "identity is read every round: a product code that stops matching is missed" do
+    capture_log(fn ->
+      sim = poll!([sim_meter(1, "elite_440")], [meter(1, "elite_440")], %{"interval_ms" => 10})
 
-    assert [%Reading{} | _] = recorded!()
-    # A product code that no longer matches goes unseen while the connection holds.
-    Simulator.identify(sim, 1, :product_code, "ELITE440-444")
-    assert [%Reading{} | _] = recorded!()
-    assert [%Reading{} | _] = recorded!()
+      assert [%Reading{product_code: "ELITE440-445"} | _] = recorded!()
+      Simulator.identify(sim, 1, :product_code, "ELITE440-444")
+      await_unit!(1, &match?([%MissedRead{reason: {:profile_mismatch, _}} | _], &1))
+    end)
+  end
+
+  test "readings carry the serial read in their round, so a swapped meter's carry its own" do
+    capture_log(fn ->
+      sim = poll!([sim_meter(1, "elite_440")], [meter(1, "elite_440")], %{"interval_ms" => 10})
+
+      assert [%Reading{meter_serial: "SIM-1"} | _] = recorded!()
+      Simulator.identify(sim, 1, :serial, "SWAP-1")
+      events = await_unit!(1, &match?([%Reading{meter_serial: "SWAP-1"} | _], &1))
+      assert Enum.all?(events, &match?(%Reading{meter_serial: "SWAP-1"}, &1))
+    end)
+  end
+
+  test "with no serial configured, readings carry the serial read" do
+    poll!([sim_meter(3, "elite_500")], [Map.delete(meter(3, "elite_500"), "serial")])
+    events = recorded!()
+    assert length(events) == 4
+
+    assert Enum.all?(
+             events,
+             &match?(%Reading{meter_serial: "SIM-3", product_code: "E500C-5102"}, &1)
+           )
+  end
+
+  test "a serial other than the configured one is logged, and readings go under the one read" do
+    log =
+      capture_log(fn ->
+        poll!([sim_meter(1, "elite_440")], [meter(1, "elite_440", %{"serial" => "CFG-1"})])
+        events = recorded!()
+        assert Enum.all?(events, &match?(%Reading{meter_serial: "SIM-1"}, &1))
+      end)
+
+    assert log =~ ~s(unit 1: serial "SIM-1" read, "CFG-1" configured)
+  end
+
+  test "a failed serial read misses the round, under no serial" do
+    poll!([sim_meter(1, "elite_440", serial: :absent)], [meter(1, "elite_440")])
+    events = recorded!()
+    assert length(events) == 2
+
+    assert Enum.all?(
+             events,
+             &match?(%MissedRead{reason: {:exception, 2}, meter_serial: nil}, &1)
+           )
+  end
+
+  test "a serial with nothing printable in it misses the round, under no serial" do
+    capture_log(fn ->
+      poll!([sim_meter(1, "elite_440", serial: "")], [meter(1, "elite_440")])
+
+      assert [%MissedRead{reason: {:profile_mismatch, "serial " <> _}, meter_serial: nil} | _] =
+               recorded!()
+    end)
   end
 end

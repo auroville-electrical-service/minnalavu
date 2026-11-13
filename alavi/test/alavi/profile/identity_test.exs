@@ -127,6 +127,22 @@ defmodule Alavi.Profile.IdentityTest do
     end
   end
 
+  describe "observed/2" do
+    test "reads cut short observe what was read, and nil for the rest" do
+      identity =
+        identity!(%{"product_code" => @product, "serial" => @serial, "energy_unit" => @unit})
+
+      assert Identity.observed(identity, %{}) == @none
+
+      assert Identity.observed(identity, %{
+               product_code: {:ok, words("ELITE440-445")},
+               serial: {:ok, words("SIM-1", 4)}
+             }) == %{serial: "SIM-1", product_code: "ELITE440-445"}
+
+      assert Identity.observed(identity, %{product_code: {:error, :timeout}}) == @none
+    end
+  end
+
   describe "reads/1" do
     test "reads list the product code, then the serial, then the energy unit" do
       identity =

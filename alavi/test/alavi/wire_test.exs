@@ -14,6 +14,7 @@ defmodule Alavi.WireTest do
         endpoint: @endpoint,
         unit_id: 9,
         meter_serial: "SIM-9",
+        product_code: "ELITE440-445",
         profile: "elite_440",
         register_key: "active_energy_import",
         timestamp: ~U[2026-11-01 00:00:00Z],
@@ -24,6 +25,9 @@ defmodule Alavi.WireTest do
 
       assert %{"value" => "1234.500"} = Reading.to_wire(reading)
       assert %{"value" => "1000"} = Reading.to_wire(%{reading | value: Decimal.new("1E+3")})
+
+      assert %{"meter_serial" => "SIM-9", "product_code" => "ELITE440-445"} =
+               Reading.to_wire(reading)
     end
   end
 
@@ -44,6 +48,12 @@ defmodule Alavi.WireTest do
 
     defp reason_of(reason) do
       missed(reason) |> MissedRead.to_wire() |> Map.take(["reason", "exception_code", "detail"])
+    end
+
+    test "a missed read with no serial read carries null, and never a product code" do
+      wire = %{missed(:timeout) | meter_serial: nil} |> MissedRead.to_wire()
+      assert %{"meter_serial" => nil} = wire
+      refute Map.has_key?(wire, "product_code")
     end
 
     test "a Modbus exception is named, with its code beside it" do

@@ -56,9 +56,39 @@ defmodule Alavi.ConfigTest do
        "endpoints[0]: unit_id 1 appears more than once"},
       {"a repeated endpoint", ["endpoints", 1, "port"], 502,
        "endpoint 127.0.0.1:502 appears more than once"},
-      {"a repeated serial", ["endpoints", 1, "meters", 0, "serial"], "SIM-elite_440-1",
-       ~s(serial "SIM-elite_440-1" appears more than once)}
+      {"a repeated serial", ["endpoints", 1, "meters", 0, "serial"], "SIM-1",
+       ~s(serial "SIM-1" appears more than once)},
+      {"an empty serial", ["endpoints", 0, "meters", 0, "serial"], "",
+       "meters[0]: serial must be a non-empty string"},
+      {"a serial with a surrounding space", ["endpoints", 0, "meters", 0, "serial"], "SIM-1 ",
+       ~s(serial "SIM-1 " is not printable ASCII without surrounding spaces)},
+      {"a serial longer than its registers hold", ["endpoints", 0, "meters", 0, "serial"],
+       "SIM-00001", ~s(longer than the 8 characters profile elite_440's serial registers hold)}
     ]
+
+    test "a meter's serial is optional, and meters without one do not clash" do
+      json =
+        doc([endpoint(502, "tcp", [meter(1, "elite_440"), meter(3, "elite_500")])])
+        |> update_in(
+          ["endpoints", Access.at(0), "meters", Access.all()],
+          &Map.delete(&1, "serial")
+        )
+
+      assert {:ok, %Config{endpoints: [%Endpoint{meters: meters}]}} =
+               Config.parse(json, profiles())
+
+      assert Enum.map(meters, & &1.serial) == [nil, nil]
+    end
+
+    test "rejects a profile that does not read the serial or the product code" do
+      for check <- [:serial, :product_code] do
+        profiles =
+          update_in(profiles(), ["elite_440", Access.key!(:identity)], &%{&1 | check => nil})
+
+        assert {:error, reason} = Config.parse(valid(), profiles)
+        assert reason =~ "profile elite_440 has no identity.serial or identity.product_code check"
+      end
+    end
 
     for {name, path, value, message} <- @broken do
       test "rejects #{name}" do

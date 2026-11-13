@@ -10,16 +10,24 @@ export interface Endpoint {
   readonly port: number;
 }
 
-/** A meter as the collector observes it. */
+/** A meter as the collector observes it in one round. */
 export interface Meter {
   readonly endpoint: Endpoint;
   readonly unitId: number;
-  readonly serial: string;
+  /** The serial the meter reported this round, never one configured; null when none was read. */
+  readonly serial: string | null;
   readonly profile: string;
 }
 
+/** A meter whose identity was read and passed this round: only such a meter has readings. */
+export interface IdentifiedMeter extends Meter {
+  readonly serial: string;
+  /** The product code the meter reported this round. */
+  readonly productCode: string;
+}
+
 export interface Reading {
-  readonly meter: Meter;
+  readonly meter: IdentifiedMeter;
   readonly registerKey: string;
   /** The collector's clock when the reply arrived. */
   readonly at: Date;
@@ -82,7 +90,7 @@ export interface Batch {
 
 // contract: test/batch.test.ts "readRegister"
 export const readRegister = (
-  meter: Meter,
+  meter: IdentifiedMeter,
   register: Pick<Register, "key" | "type" | "word_order" | "decimals" | "unit">,
   words: readonly number[],
   at: Date,
@@ -115,6 +123,7 @@ const meterJson = (meter: Meter, registerKey: string, at: Date) => ({
 
 const readingJson = (r: Reading) => ({
   ...meterJson(r.meter, r.registerKey, r.at),
+  product_code: r.meter.productCode,
   raw_words: [...r.rawWords],
   value: r.value,
   unit: r.unit,

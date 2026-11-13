@@ -34,11 +34,12 @@ defmodule Alavi.PollerCase do
     |> Map.merge(changes)
   end
 
+  @doc "A config meter entry expecting the serial a simulated meter reports by default."
   @spec meter(1..247, String.t(), map()) :: map()
   def meter(unit_id, profile, changes \\ %{}),
     do:
       Map.merge(
-        %{"unit_id" => unit_id, "serial" => "SIM-#{profile}-#{unit_id}", "profile" => profile},
+        %{"unit_id" => unit_id, "serial" => "SIM-#{unit_id}", "profile" => profile},
         changes
       )
 

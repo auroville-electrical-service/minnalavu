@@ -163,7 +163,7 @@
           "format": "date-time"
         },
         "reason": {
-          "description": "unreachable: the endpoint could not be connected to; decode: the meter answered with words that do not decode; profile_mismatch: the meter's product code or energy unit setting is not its profile's, so none of its registers were read (see detail); exception: a Modbus exception response (see exception_code); the others are failures of the read itself.",
+          "description": "unreachable: the endpoint could not be connected to; decode: the meter answered with words that do not decode; profile_mismatch: the meter's product code or energy unit setting is not its profile's, or its serial is empty or not printable, so none of its registers were read (see detail); exception: a Modbus exception response (see exception_code); the others are failures of the read itself.",
           "enum": [
             "timeout",
             "closed",

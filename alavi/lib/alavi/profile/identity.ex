@@ -3,7 +3,7 @@ defmodule Alavi.Profile.Identity do
   What a meter must report before its profile's registers are trusted, parsed
   from a profile's `identity` section. Every check is optional per profile.
   Pure: `reads/1` lists what to read, `verdict/2` judges what came back and
-  says what the meter reported.
+  says what the meter reported, and `observed/2` says it for reads cut short.
   """
 
   alias Alavi.Config.Fields
@@ -53,8 +53,8 @@ defmodule Alavi.Profile.Identity do
   @type outcome :: :ok | {:mismatch, String.t()} | {:error, Client.error()}
   @typedoc """
   The serial and product code as the meter reported them, whatever the
-  outcome: nil where the profile has no such check, the read failed, or the
-  text is empty or not printable ASCII.
+  outcome: nil where the profile has no such check, the read failed or was
+  not made, or the text is empty or not printable ASCII.
   """
   @type observed :: %{serial: String.t() | nil, product_code: String.t() | nil}
   @type verdict :: {outcome(), observed()}
@@ -98,6 +98,14 @@ defmodule Alavi.Profile.Identity do
   def verdict(%__MODULE__{} = identity, results),
     do: {outcome(identity, results), observed(identity, results)}
 
+  # contract: test/alavi/profile/identity_test.exs "observed/2"
+  @spec observed(t(), %{optional(check()) => result()}) :: observed()
+  def observed(%__MODULE__{} = identity, results) do
+    Map.new([:serial, :product_code], fn check ->
+      {check, Map.fetch!(identity, check) && observe(Map.get(results, check))}
+    end)
+  end
+
   defp outcome(identity, results) do
     Enum.reduce_while(reads(identity), :ok, fn {check, _, _, _}, :ok ->
       case judge(check, Map.fetch!(identity, check), Map.fetch!(results, check)) do
@@ -107,14 +115,9 @@ defmodule Alavi.Profile.Identity do
     end)
   end
 
-  defp observed(identity, results) do
-    Map.new([:serial, :product_code], fn check ->
-      {check, Map.fetch!(identity, check) && observe(Map.fetch!(results, check))}
-    end)
-  end
-
   defp observe({:ok, words}), do: words |> ascii() |> printable()
   defp observe({:error, _}), do: nil
+  defp observe(nil), do: nil
 
   defp specs(%__MODULE__{} = identity),
     do: for(check <- @checks, spec = Map.fetch!(identity, check), spec != nil, do: spec)

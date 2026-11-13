@@ -50,6 +50,7 @@ defmodule Alavi.UplinkTest do
         endpoint: %{host: "10.0.0.21", port: 502},
         unit_id: unit_id,
         meter_serial: "SIM-#{unit_id}",
+        product_code: "ELITE440-445",
         profile: "elite_440",
         register_key: key,
         timestamp: ~U[2026-11-01 00:00:00.123456Z],

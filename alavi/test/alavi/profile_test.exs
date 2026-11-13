@@ -64,7 +64,7 @@ defmodule Alavi.ProfileTest do
     end
   end
 
-  test "contract fixture values decode from their raw words" do
+  test "contract fixture values decode from their raw words, under accepted product codes" do
     fixture =
       @contract |> Path.join("fixtures/batch.v1.basic.json") |> File.read!() |> JSON.decode!()
 
@@ -75,6 +75,7 @@ defmodule Alavi.ProfileTest do
       assert {:ok, value} = Decode.value(register, reading["raw_words"])
       assert Decimal.to_string(value) == reading["value"]
       assert register.unit == reading["unit"]
+      assert reading["product_code"] in profile.identity.product_code.accept
     end
   end
 

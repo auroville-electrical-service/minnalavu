@@ -35,6 +35,7 @@ defmodule Alavi.BufferTest do
       endpoint: %{host: "127.0.0.1", port: 5020},
       unit_id: unit_id,
       meter_serial: "SIM-#{unit_id}",
+      product_code: "ELITE440-445",
       profile: "elite_440",
       register_key: key,
       timestamp: ts,

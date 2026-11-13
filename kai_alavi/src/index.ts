@@ -4,6 +4,7 @@ export {
   batchJson,
   type Clock,
   type Endpoint,
+  type IdentifiedMeter,
   type Meter,
   type MissedRead,
   type MissReason,

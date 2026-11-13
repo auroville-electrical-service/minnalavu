@@ -63,7 +63,7 @@
     { "name": "a detail of exactly 200 characters", "changes": [{ "path": ["missed_reads", 1, "detail"], "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" }] },
     { "name": "an integer written with a zero fraction", "changes": [{ "path": ["readings", 0, "endpoint", "port"], "value": 502.0 }] },
     { "name": "a timestamp in lower case", "changes": [{ "path": ["sent_at"], "value": "2026-11-01t00:05:00z" }] },
-    { "name": "a reading with the product code read", "changes": [{ "path": ["readings", 0, "product_code"], "value": "ELITE440-445" }, { "path": ["readings", 1, "product_code"], "value": "E500C-5102" }] },
+    { "name": "a reading without a product code", "changes": [{ "path": ["readings", 0, "product_code"], "delete": true }] },
     { "name": "a missed read with no serial read", "changes": [{ "path": ["missed_reads", 1, "meter_serial"], "value": null }] },
     { "name": "a value with many digits", "changes": [{ "path": ["readings", 0, "value"], "value": "-123456789012345678901234.123456789012" }] }
   ]

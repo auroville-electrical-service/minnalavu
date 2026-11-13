@@ -7,6 +7,7 @@ import {
   type Batch,
   batchJson,
   findRegister,
+  type IdentifiedMeter,
   type Meter,
   type MissedRead,
   type MissReason,
@@ -29,14 +30,20 @@ const register = (profile: string, key: string) => {
 };
 
 const at = (s: string) => new Date(`2026-11-01T00:00:0${s}Z`);
-const meter = (host: string, unitId: number, serial: string, profile: string): Meter => ({
+const meter = (host: string, unitId: number, serial: string | null, profile: string): Meter => ({
   endpoint: { host, port: 502 },
   unitId,
   serial,
   profile,
 });
 
-const reading = (m: Meter, key: string, words: number[], second: string) => {
+const identified = (unitId: number, serial: string, profile: string, productCode: string): IdentifiedMeter => ({
+  ...meter("10.0.0.21", unitId, serial, profile),
+  serial,
+  productCode,
+});
+
+const reading = (m: IdentifiedMeter, key: string, words: number[], second: string) => {
   const r = readRegister(m, register(m.profile, key), words, at(second), 1);
   if (!r.ok) throw new Error(`did not decode: ${JSON.stringify(r.error.reason)}`);
   return r.value;
@@ -66,8 +73,13 @@ const basic: Batch = {
     quarantined: 0,
   },
   readings: [
-    reading(meter("10.0.0.21", 1, "SIM-445-0001", "elite_440"), "active_energy_import", [20480, 17562], "0"),
-    reading(meter("10.0.0.21", 3, "SIM-500-0001", "elite_500"), "active_energy_export", [0, 0, 18944, 16531], "1"),
+    reading(identified(1, "SIM-445-0001", "elite_440", "ELITE440-445"), "active_energy_import", [20480, 17562], "0"),
+    reading(
+      identified(3, "SIM-500-0001", "elite_500", "E500C-5102"),
+      "active_energy_export",
+      [0, 0, 18944, 16531],
+      "1",
+    ),
   ],
   missedReads: [
     exceptionMiss,
@@ -112,6 +124,24 @@ describe("batchJson", () => {
     expect(batch.missed_reads.map((m) => m.reason)).toEqual(reasons.map((r) => r.kind));
   });
 
+  test("a missed read with no serial read carries null, and never a product code", () => {
+    const missed: MissedRead = { ...exceptionMiss, meter: meter("10.0.0.21", 9, null, "elite_440") };
+    const batch = batchJson({ ...basic, missedReads: [missed] });
+    expect(validate(batch) ? [] : validate.errors).toEqual([]);
+    expect(batch.missed_reads[0]?.meter_serial).toBeNull();
+    expect(batch.missed_reads[0]).not.toHaveProperty("product_code");
+  });
+
+  test("a missed read from an identified meter leaves its product code behind", () => {
+    const m = identified(1, "SIM-445-0001", "elite_440", "ELITE440-445");
+    const r = readRegister(m, register("elite_440", "active_energy_import"), [0, 0x7fc0], at("4"), 1);
+    if (r.ok) throw new Error("decoded words that must not decode");
+    const batch = batchJson({ ...basic, missedReads: [r.error] });
+    expect(validate(batch) ? [] : validate.errors).toEqual([]);
+    expect(batch.missed_reads[0]).toMatchObject({ meter_serial: "SIM-445-0001" });
+    expect(batch.missed_reads[0]).not.toHaveProperty("product_code");
+  });
+
   test("a socket detail is cut to the schema's 200 characters", () => {
     const missed = { ...exceptionMiss, reason: { kind: "socket", detail: "x".repeat(500) } } satisfies MissedRead;
     expect(batchJson({ ...basic, missedReads: [missed] }).missed_reads[0]?.detail).toHaveLength(200);
@@ -134,7 +164,7 @@ describe("batchJson", () => {
 });
 
 describe("readRegister", () => {
-  const m = meter("10.0.0.21", 1, "SIM-445-0001", "elite_440");
+  const m = identified(1, "SIM-445-0001", "elite_440", "ELITE440-445");
 
   test("words that do not decode are a missed read that keeps them", () => {
     const r = readRegister(m, register("elite_440", "active_energy_import"), [0, 0x7fc0], at("4"), 2);

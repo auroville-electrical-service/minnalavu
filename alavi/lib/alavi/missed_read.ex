@@ -1,8 +1,9 @@
 defmodule Alavi.MissedRead do
   @moduledoc """
-  A register the poller was due to read and did not, with why. `attempts` 0
-  means it was not tried: the meter or endpoint was already known unreachable
-  this round, so the poller moved on to save bus time.
+  A register the poller was due to read and did not, with why. `meter_serial`
+  is the serial the meter reported that round, or nil when none was read.
+  `attempts` 0 means it was not tried: the meter or endpoint was already known
+  unreachable, or did not match its profile, this round.
   """
 
   alias Alavi.{Decode, Modbus.Client, Reading}
@@ -29,7 +30,7 @@ defmodule Alavi.MissedRead do
   @type t :: %__MODULE__{
           endpoint: Reading.endpoint(),
           unit_id: 1..247,
-          meter_serial: String.t(),
+          meter_serial: String.t() | nil,
           profile: String.t(),
           register_key: String.t(),
           timestamp: DateTime.t(),

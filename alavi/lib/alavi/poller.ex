@@ -54,7 +54,6 @@ defmodule Alavi.Poller do
       clock: clock,
       raw_log: raw_log,
       client: nil,
-      confirmed: MapSet.new(),
       down: nil,
       due: Map.new(endpoint.meters, &{&1.unit_id, now}),
       backoff: endpoint.reconnect_backoff_ms.min,
@@ -78,8 +77,11 @@ defmodule Alavi.Poller do
   defp poll_meter(meter, state) do
     {events, state} =
       case identify(meter, state) do
-        {:ok, state} -> read_registers(meter, state)
-        {{:missed, reason, n}, state} -> {missed_all(state, meter, reason, n), state}
+        {{:ok, seen}, state} ->
+          read_registers(meter, seen, state)
+
+        {{:missed, reason, n, serial}, state} ->
+          {missed_all(state, meter, serial, reason, n), state}
       end
 
     # A refusal is the sink's to report (see `Alavi.Sink`); the round goes on.
@@ -87,89 +89,111 @@ defmodule Alavi.Poller do
     state
   end
 
-  defp read_registers(meter, state) do
-    skip = if state.down, do: {:unreachable, state.down}
-
+  defp read_registers(meter, seen, state) do
     {events, {state, _skip}} =
-      Enum.map_reduce(meter.profile.registers, {state, skip}, &register(&1, &2, meter))
+      Enum.map_reduce(meter.profile.registers, {state, nil}, &register(&1, &2, meter, seen))
 
     {events, state}
   end
 
   # The attempts were made once, for the meter: they count on its first register.
-  defp missed_all(state, meter, reason, n) do
+  defp missed_all(state, meter, serial, reason, n) do
     [first | rest] = meter.profile.registers
 
     [
-      missed(state, meter, first, reason, n)
-      | Enum.map(rest, &missed(state, meter, &1, reason, 0))
+      missed(state, meter, serial, first, reason, n)
+      | Enum.map(rest, &missed(state, meter, serial, &1, reason, 0))
     ]
   end
 
-  # An unreachable endpoint is left to `read_registers/2`, which records it.
-  defp identify(%Meter{unit_id: unit, profile: profile}, state) do
-    cond do
-      state.down != nil -> {:ok, state}
-      Identity.empty?(profile.identity) -> {:ok, state}
-      MapSet.member?(state.confirmed, unit) -> {:ok, state}
-      true -> check_identity(unit, profile.identity, state)
+  # Read every round, so each reading carries what the meter reported in its own round.
+  defp identify(_meter, %{down: down} = state) when down != nil,
+    do: {{:missed, {:unreachable, down}, 0, nil}, state}
+
+  defp identify(meter, state) do
+    case read_identity(meter, state) do
+      {{:missed, _reason, _n, _serial} = missed, state} -> {missed, state}
+      {results, state} -> judged(Identity.verdict(meter.profile.identity, results), meter, state)
     end
   end
 
-  defp check_identity(unit, identity, state) do
+  defp read_identity(%Meter{unit_id: unit, profile: %{identity: identity}}, state) do
     identity
     |> Identity.reads()
-    |> Enum.reduce_while({%{}, state}, fn {check, table, address, count}, {results, state} ->
-      case read_words(state, {unit, table, address, count}, 1) do
-        {{:ok, words, _n}, state} ->
-          {:cont, {Map.put(results, check, {:ok, words}), state}}
+    |> Enum.reduce_while({%{}, state}, &identity_read(&1, &2, unit, identity))
+  end
 
-        {{:skip_register, error, _n}, state} ->
-          {:cont, {Map.put(results, check, {:error, error}), state}}
+  defp identity_read({check, table, address, count}, {results, state}, unit, identity) do
+    case read_words(state, {unit, table, address, count}, 1) do
+      {{:ok, words, _n}, state} ->
+        {:cont, {Map.put(results, check, {:ok, words}), state}}
 
-        {{:skip_meter, reason, n}, state} ->
-          {:halt, {{:missed, reason, n}, state}}
-      end
-    end)
-    |> case do
-      {{:missed, _reason, _n} = missed, state} ->
-        {missed, state}
+      {{:skip_register, error, _n}, state} ->
+        {:cont, {Map.put(results, check, {:error, error}), state}}
 
-      {results, state} ->
-        {outcome, _observed} = Identity.verdict(identity, results)
-        judged(outcome, unit, state)
+      {{:skip_meter, reason, n}, state} ->
+        serial = Identity.observed(identity, results).serial
+        {:halt, {{:missed, reason, n, serial}, state}}
     end
   end
 
-  defp judged(:ok, unit, state),
-    do: {:ok, %{state | confirmed: MapSet.put(state.confirmed, unit)}}
-
-  defp judged({:mismatch, detail}, unit, state) do
-    Logger.warning("alavi poller #{label(state)} unit #{unit}: profile mismatch: #{detail}")
-    {{:missed, {:profile_mismatch, detail}, 0}, state}
+  defp judged({outcome, observed}, meter, state) do
+    compare_serial(meter, observed.serial, state)
+    outcome(outcome, observed, meter, state)
   end
 
-  defp judged({:error, error}, _unit, state), do: {{:missed, error, 0}, state}
+  defp outcome(:ok, %{serial: serial, product_code: code} = seen, _meter, state)
+       when is_binary(serial) and is_binary(code),
+       do: {{:ok, seen}, state}
+
+  defp outcome({:mismatch, detail}, observed, meter, state) do
+    Logger.warning(
+      "alavi poller #{label(state)} unit #{meter.unit_id}: profile mismatch: #{detail}"
+    )
+
+    {{:missed, {:profile_mismatch, detail}, 0, observed.serial}, state}
+  end
+
+  defp outcome({:error, error}, observed, _meter, state),
+    do: {{:missed, error, 0, observed.serial}, state}
+
+  defp compare_serial(%Meter{serial: expected} = meter, read, state)
+       when is_binary(expected) and is_binary(read) and expected != read do
+    Logger.warning(
+      "alavi poller #{label(state)} unit #{meter.unit_id}: serial #{inspect(read)} read, " <>
+        "#{inspect(expected)} configured; its readings go under the serial read"
+    )
+  end
+
+  defp compare_serial(_meter, _read, _state), do: :ok
 
   defp label(%{endpoint: %Endpoint{host: host, port: port}}), do: "#{host}:#{port}"
 
-  defp register(reg, {state, nil}, meter) do
+  defp register(reg, {state, nil}, meter, seen) do
     read = {meter.unit_id, reg.table, reg.address, Register.word_count(reg)}
 
     case read_words(state, read, 1) do
-      {{:ok, words, n}, state} -> {decoded(state, meter, reg, words, n), {state, nil}}
-      {{:skip_register, error, n}, state} -> {missed(state, meter, reg, error, n), {state, nil}}
-      {{:skip_meter, reason, n}, state} -> {missed(state, meter, reg, reason, n), {state, reason}}
+      {{:ok, words, n}, state} ->
+        {decoded(state, meter, seen, reg, words, n), {state, nil}}
+
+      {{:skip_register, error, n}, state} ->
+        {missed(state, meter, seen.serial, reg, error, n), {state, nil}}
+
+      {{:skip_meter, reason, n}, state} ->
+        {missed(state, meter, seen.serial, reg, reason, n), {state, reason}}
     end
   end
 
-  defp register(reg, {state, skip}, meter),
-    do: {missed(state, meter, reg, skip, 0), {state, skip}}
+  defp register(reg, {state, skip}, meter, seen),
+    do: {missed(state, meter, seen.serial, reg, skip, 0), {state, skip}}
 
-  defp decoded(state, meter, reg, words, n) do
+  defp decoded(state, meter, seen, reg, words, n) do
     case Decode.value(reg, words) do
-      {:ok, value} -> reading(state, meter, reg, words, value)
-      {:error, reason} -> %{missed(state, meter, reg, {:decode, reason}, n) | raw_words: words}
+      {:ok, value} ->
+        reading(state, meter, seen, reg, words, value)
+
+      {:error, reason} ->
+        %{missed(state, meter, seen.serial, reg, {:decode, reason}, n) | raw_words: words}
     end
   end
 
@@ -235,7 +259,7 @@ defmodule Alavi.Poller do
 
     case result do
       {:ok, client} ->
-        {:ok, %{state | client: client, confirmed: MapSet.new()}}
+        {:ok, %{state | client: client}}
 
       {:error, reason} ->
         Logger.warning(
@@ -251,11 +275,12 @@ defmodule Alavi.Poller do
 
   defp client_opts(%Endpoint{framing: :rtu_over_tcp} = e), do: [timeout: e.timeout_ms]
 
-  defp reading(state, %Meter{} = meter, %Register{} = reg, words, value) do
+  defp reading(state, %Meter{} = meter, seen, %Register{} = reg, words, value) do
     %Reading{
       endpoint: endpoint_ref(state.endpoint),
       unit_id: meter.unit_id,
-      meter_serial: meter.serial,
+      meter_serial: seen.serial,
+      product_code: seen.product_code,
       profile: meter.profile.name,
       register_key: reg.key,
       timestamp: state.clock.(),
@@ -265,11 +290,11 @@ defmodule Alavi.Poller do
     }
   end
 
-  defp missed(state, %Meter{} = meter, %Register{} = reg, reason, attempts) do
+  defp missed(state, %Meter{} = meter, serial, %Register{} = reg, reason, attempts) do
     %MissedRead{
       endpoint: endpoint_ref(state.endpoint),
       unit_id: meter.unit_id,
-      meter_serial: meter.serial,
+      meter_serial: serial,
       profile: meter.profile.name,
       register_key: reg.key,
       timestamp: state.clock.(),
