@@ -89,6 +89,14 @@ defmodule Alavi.UplinkTest do
     Map.put(request, :json, JSON.decode!(request.body))
   end
 
+  # The next request carrying readings, past any heartbeats.
+  defp batch_request! do
+    case request!().json do
+      %{"readings" => []} -> batch_request!()
+      json -> json
+    end
+  end
+
   defp await_backlog!(buffer, pred, tries \\ 100) do
     backlog = Buffer.backlog(buffer)
 
@@ -307,6 +315,36 @@ defmodule Alavi.UplinkTest do
 
       assert log =~ "heartbeat" and log =~ "HTTP 503"
       assert %{batches: 0, quarantined: 0} = Buffer.backlog(ctx.buffer)
+    end
+
+    test "a heartbeat stored after failures resets the backoff for the next batch", ctx do
+      # Counted apart: three heartbeats fail, then are stored; a batch fails once.
+      sent = :counters.new(2, [])
+      failures = %{1 => 3, 2 => 1}
+
+      answer = fn %{body: body} = request ->
+        slot = if JSON.decode!(body)["readings"] == [], do: 1, else: 2
+        :counters.add(sent, slot, 1)
+
+        if :counters.get(sent, slot) <= failures[slot],
+          do: {503, ""},
+          else: TestServer.stored().(request)
+      end
+
+      server = server!([answer])
+
+      uplink!(ctx.buffer, TestServer.port(server),
+        heartbeat_ms: 1,
+        backoff_ms: %{min: 50, max: 1_000}
+      )
+
+      # Waits of 50, 100 and 200 ms after the failures leave the next at 400.
+      for _ <- 1..4, do: assert(request!().json["readings"] == [])
+      record!(ctx.buffer, 1)
+      first = batch_request!()
+      at = System.monotonic_time(:millisecond)
+      assert batch_request!()["batch_id"] == first["batch_id"]
+      assert System.monotonic_time(:millisecond) - at < 300
     end
 
     test "jobs and unknown requests in an answer are logged when there is no intake", ctx do

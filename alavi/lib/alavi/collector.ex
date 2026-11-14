@@ -16,8 +16,9 @@ defmodule Alavi.Collector do
   `intake` (the collector supplies them), or `:none` for no uplink (tests that
   inspect the buffer); the pollers nudge it after a read on demand only if it
   has a `name`. Its heartbeat is due after the shortest polling interval of
-  any meter in the config without an answer from the server: one round of the
-  meter polled most often. Its intake runs the jobs the server lists only if
+  any meter this collector polls without an answer from the server: one round
+  of the meter polled most often; with no meter polled here, after the
+  uplink's `idle_ms`. Its intake runs the jobs the server lists only if
   `pollers` is given, for it reaches them by that name. `clock_status` is the
   options of an `Alavi.Clock.Windows` to start first, or `:none`; the buffer's
   `clock_status` must read it if there is one. `pollers` is the name to
@@ -85,7 +86,7 @@ defmodule Alavi.Collector do
           supplied = [
             buffer: Keyword.fetch!(buffer, :name),
             status: status,
-            heartbeat_ms: heartbeat_ms(config),
+            heartbeat_ms: heartbeat_ms(config, Keyword.fetch!(uplink, :idle_ms)),
             intake: intake(Keyword.get(opts, :pollers), config)
           ]
 
@@ -114,8 +115,13 @@ defmodule Alavi.Collector do
     )
   end
 
-  defp heartbeat_ms(%Config{endpoints: endpoints}),
-    do: endpoints |> Enum.flat_map(& &1.meters) |> Enum.map(& &1.interval_ms) |> Enum.min()
+  defp heartbeat_ms(%Config{endpoints: endpoints}, idle_ms) do
+    endpoints
+    |> Enum.reject(& &1.polled_by_other_system)
+    |> Enum.flat_map(& &1.meters)
+    |> Enum.map(& &1.interval_ms)
+    |> Enum.min(fn -> idle_ms end)
+  end
 
   defp intake(nil, _config), do: :none
   defp intake(pollers, config), do: Intake.new(pollers, config)

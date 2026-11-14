@@ -69,7 +69,8 @@ defmodule Alavi.Pollers do
              | :restarting
              | :poller_down
              | :no_units
-             | {:unknown_units, [term()]}}
+             | {:unknown_units, [term()]}
+             | :busy}
   def read_now(pollers, {host, port}, units, request_id \\ nil) do
     case List.keyfind(Supervisor.which_children(pollers), {Poller, host, port}, 0) do
       {_id, pid, _type, _modules} when is_pid(pid) -> call(pid, units, request_id)

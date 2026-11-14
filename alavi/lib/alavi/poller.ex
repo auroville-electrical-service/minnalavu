@@ -14,7 +14,8 @@ defmodule Alavi.Poller do
   `:step` message, or the poll timer while nothing is due.
 
   A read on demand (`read_now/2`) is a job of its own, run before the rest of
-  a round under way, which then resumes where it stopped; it leaves when each
+  a round under way, which then resumes where it stopped, unless a meter is
+  overdue by its interval (`Alavi.Poller.Schedule.next/4`); it leaves when each
   meter is next due as it was. Its events go to the status page as reads, not
   as a round (`Alavi.Status.on_demand/2`), so that a round's outcomes stay a
   whole chain's, and once they are recorded the uplink is nudged
@@ -53,8 +54,9 @@ defmodule Alavi.Poller do
 
   # contract: test/alavi/read_on_demand_test.exs "read_now/2"
   @doc """
-  Queue a read on demand of the meters with these unit IDs. It runs next,
-  once the step under way ends, and the caller is then sent
+  Queue a read on demand of the meters with these unit IDs, or `:busy` past
+  the bound of `Alavi.Poller.Schedule.queue_read/2`. It runs next, once the
+  step under way ends, unless a round is overdue, and the caller is then sent
   `{:alavi_read, ref, events}`: the readings and missed reads it recorded,
   in the order read. The reply waits for that step.
 
@@ -63,7 +65,7 @@ defmodule Alavi.Poller do
   Its readings and missed reads carry `request_id`.
   """
   @spec read_now(GenServer.server(), [1..247], String.t() | nil) ::
-          {:ok, reference()} | {:error, :no_units | {:unknown_units, [term()]}}
+          {:ok, reference()} | {:error, :no_units | {:unknown_units, [term()]} | :busy}
   def read_now(server, units, request_id \\ nil),
     do: GenServer.call(server, {:read_now, units, request_id}, :infinity)
 
@@ -107,8 +109,11 @@ defmodule Alavi.Poller do
   def handle_call({:read_now, units, request_id}, {pid, _tag}, state) do
     ref = make_ref()
 
-    case Job.read_on_demand(state.endpoint.meters, units, now(), {pid, ref}, request_id) do
-      {:ok, job} -> queued(%{state | queue: state.queue ++ [job]}, ref)
+    with {:ok, job} <-
+           Job.read_on_demand(state.endpoint.meters, units, now(), {pid, ref}, request_id),
+         {:ok, queue} <- Schedule.queue_read(state.queue, job) do
+      queued(%{state | queue: queue}, ref)
+    else
       {:error, _reason} = error -> {:reply, error, state}
     end
   end

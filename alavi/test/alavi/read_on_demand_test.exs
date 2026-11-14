@@ -265,6 +265,27 @@ defmodule Alavi.ReadOnDemandTest do
       assert {:ok, ref} = Poller.read_now(pid, [1])
       assert [%Reading{unit_id: 1} | _] = answer!(ref)
     end
+
+    test "a ninth request while eight are queued or under way is refused as busy" do
+      {_sim, port} = start_sim!(:tcp)
+      sup = start_pollers!([chain(port)])
+      round!()
+      pid = poller!(sup)
+
+      # Suspended, the poller holds all nine calls; resumed, it runs a step of
+      # the first, and its next `:step` waits behind the other eight calls.
+      :ok = :sys.suspend(pid)
+      calls = for _ <- 1..9, do: Task.async(fn -> Poller.read_now(pid, [1, 2, 3]) end)
+
+      :ok =
+        eventually!(fn -> Process.info(pid, :message_queue_len) == {:message_queue_len, 9} end)
+
+      :ok = :sys.resume(pid)
+      replies = Enum.map(calls, &Task.await/1)
+
+      assert Enum.count(replies, &match?({:ok, _ref}, &1)) == 8
+      assert Enum.count(replies, &(&1 == {:error, :busy})) == 1
+    end
   end
 
   describe "Pollers.read_now/3" do

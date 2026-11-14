@@ -176,6 +176,43 @@ defmodule Alavi.CollectorTest do
       assert refused != [] and
                Enum.all?(refused, &(&1.kind == :missed and &1.wire["detail"] == "#{refused()}"))
     end
+
+    test "the heartbeat follows the shortest interval polled here, not another system's", ctx do
+      {_sim, port} = start_sim!(:tcp)
+      other = refusing_port!()
+
+      endpoints = [
+        endpoint(port, "tcp", [meter(1, "elite_440")]),
+        endpoint(other, "tcp", [meter(1, "elite_440", %{"serial" => "OTHER-1"})], %{
+          "polled_by_other_system" => true,
+          "interval_ms" => 100
+        })
+      ]
+
+      server = start_supervised!({TestServer, owner: self(), answers: [TestServer.stored()]})
+      start_collector!(ctx.tmp_dir, endpoints, uplink_to(TestServer.port(server)))
+
+      assert_receive {:request, _first}, 2_000
+      Process.sleep(600)
+      refute Enum.any?(bodies_now(), &heartbeat?/1)
+    end
+
+    test "with no meter polled here, the heartbeat is due after the uplink's idle_ms", ctx do
+      other = refusing_port!()
+
+      endpoints = [
+        endpoint(other, "tcp", [meter(1, "elite_440", %{"serial" => "OTHER-1"})], %{
+          "polled_by_other_system" => true
+        })
+      ]
+
+      server = start_supervised!({TestServer, owner: self(), answers: [TestServer.stored()]})
+      start_collector!(ctx.tmp_dir, endpoints, uplink_to(TestServer.port(server)))
+
+      assert_receive {:request, %{body: first}}, 1_000
+      assert_receive {:request, %{body: second}}, 1_000
+      assert heartbeat?(JSON.decode!(first)) and heartbeat?(JSON.decode!(second))
+    end
   end
 
   # Units 1 and 3, under serials unique to the endpoint, set on its simulator if it has one.
@@ -323,6 +360,17 @@ defmodule Alavi.CollectorTest do
       0 -> []
     end
   end
+
+  defp bodies_now do
+    receive do
+      {:request, %{body: body}} -> [JSON.decode!(body) | bodies_now()]
+    after
+      0 -> []
+    end
+  end
+
+  defp heartbeat?(batch),
+    do: batch["readings"] == [] and batch["missed_reads"] == [] and batch["firmware_reads"] == nil
 
   defp events(batch) do
     for {kind, field} <- [reading: "readings", missed: "missed_reads"], wire <- batch[field] do

@@ -77,6 +77,92 @@ defmodule Alavi.Poller.ScheduleTest do
     end
   end
 
+  describe "next/4, with a meter overdue by its interval" do
+    defp read(ms, units), do: elem(Job.read_on_demand(ms, units, 0, {self(), make_ref()}), 1)
+
+    test "a round due starts ahead of a read on demand once a meter is a whole interval late" do
+      [_m1, _m2, m3] = ms = meters()
+      rod = read(ms, [1])
+      due = %{1 => 60_000, 2 => 60_000, 3 => 0}
+
+      assert Schedule.next([rod], 9_999, due, ms) == {:step, rod, []}
+
+      assert {:start, %Job{kind: :poll_round, meters: [^m3], started: 10_000}} =
+               Schedule.next([rod], 10_000, due, ms)
+
+      assert {:start, %Job{kind: :poll_round}} =
+               Schedule.next([rod], 1_000_000, %{1 => 0, 2 => 0, 3 => 0}, ms)
+    end
+
+    test "a round under way is stepped ahead of reads on demand, and they keep their order" do
+      [m1, m2, _m3] = ms = meters()
+      round = [m1, m2] |> Job.poll_round(0) |> Job.polled([:read], {m1, seen(1), nil})
+      [a, b] = [read(ms, [3]), read(ms, [1])]
+      due = %{1 => 0, 2 => 0, 3 => 10_000}
+
+      assert Schedule.next([a, round, b], 60_000, due, ms) == {:step, round, [a, b]}
+    end
+
+    test "a stream of reads on demand, one more queued before every step, lets rounds run" do
+      ms = meters()
+
+      # Each step takes 1 s. The first round, over all three meters, runs at
+      # once; then reads, until unit 3 is 10 s overdue at 80 s; its round,
+      # then reads again until 100 s.
+      {_queue, _due, _now, counts} =
+        Enum.reduce(1..40, {[], %{1 => 0, 2 => 0, 3 => 0}, 60_000, %{reads: 0, rounds: 0}}, fn
+          _step, {queue, due, now, counts} ->
+            queue = queue ++ [read(ms, [3])]
+
+            case Schedule.next(queue, now, due, ms) do
+              {:start, round} ->
+                stepped(round, queue, due, now, counts)
+
+              {:step, %Job{kind: :read_on_demand}, rest} ->
+                {rest, due, now + 1_000, Map.update!(counts, :reads, &(&1 + 1))}
+
+              {:step, round, rest} ->
+                stepped(round, rest, due, now, counts)
+            end
+        end)
+
+      assert counts == %{reads: 36, rounds: 2}
+    end
+
+    # One meter step of `round`, back at the head of the queue unless it is done.
+    defp stepped(round, rest, due, now, counts) do
+      round = Job.polled(round, [:read], nil)
+
+      case Job.next(round) do
+        :done ->
+          {rest, Schedule.after_round(due, round), now + 1_000,
+           Map.update!(counts, :rounds, &(&1 + 1))}
+
+        _step ->
+          {[round | rest], due, now + 1_000, counts}
+      end
+    end
+  end
+
+  describe "queue_read/2" do
+    test "a read on demand joins the end of the queue, up to eight queued or under way" do
+      [m1 | _] = ms = meters()
+      round = Job.poll_round([m1], 0)
+      reads = for unit <- [1, 2, 3, 1, 2, 3, 1, 2], do: read(ms, [unit])
+      ninth = read(ms, [3])
+
+      assert {:ok, queue} =
+               Enum.reduce(reads, {:ok, [round]}, fn read, {:ok, queue} ->
+                 Schedule.queue_read(queue, read)
+               end)
+
+      assert queue == [round | reads]
+      assert Schedule.queue_read(queue, ninth) == {:error, :busy}
+      fewer = Enum.drop(queue, -1)
+      assert Schedule.queue_read(fewer, ninth) == {:ok, fewer ++ [ninth]}
+    end
+  end
+
   describe "after_round/2" do
     test "each meter of the round is next due an interval after the round started" do
       [m1, _m2, m3] = meters()

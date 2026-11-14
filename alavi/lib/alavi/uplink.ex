@@ -104,7 +104,7 @@ defmodule Alavi.Uplink do
 
   defp beat({:ack, answer}, batch, state) do
     Logger.debug("alavi uplink: heartbeat #{batch.id} stored")
-    {:empty, state.idle_ms, answered(answer, state)}
+    {:empty, state.idle_ms, %{answered(answer, state) | wait: state.backoff.min}}
   end
 
   defp beat({_quarantine_or_retry, why}, batch, state) do
