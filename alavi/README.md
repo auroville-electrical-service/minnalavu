@@ -42,6 +42,9 @@ From the release root, in an administrator's command prompt:
    the service runs there and a crash dump it writes there (`erl_crash.dump`)
    can hold the token:
    `icacls . /inheritance:r /grant "*S-1-5-32-544:(OI)(CI)F" /grant "*S-1-5-18:(OI)(CI)F"`.
+   Not with `/T`: that strips each file's inherited entries and leaves
+   files with none, so nothing can run `erlsrv.exe`. If it happened,
+   `icacls * /reset /T` makes every file inherit the root's again.
 2. With no service running, check the settings: `bin\alavi.bat start` runs the
    collector in the console, and a settings error is printed there. Stop it
    with Ctrl+C.
