@@ -116,8 +116,9 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
 - `health.misplaced_serials`: registered serials read within the lookback at
   a place (collector, host, port, unit) other than where the registry put them
   when each reading was taken; one row per serial and place.
-- `health.meter_firmware`: per serial, the latest names it reported, the
-  record before them, and whether they differ.
+- `health.meter_firmware`: per serial, the latest names it reported, when
+  they were first read and arrived (a resend after a restart does not move
+  that), the latest earlier record whose names differ, and whether there is one.
 - `health.problems`: one row per problem, `(kind, subject)` naming it and
   `detail` describing it now. Kinds: `collector_silent` (no upload for
   `collector_silent_after`), `meter_silent` (no reading for
@@ -131,9 +132,9 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
   `serial_at_several_places` (an unregistered serial read at more than one
   place: two meters reporting one serial, one meter reachable two ways, or a
   move; every place in its detail) and `firmware_changed` (a serial whose
-  latest names differ from its record before them, while the batch that
-  brought the latest arrived within the lookback, so a weeks-late change is
-  flagged when it arrives).
+  latest names differ from an earlier record, while the batch that first
+  brought the latest names arrived within the lookback, so a weeks-late change
+  is flagged when it arrives, and a resend neither hides nor renews it).
 - `health.thresholds`: the thresholds in force, from
   `registry.health_thresholds` (append-only; the last row set holds). Change
   them as the owner:

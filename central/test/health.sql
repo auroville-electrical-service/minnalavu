@@ -250,7 +250,11 @@ INSERT INTO b VALUES ('sqlh_c_old', pg_temp.upload('sqlh_c', '2 days', 0, 0, 0, 
 -- SQLF-0003 has one record; SQLF-0004 changed in a batch that arrived two
 -- days ago; SQLF-0005 stopped giving its module 1 name; SQLF-0006 changed and
 -- then sent the new names again; SQLF-0007 changed ten days ago, in a batch
--- that arrived five minutes ago.
+-- that arrived five minutes ago; SQLF-0008 changed and sent the new names
+-- again after a restart, both in one upload; SQLF-0009 changed in a batch
+-- that arrived three hours ago, and sent the new names again in a later one;
+-- SQLF-0000 changed in a batch that arrived two days ago, and sent the new
+-- names again in one that arrived five minutes ago.
 SELECT pg_temp.firmware(s, (SELECT batch FROM b WHERE collector = c), i, sw, f1,
                         20 + right(s, 1)::integer)
 FROM (VALUES ('SQLF-0001', 'sqlh_a', '3 days'::interval, 'SIM-SW1', 'SIM-F1'),
@@ -266,23 +270,40 @@ FROM (VALUES ('SQLF-0001', 'sqlh_a', '3 days'::interval, 'SIM-SW1', 'SIM-F1'),
              ('SQLF-0006', 'sqlh_a', '2 days', 'SIM-SW2', 'SIM-F1'),
              ('SQLF-0006', 'sqlh_a', '10 minutes', 'SIM-SW2', 'SIM-F1'),
              ('SQLF-0007', 'sqlh_a', '11 days', 'SIM-SW1', 'SIM-F1'),
-             ('SQLF-0007', 'sqlh_a', '10 days', 'SIM-SW2', 'SIM-F1')) v (s, c, i, sw, f1);
+             ('SQLF-0007', 'sqlh_a', '10 days', 'SIM-SW2', 'SIM-F1'),
+             ('SQLF-0008', 'sqlh_a', '3 days', 'SIM-SW1', 'SIM-F1'),
+             ('SQLF-0008', 'sqlh_a', '2 hours', 'SIM-SW2', 'SIM-F1'),
+             ('SQLF-0008', 'sqlh_a', '10 minutes', 'SIM-SW2', 'SIM-F1'),
+             ('SQLF-0009', 'sqlh_c', '3 days', 'SIM-SW1', 'SIM-F1'),
+             ('SQLF-0009', 'sqlh_c', '4 hours', 'SIM-SW2', 'SIM-F1'),
+             ('SQLF-0009', 'sqlh_a', '10 minutes', 'SIM-SW2', 'SIM-F1'),
+             ('SQLF-0000', 'sqlh_c_old', '3 days', 'SIM-SW1', 'SIM-F1'),
+             ('SQLF-0000', 'sqlh_c_old', '2 days', 'SIM-SW2', 'SIM-F1'),
+             ('SQLF-0000', 'sqlh_a', '10 minutes', 'SIM-SW2', 'SIM-F1')) v (s, c, i, sw, f1);
 
 SELECT pg_temp.is(
   (SELECT string_agg(format('%s %s %s %s', serial, software, coalesce(firmware_1, 'NULL'),
                             changed), ', ' ORDER BY serial)
    FROM health.meter_firmware WHERE serial LIKE 'SQLF-%'),
-  'SQLF-0001 SIM-SW2 SIM-F1 t, SQLF-0002 SIM-SW1 SIM-F1 f, SQLF-0003 SIM-SW1 SIM-F1 f, '
-  || 'SQLF-0004 SIM-SW2 SIM-F1 t, SQLF-0005 SIM-SW1 NULL t, SQLF-0006 SIM-SW2 SIM-F1 f, '
-  || 'SQLF-0007 SIM-SW2 SIM-F1 t',
-  'each serial''s latest names are shown, and whether they differ from the record before them');
+  'SQLF-0000 SIM-SW2 SIM-F1 t, SQLF-0001 SIM-SW2 SIM-F1 t, SQLF-0002 SIM-SW1 SIM-F1 f, '
+  || 'SQLF-0003 SIM-SW1 SIM-F1 f, SQLF-0004 SIM-SW2 SIM-F1 t, SQLF-0005 SIM-SW1 NULL t, '
+  || 'SQLF-0006 SIM-SW2 SIM-F1 t, SQLF-0007 SIM-SW2 SIM-F1 t, SQLF-0008 SIM-SW2 SIM-F1 t, '
+  || 'SQLF-0009 SIM-SW2 SIM-F1 t',
+  'each serial''s latest names are shown, and whether they differ from an earlier record');
+
+SELECT pg_temp.is(
+  (SELECT format('%s %s %s %s', software, first_read_at, first_received_at, previous_read_at)
+   FROM health.meter_firmware WHERE serial = 'SQLF-0009'),
+  format('SIM-SW2 %s %s %s', now() - interval '4 hours', now() - interval '3 hours',
+         now() - interval '3 days'),
+  'a resend of the same names keeps when they were first read and arrived, and the names before');
 
 SELECT pg_temp.is(
   (SELECT string_agg(subject, ', ' ORDER BY subject) FROM health.problems
    WHERE kind = 'firmware_changed'),
-  'SQLF-0001, SQLF-0005, SQLF-0007',
-  'a firmware change is flagged while the record showing it arrived within the lookback, '
-  || 'and unchanged names are not');
+  'SQLF-0001, SQLF-0005, SQLF-0006, SQLF-0007, SQLF-0008, SQLF-0009',
+  'a firmware change is flagged while the first record of the new names arrived within the '
+  || 'lookback, whatever was resent after it, and unchanged names are not');
 
 SELECT pg_temp.is(
   (SELECT detail FROM health.problems WHERE kind = 'firmware_changed' AND subject = 'SQLF-0005'),
@@ -307,7 +328,7 @@ SELECT pg_temp.is(
 SELECT pg_temp.is(
   (SELECT string_agg(subject, ', ' ORDER BY subject) FROM health.problems
    WHERE kind = 'firmware_changed'),
-  'SQLF-0001, SQLF-0004, SQLF-0005, SQLF-0007',
+  'SQLF-0000, SQLF-0001, SQLF-0004, SQLF-0005, SQLF-0006, SQLF-0007, SQLF-0008, SQLF-0009',
   'a firmware change is judged by the lookback in force');
 
 SELECT pg_temp.is(

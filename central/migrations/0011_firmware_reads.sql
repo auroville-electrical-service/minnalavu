@@ -266,19 +266,33 @@ BEGIN
 END
 $$;
 
--- Per meter serial, the latest names it reported and the record before them.
--- The latest is by read_at, then address, so a tie is settled the same way
--- every time. The serial, product codes and host are shown cut to 100
--- characters, control characters as ?.
+-- Per meter serial, the latest names it reported; the latest record before
+-- them whose names differ (previous), since the collector resends unchanged
+-- names on every start; and the first record of the run that holds the latest
+-- names (first_read_at, first_received_at), which a resend does not move. The
+-- latest is by read_at, then address, so a tie is settled the same way every
+-- time. The serial, product codes and host are shown cut to 100 characters,
+-- control characters as ?.
 -- contract: central/test/health.sql
 CREATE VIEW health.meter_firmware AS
   WITH ranked AS (
     SELECT f.*, b.received_at,
            row_number() OVER (PARTITION BY f.meter_serial
                               ORDER BY f.read_at DESC, f.collector_id, f.endpoint_host,
-                                       f.endpoint_port, f.unit_id) AS n
+                                       f.endpoint_port, f.unit_id) AS n,
+           count(*) OVER (PARTITION BY f.meter_serial) AS records
     FROM store.firmware_reads f
     JOIN store.batches b USING (batch_id)
+  ),
+  latest AS (
+    SELECT l.*,
+           (SELECT min(r.n) FROM ranked r
+            WHERE r.meter_serial = l.meter_serial
+              AND (r.software, r.firmware_1, r.firmware_2, r.modbus_version)
+                  IS DISTINCT FROM (l.software, l.firmware_1, l.firmware_2, l.modbus_version))
+             AS previous_n
+    FROM ranked l
+    WHERE l.n = 1
   )
   SELECT regexp_replace(left(l.meter_serial, 100), '[[:cntrl:]]', '?', 'g') AS serial,
          regexp_replace(left(l.product_code, 100), '[[:cntrl:]]', '?', 'g') AS product_code,
@@ -286,20 +300,20 @@ CREATE VIEW health.meter_firmware AS
          l.collector_id,
          regexp_replace(left(l.endpoint_host, 100), '[[:cntrl:]]', '?', 'g') AS endpoint_host,
          l.endpoint_port, l.unit_id,
+         s.read_at AS first_read_at, s.received_at AS first_received_at,
          p.software AS previous_software, p.firmware_1 AS previous_firmware_1,
          p.firmware_2 AS previous_firmware_2, p.modbus_version AS previous_modbus_version,
          p.read_at AS previous_read_at,
-         p.n IS NOT NULL
-           AND (l.software, l.firmware_1, l.firmware_2, l.modbus_version)
-               IS DISTINCT FROM (p.software, p.firmware_1, p.firmware_2, p.modbus_version)
-           AS changed
-  FROM ranked l
-  LEFT JOIN ranked p ON p.meter_serial = l.meter_serial AND p.n = 2
-  WHERE l.n = 1;
+         p.n IS NOT NULL AS changed
+  FROM latest l
+  LEFT JOIN ranked p ON p.meter_serial = l.meter_serial AND p.n = l.previous_n
+  JOIN ranked s ON s.meter_serial = l.meter_serial
+               AND s.n = coalesce(l.previous_n, l.records + 1) - 1;
 
 -- One row per problem: (kind, subject) names it, detail describes it now.
--- A firmware change is judged by when its record arrived, so a change read
--- weeks ago at an offline site is flagged when it reaches the store.
+-- A firmware change is judged by when the first record of its new names
+-- arrived, so a change read weeks ago at an offline site is flagged when it
+-- reaches the store, and a resend of the same names neither hides nor renews it.
 -- contract: central/test/health.sql
 CREATE OR REPLACE VIEW health.problems AS
   SELECT 'collector_silent' AS kind, c.collector_id AS subject,
@@ -361,11 +375,11 @@ CREATE OR REPLACE VIEW health.problems AS
                 coalesce(f.previous_firmware_2, '(none)'),
                 coalesce(f.previous_modbus_version, '(none)'), f.previous_read_at,
                 coalesce(f.software, '(none)'), coalesce(f.firmware_1, '(none)'),
-                coalesce(f.firmware_2, '(none)'), coalesce(f.modbus_version, '(none)'), f.read_at,
+                coalesce(f.firmware_2, '(none)'), coalesce(f.modbus_version, '(none)'), f.first_read_at,
                 f.endpoint_host, f.endpoint_port, f.unit_id, f.collector_id)
   FROM health.meter_firmware f
   CROSS JOIN health.thresholds t
-  WHERE f.changed AND f.received_at > now() - t.lookback;
+  WHERE f.changed AND f.first_received_at > now() - t.lookback;
 
 GRANT SELECT ON health.meter_firmware TO monitor;
 
