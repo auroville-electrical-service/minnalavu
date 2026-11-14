@@ -10,7 +10,7 @@ defmodule Alavi.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
       aliases: aliases(),
-      releases: [alavi: [steps: [:assemble, &restart_on_failure/1]]],
+      releases: [alavi: [steps: [:assemble, &service_options/1]]],
       dialyzer: [plt_add_apps: [:mix, :ex_unit]]
     ]
   end
@@ -40,23 +40,28 @@ defmodule Alavi.MixProject do
     ]
   end
 
-  # Mix's bin\alavi.bat installs the Windows service with erlsrv's default,
-  # -onfail ignore, so a node that stops stays down, and it has no option for
-  # it. `restart`, not `restart_always`: a node that stops again within 10 s of
-  # a restart (a bad settings file stops it in under a second) is left stopped,
-  # not restarted in a loop.
-  defp restart_on_failure(release) do
+  # Mix's bin\alavi.bat installs the Windows service with erlsrv's defaults,
+  # and has no option for either:
+  # - -onfail ignore, so a node that stops stays down. `restart`, not
+  #   `restart_always`: a node that stops again within 10 s of a restart (a bad
+  #   settings file stops it in under a second) is left stopped, not restarted
+  #   in a loop.
+  # - no working directory, so the node runs in the system directory and an
+  #   erl_crash.dump, which can hold the token, lands there. In the release
+  #   root it lands beside settings.json, under the ACL the README sets.
+  defp service_options(release) do
     bat = Path.join([release.path, "bin", "#{release.name}.bat"])
     add = ~s|"!ERLSRV!" add "!RELEASE_NAME!_!RELEASE_NAME!" ^\n|
+    options = ~s|  -onfail restart -workdir "!RELEASE_ROOT!" ^\n|
 
     case String.split(File.read!(bat), add) do
       [head, tail] ->
-        File.write!(bat, head <> add <> "  -onfail restart ^\n" <> tail)
+        File.write!(bat, head <> add <> options <> tail)
         release
 
       _ ->
         Mix.raise(
-          "#{bat}: no single erlsrv add line to put -onfail on; has Mix's template changed?"
+          "#{bat}: no single erlsrv add line to put -onfail and -workdir on; has Mix's template changed?"
         )
     end
   end

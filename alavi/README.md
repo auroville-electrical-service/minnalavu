@@ -38,7 +38,10 @@ From the release root, in an administrator's command prompt:
    not matter):
    `icacls settings.json /inheritance:r /grant "*S-1-5-32-544:F" /grant "*S-1-5-18:F"`.
    `icacls settings.json` should then list only `BUILTIN\Administrators:(F)`
-   and `NT AUTHORITY\SYSTEM:(F)`.
+   and `NT AUTHORITY\SYSTEM:(F)`. Restrict the release root the same way, as
+   the service runs there and a crash dump it writes there (`erl_crash.dump`)
+   can hold the token:
+   `icacls . /inheritance:r /grant "*S-1-5-32-544:(OI)(CI)F" /grant "*S-1-5-18:(OI)(CI)F"`.
 2. With no service running, check the settings: `bin\alavi.bat start` runs the
    collector in the console, and a settings error is printed there. Stop it
    with Ctrl+C.
@@ -47,12 +50,13 @@ From the release root, in an administrator's command prompt:
    `erlsrv` below.
 4. `erlsrv start alavi_alavi`.
 
-`erlsrv list alavi_alavi` should show `OnFail: restart`: the release's
-`bin\alavi.bat` installs the service with `-onfail restart` (`mix.exs`), so
-erlsrv restarts a node that stops on its own. A node that stops again within
-10 seconds of being restarted, as one does with an invalid settings file, is
-left stopped rather than restarted in a loop: fix the cause (the log, or step
-2) and start it again. To install a new release, `erlsrv remove alavi_alavi`,
+`erlsrv list alavi_alavi` should show `OnFail: restart` and the release root
+as `WorkDir:`: the release's `bin\alavi.bat` installs the service with
+`-onfail restart -workdir` (`mix.exs`), so erlsrv restarts a node that stops
+on its own, and a node that halts writes its `erl_crash.dump` in the release
+root. A node that stops again within 10 seconds of being restarted, as one
+does with an invalid settings file, is left stopped rather than restarted in a
+loop: fix the cause (the log, or step 2) and start it again. To install a new release, `erlsrv remove alavi_alavi`,
 then the steps above from the new release root.
 
 ## Logs
