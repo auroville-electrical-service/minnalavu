@@ -2,6 +2,7 @@ defmodule Alavi.PollerTest do
   use ExUnit.Case, async: true
 
   import Alavi.PollerCase
+  import ExUnit.CaptureLog, only: [with_log: 1]
 
   alias Alavi.{MissedRead, Reading}
 
@@ -83,6 +84,36 @@ defmodule Alavi.PollerTest do
       assert %MissedRead{unit_id: 9, reason: {:exception, 0x0B}, attempts: 1} = first
       assert Enum.all?(rest, &match?(%MissedRead{reason: {:exception, 0x0B}, attempts: 0}, &1))
       assert [%Reading{unit_id: 1} | _] = recorded!()
+    end
+
+    test "a gateway's two-byte reply is rejected as unexpected and logged, on a fresh connection each retry, and the rest of the chain is read" do
+      {sim, port} = start_sim!(:tcp)
+      Simulator.faults(sim, two_byte_replies: [{2, 7}])
+      meters = [meter(1, "elite_440"), meter(2, "elite_440"), meter(3, "elite_500")]
+      # Long enough that the endpoint has let go of the closed connection.
+      backoff = %{"reconnect_backoff_ms" => %{"min" => 50, "max" => 100}}
+
+      {rounds, log} =
+        with_log(fn ->
+          start_pollers!([endpoint(port, "tcp", meters, backoff)])
+          for _ <- 1..3, do: recorded!()
+        end)
+
+      assert [[%Reading{unit_id: 1} | _], [first | rest], [%Reading{unit_id: 3} | _]] = rounds
+      assert %MissedRead{unit_id: 2, attempts: 3, reason: :unexpected_response} = first
+      assert Enum.all?(rest, &match?(%MissedRead{attempts: 0, reason: :unexpected_response}, &1))
+
+      lines = log |> String.split("\n") |> Enum.filter(&(&1 =~ "127.0.0.1:#{port} unit 2:"))
+      prefix = "unit 2: reply rejected (:unexpected_response), 8 bytes:"
+      assert [_, _, _] = lines
+
+      assert Enum.all?(
+               lines,
+               &(&1 =~ ~r/#{Regex.escape(prefix)} 00 [0-9A-F]{2} 00 00 00 02 07 0B$/)
+             )
+
+      # The client closes on the rejection, so each retry starts a new connection at transaction 0.
+      assert Enum.all?(tl(lines), &String.ends_with?(&1, ": 00 00 00 00 00 02 07 0B"))
     end
 
     test "exception 06 backs off before each retry, then the meter is missed until it clears" do

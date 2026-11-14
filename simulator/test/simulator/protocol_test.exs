@@ -59,6 +59,22 @@ defmodule Simulator.ProtocolTest do
                Protocol.respond(meters, %Faults{}, 1, <<3, 11_149::16, 2::16>>, :gateway_error)
     end
 
+    test "a gateway's two-byte reply is 0B alone under its mapped unit byte, and other units are answered",
+         %{meters: meters} do
+      faults = %Faults{two_byte_replies: %{1 => 7}}
+
+      assert {:reply_as, 7, <<0x0B>>} =
+               Protocol.respond(meters, faults, 1, <<3, 11_149::16, 2::16>>)
+
+      assert {:reply, <<3, 4, _::binary>>} =
+               Protocol.respond(
+                 meters,
+                 %{faults | two_byte_replies: %{2 => 1}},
+                 1,
+                 <<3, 11_149::16, 2::16>>
+               )
+    end
+
     test "busy endpoint is exception 06", %{meters: meters} do
       assert {:reply, <<0x83, 6>>} =
                Protocol.respond(meters, %Faults{busy: true}, 1, <<3, 11_149::16, 2::16>>)

@@ -140,8 +140,15 @@ defmodule Simulator.Server do
         :ok
 
       {{:reply, pdu}, faults} ->
-        Process.sleep(faults.delay_ms)
-        :gen_tcp.send(socket, Protocol.encode_response(framing, faults, request, pdu))
+        send_response(socket, framing, faults, request, pdu)
+
+      {{:reply_as, unit_id, pdu}, faults} ->
+        send_response(socket, framing, faults, %{request | unit_id: unit_id}, pdu)
     end
+  end
+
+  defp send_response(socket, framing, faults, request, pdu) do
+    Process.sleep(faults.delay_ms)
+    :gen_tcp.send(socket, Protocol.encode_response(framing, faults, request, pdu))
   end
 end

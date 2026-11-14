@@ -54,12 +54,14 @@ defmodule Simulator do
           :ok
   def name(sim, unit_id, name, value), do: GenServer.call(sim, {:name, unit_id, name, value})
 
+  # contract: test/simulator_test.exs "faults/2"
   @doc "Change faults; fields not given keep their value. See `Simulator.Faults`."
   @spec faults(GenServer.server(), keyword()) :: :ok
   def faults(sim, changes) do
     changes = Keyword.update(changes, :silent_units, nil, &MapSet.new/1)
     changes = Keyword.update(changes, :silent_reads, nil, &MapSet.new/1)
     changes = Keyword.update(changes, :refused_reads, nil, &Map.new/1)
+    changes = Keyword.update(changes, :two_byte_replies, nil, &Map.new/1)
     changes = Enum.reject(changes, fn {_k, v} -> is_nil(v) end)
     GenServer.call(sim, {:faults, changes})
   end

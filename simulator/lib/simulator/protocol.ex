@@ -46,9 +46,12 @@ defmodule Simulator.Protocol do
   def decode_request(_framing, _buffer), do: :incomplete
 
   # contract: test/simulator/protocol_test.exs "respond/5"
-  @doc "The response PDU for a request, or `:silent` when nothing would answer."
+  @doc """
+  The response PDU for a request, or `:silent` when nothing would answer.
+  `{:reply_as, unit, pdu}` is framed under `unit` instead of the unit asked for.
+  """
   @spec respond([Meter.t()], Faults.t(), 0..255, binary(), missing_units()) ::
-          {:reply, binary()} | :silent
+          {:reply, binary()} | {:reply_as, 0..255, binary()} | :silent
   def respond(meters, %Faults{} = faults, unit_id, <<fc, _::binary>> = pdu, missing \\ :silent) do
     read = read_at(unit_id, pdu)
 
@@ -58,6 +61,9 @@ defmodule Simulator.Protocol do
 
       MapSet.member?(faults.silent_reads, read) ->
         :silent
+
+      is_map_key(faults.two_byte_replies, unit_id) ->
+        {:reply_as, faults.two_byte_replies[unit_id], <<@gateway_target_failed>>}
 
       is_map_key(faults.refused_reads, read) ->
         {:reply, exception(fc, faults.refused_reads[read])}
