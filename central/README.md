@@ -25,7 +25,9 @@ The directory is not named `minnalavu/`, since that is the repo itself.
   the meter reported, and carries the product code it reported too. A missed
   read is a fact about an address, keyed on `(collector_id, endpoint_host,
   endpoint_port, unit_id, register_key, read_at)`, and carries the serial read
-  in its round, or none. `batches` (one row per batch, as
+  in its round, or none. `firmware_reads`: a meter's software and firmware
+  names as read, keyed like a missed read on its address and time, a name it
+  did not give NULL. `batches` (one row per batch, as
   first received), `uploads` (every arrival of a batch, with the collector's
   backlog), `reading_conflicts` (a reading whose key was already taken by one
   with other content) and `collectors`. Nothing in `store` can be updated,
@@ -112,6 +114,8 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
 - `health.misplaced_serials`: registered serials read within the lookback at
   a place (collector, host, port, unit) other than where the registry put them
   when each reading was taken; one row per serial and place.
+- `health.meter_firmware`: per serial, the latest names it reported, the
+  record before them, and whether they differ.
 - `health.problems`: one row per problem, `(kind, subject)` naming it and
   `detail` describing it now. Kinds: `collector_silent` (no upload for
   `collector_silent_after`), `meter_silent` (no reading for
@@ -121,10 +125,13 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
   buffer), `backlog_refused`, `backlog_discarded`, `backlog_quarantined` (above
   zero in the latest upload; `refused` counts since the collector started, so
   it clears on a restart), `unregistered_serial`, `misplaced_serial` (one
-  per serial, every place it was read in its detail) and
+  per serial, every place it was read in its detail),
   `serial_at_several_places` (an unregistered serial read at more than one
   place: two meters reporting one serial, one meter reachable two ways, or a
-  move; every place in its detail).
+  move; every place in its detail) and `firmware_changed` (a serial whose
+  latest names differ from its record before them, while the batch that
+  brought the latest arrived within the lookback, so a weeks-late change is
+  flagged when it arrives).
 - `health.thresholds`: the thresholds in force, from
   `registry.health_thresholds` (append-only; the last row set holds). Change
   them as the owner:
@@ -179,8 +186,10 @@ send the same mail.
 ## Answers from `POST /rpc/ingest`
 
 - 200: stored, or already stored (a resend). The body names the `batch_id` and
-  counts readings `received`, `inserted`, `duplicate` and `conflicting`, and
-  missed reads `received`, `inserted` and `duplicate`.
+  counts readings `received`, `inserted`, `duplicate` and `conflicting`,
+  missed reads `received`, `inserted` and `duplicate`, and firmware reads
+  `received`, `inserted`, `duplicate` and `conflicting` (a conflicting one is
+  counted, not kept).
 - 422 (`PT422`): the batch does not match the schema; the message names the field.
 - 409 (`PT409`): the batch id was already sent by another collector.
 - 400 (`PGRST102`): the body is not JSON.

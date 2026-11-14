@@ -14,7 +14,8 @@ INSERT INTO answers VALUES ('first', pg_temp.ingest_as('collector_sqltest_a', :'
 SELECT pg_temp.is((SELECT answer FROM answers WHERE name = 'first') - 'first_received_at',
   '{"batch_id": "0b6f8d2e-5c1a-4e7b-9a3d-2f4c6e8a0b1c", "resent": false,
     "readings": {"received": 2, "inserted": 2, "duplicate": 0, "conflicting": 0},
-    "missed_reads": {"received": 2, "inserted": 2, "duplicate": 0}}'::jsonb,
+    "missed_reads": {"received": 2, "inserted": 2, "duplicate": 0},
+    "firmware_reads": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0}}'::jsonb,
   'a new batch is stored, and the answer counts what was inserted');
 
 SELECT pg_temp.is(
@@ -60,7 +61,8 @@ INSERT INTO answers VALUES ('resent', pg_temp.ingest_as('collector_sqltest_a', :
 SELECT pg_temp.is((SELECT answer FROM answers WHERE name = 'resent') - 'first_received_at',
   '{"batch_id": "0b6f8d2e-5c1a-4e7b-9a3d-2f4c6e8a0b1c", "resent": true,
     "readings": {"received": 2, "inserted": 0, "duplicate": 2, "conflicting": 0},
-    "missed_reads": {"received": 2, "inserted": 0, "duplicate": 2}}'::jsonb,
+    "missed_reads": {"received": 2, "inserted": 0, "duplicate": 2},
+    "firmware_reads": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0}}'::jsonb,
   'a resent batch is accepted, and nothing in it is stored twice');
 
 SELECT pg_temp.is(
@@ -197,7 +199,8 @@ SELECT pg_temp.is(
   pg_temp.ingest_as('collector_sqltest_a', (SELECT batch FROM coded)) - 'first_received_at',
   '{"batch_id": "66666666-6666-4666-8666-666666666666", "resent": false,
     "readings": {"received": 1, "inserted": 1, "duplicate": 0, "conflicting": 0},
-    "missed_reads": {"received": 4, "inserted": 4, "duplicate": 0}}'::jsonb,
+    "missed_reads": {"received": 4, "inserted": 4, "duplicate": 0},
+    "firmware_reads": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0}}'::jsonb,
   'missed reads at different addresses are each stored, with or without the serial read');
 
 SELECT pg_temp.is(
@@ -240,6 +243,106 @@ SELECT pg_temp.is(
   'ELITE440-446',
   'the conflicting reading keeps its product code');
 
+-- Firmware reads: a batch of the basic batch's events and two meters' names,
+-- one of which the meter did not give in full.
+CREATE TEMP TABLE named (batch jsonb);
+INSERT INTO named SELECT pg_temp.changed(pg_temp.changed(:'basic',
+  '{"path": ["batch_id"], "value": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}'),
+  '{"path": ["firmware_reads"], "value": [
+     {"endpoint": {"host": "10.0.0.21", "port": 502}, "unit_id": 1,
+      "meter_serial": "SIM-445-0001", "product_code": "ELITE440-445",
+      "timestamp": "2026-11-01T00:00:00Z", "software": "SIM-SW44", "firmware_1": "SIM-F1",
+      "firmware_2": "SIM-F2", "modbus_version": "0B03"},
+     {"endpoint": {"host": "10.0.0.21", "port": 502}, "unit_id": 3,
+      "meter_serial": "SIM-500-0001", "product_code": "E500C-5102",
+      "timestamp": "2026-11-01T00:00:01Z", "software": "SIM-SW5", "firmware_1": null,
+      "firmware_2": null, "modbus_version": "00FF"}]}');
+
+SELECT pg_temp.is(
+  pg_temp.ingest_as('collector_sqltest_a', (SELECT batch FROM named)) -> 'firmware_reads',
+  '{"received": 2, "inserted": 2, "duplicate": 0, "conflicting": 0}',
+  'a batch''s firmware reads are stored, and the answer counts them');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s %s %s %s %s %s %s %s:%s %s %s %s', meter_serial, product_code,
+                            read_at, software, coalesce(firmware_1, 'NULL'),
+                            coalesce(firmware_2, 'NULL'), modbus_version, endpoint_host,
+                            endpoint_port, unit_id, collector_id, batch_id), '; '
+                     ORDER BY read_at)
+   FROM store.firmware_reads),
+  'SIM-445-0001 ELITE440-445 2026-11-01 00:00:00+00 SIM-SW44 SIM-F1 SIM-F2 0B03 10.0.0.21:502 1 '
+  || 'sqltest_a aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa; '
+  || 'SIM-500-0001 E500C-5102 2026-11-01 00:00:01+00 SIM-SW5 NULL NULL 00FF 10.0.0.21:502 3 '
+  || 'sqltest_a aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  'firmware reads keep their names as sent, a name not given as NULL, where and when they were '
+  || 'read, the calling collector and their batch');
+
+SELECT pg_temp.is(
+  pg_temp.ingest_as('collector_sqltest_a', (SELECT batch FROM named)) -> 'firmware_reads',
+  '{"received": 2, "inserted": 0, "duplicate": 2, "conflicting": 0}',
+  'a resent batch''s firmware reads are not stored twice');
+
+SELECT pg_temp.is(
+  pg_temp.ingest_as('collector_sqltest_a',
+    jsonb_set((SELECT batch FROM named), '{batch_id}', '"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"'))
+    -> 'firmware_reads',
+  '{"received": 2, "inserted": 0, "duplicate": 2, "conflicting": 0}',
+  'firmware reads already stored are not stored again from another batch');
+
+SELECT pg_temp.is(
+  pg_temp.ingest_as('collector_sqltest_a',
+    pg_temp.changed(
+      jsonb_set((SELECT batch FROM named), '{batch_id}', '"cccccccc-cccc-4ccc-8ccc-cccccccccccc"'),
+      '{"path": ["firmware_reads", 0, "software"], "value": "SIM-SW45"}')) -> 'firmware_reads',
+  '{"received": 2, "inserted": 0, "duplicate": 1, "conflicting": 1}',
+  'a firmware read that differs from the stored one at its address and time is conflicting');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(software, ' ' ORDER BY software) FROM store.firmware_reads),
+  'SIM-SW44 SIM-SW5',
+  'and the stored firmware read is unchanged');
+
+SELECT pg_temp.is(
+  pg_temp.ingest_as('collector_sqltest_b',
+    jsonb_set((SELECT batch FROM named), '{batch_id}', '"dddddddd-dddd-4ddd-8ddd-dddddddddddd"'))
+    -> 'firmware_reads',
+  '{"received": 2, "inserted": 2, "duplicate": 0, "conflicting": 0}',
+  'the same address and time under another collector is another firmware read');
+
+SELECT pg_temp.is(
+  pg_temp.ingest_as('collector_sqltest_a',
+    pg_temp.changed(
+      pg_temp.changed(
+        jsonb_set((SELECT batch FROM named), '{batch_id}', '"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"'),
+        '{"path": ["firmware_reads", 0, "timestamp"], "value": "2025-01-01T00:00:00Z"}'),
+      '{"path": ["firmware_reads", 1, "timestamp"], "value": "2025-01-01T00:00:00Z"}'))
+    -> 'firmware_reads',
+  '{"received": 2, "inserted": 2, "duplicate": 0, "conflicting": 0}',
+  'firmware reads taken almost two years ago are accepted');
+
+SELECT pg_temp.is(
+  pg_temp.ingest_error('collector_sqltest_a',
+    pg_temp.changed(
+      jsonb_set((SELECT batch FROM named), '{batch_id}', '"ffffffff-ffff-4fff-8fff-ffffffffffff"'),
+      '{"path": ["firmware_reads", 1, "firmware_2"], "value": "SIM-F2 "}')),
+  'PT422: batch rejected: batch.firmware_reads[1].firmware_2 must be printable ASCII with no '
+  || 'leading or trailing space',
+  'a firmware read with a malformed name is rejected, naming the field');
+
+SELECT pg_temp.is(
+  (SELECT count(*) FROM store.batches WHERE batch_id = 'ffffffff-ffff-4fff-8fff-ffffffffffff'),
+  0::bigint,
+  'and nothing of its batch is stored');
+
+SELECT pg_temp.is(
+  pg_temp.sqlstate_as('postgres', $$
+    INSERT INTO store.firmware_reads
+    SELECT meter_serial, NULL, read_at + interval '1 second', software, firmware_1, firmware_2,
+           modbus_version, endpoint_host, endpoint_port, unit_id, collector_id, batch_id
+    FROM store.firmware_reads LIMIT 1$$),
+  '23502',
+  'the store refuses a firmware read without a product code');
+
 SELECT pg_temp.is(
   (SELECT string_agg(format('%s.%s %s', table_name, column_name, data_type), '; '
                      ORDER BY table_name)
@@ -266,7 +369,10 @@ FROM unnest(ARRAY[
   'TRUNCATE store.missed_reads',
   'DELETE FROM store.reading_conflicts',
   'DELETE FROM store.batches',
-  'DELETE FROM store.uploads'
+  'DELETE FROM store.uploads',
+  $q$UPDATE store.firmware_reads SET software = 'SIM-SW99'$q$,
+  'DELETE FROM store.firmware_reads',
+  'TRUNCATE store.firmware_reads'
 ]) q;
 
 ROLLBACK;

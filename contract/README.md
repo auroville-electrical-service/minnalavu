@@ -40,6 +40,9 @@ recorded under, and the collector's backlog when it was sent. A reading's
 `meter_serial` and `product_code` are what the meter reported in the round it
 was read, never what the collector's config says. A missed read carries the
 serial read in its round, or null when none could be read.
+A batch may also carry `firmware_reads`: a meter's software and firmware
+names, each as decoded under its profile's `firmware` section or null when the
+meter did not give it, with the serial and product code read in that round.
 
 Values are decimal strings, never JSON numbers, so no float ever carries
 energy or money.

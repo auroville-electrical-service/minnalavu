@@ -66,6 +66,11 @@
     "missed_reads": {
       "type": "array",
       "items": { "$ref": "#/$defs/missed_read" }
+    },
+    "firmware_reads": {
+      "description": "Meters' software and firmware names. The collector sends a meter's when they differ from the last it sent for that address, and the first after it starts. Optional.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/firmware_read" }
     }
   },
   "$defs": {
@@ -200,6 +205,55 @@
           "type": ["array", "null"],
           "maxItems": 125,
           "items": { "$ref": "#/$defs/word" }
+        }
+      }
+    },
+    "name": {
+      "description": "A software or firmware name as decoded under the meter's profile (firmware section), or null when the meter did not give it: it answered blank, or refused the read.",
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 250,
+      "pattern": "^[!-~]([ -~]*[!-~])?$"
+    },
+    "firmware_read": {
+      "description": "A meter's software and firmware names, read in a round with its serial and product code.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "endpoint",
+        "unit_id",
+        "meter_serial",
+        "product_code",
+        "timestamp",
+        "software",
+        "firmware_1",
+        "firmware_2",
+        "modbus_version"
+      ],
+      "properties": {
+        "endpoint": { "$ref": "#/$defs/endpoint" },
+        "unit_id": { "$ref": "#/$defs/unit_id" },
+        "meter_serial": {
+          "description": "The serial the meter reported in the round the names were read in.",
+          "type": "string",
+          "minLength": 1
+        },
+        "product_code": {
+          "description": "The product code the meter reported in that round, as read.",
+          "type": "string",
+          "minLength": 1
+        },
+        "timestamp": {
+          "description": "When the names were read.",
+          "type": "string",
+          "format": "date-time"
+        },
+        "software": { "$ref": "#/$defs/name" },
+        "firmware_1": { "$ref": "#/$defs/name" },
+        "firmware_2": { "$ref": "#/$defs/name" },
+        "modbus_version": {
+          "description": "The Modbus protocol version and revision; a hex entry decodes to four uppercase hex digits, such as \"0B03\".",
+          "$ref": "#/$defs/name"
         }
       }
     }

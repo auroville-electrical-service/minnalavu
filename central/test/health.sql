@@ -232,6 +232,66 @@ SELECT pg_temp.is(
          now() - interval '30 minutes', now() - interval '20 minutes'),
   'an unregistered serial read at several places says each place and when it was read there');
 
+-- Firmware reads at 10.0.0.1:502, from the batch's collector, with the
+-- software and module 1 names given (module 2 and the version fixed).
+CREATE FUNCTION pg_temp.firmware(serial text, batch uuid, ago interval, software text,
+                                 firmware_1 text, unit integer)
+RETURNS void
+LANGUAGE sql AS $$
+  INSERT INTO store.firmware_reads
+  SELECT serial, 'ELITE440-445', now() - ago, software, firmware_1, 'SIM-F2', '0B03', '10.0.0.1',
+         502, unit, b.collector_id, batch
+  FROM store.batches b WHERE b.batch_id = batch
+$$;
+
+INSERT INTO b VALUES ('sqlh_c_old', pg_temp.upload('sqlh_c', '2 days', 0, 0, 0, 0));
+
+-- SQLF-0001 upgraded; SQLF-0002 sent the same names again after a restart;
+-- SQLF-0003 has one record; SQLF-0004 changed in a batch that arrived two
+-- days ago; SQLF-0005 stopped giving its module 1 name; SQLF-0006 changed and
+-- then sent the new names again; SQLF-0007 changed ten days ago, in a batch
+-- that arrived five minutes ago.
+SELECT pg_temp.firmware(s, (SELECT batch FROM b WHERE collector = c), i, sw, f1,
+                        20 + right(s, 1)::integer)
+FROM (VALUES ('SQLF-0001', 'sqlh_a', '3 days'::interval, 'SIM-SW1', 'SIM-F1'),
+             ('SQLF-0001', 'sqlh_a', '10 minutes', 'SIM-SW2', 'SIM-F1'),
+             ('SQLF-0002', 'sqlh_a', '3 days', 'SIM-SW1', 'SIM-F1'),
+             ('SQLF-0002', 'sqlh_a', '10 minutes', 'SIM-SW1', 'SIM-F1'),
+             ('SQLF-0003', 'sqlh_a', '10 minutes', 'SIM-SW1', 'SIM-F1'),
+             ('SQLF-0004', 'sqlh_c_old', '3 days', 'SIM-SW1', 'SIM-F1'),
+             ('SQLF-0004', 'sqlh_c_old', '2 days', 'SIM-SW2', 'SIM-F1'),
+             ('SQLF-0005', 'sqlh_a', '3 days', 'SIM-SW1', 'SIM-F1'),
+             ('SQLF-0005', 'sqlh_a', '10 minutes', 'SIM-SW1', NULL),
+             ('SQLF-0006', 'sqlh_a', '3 days', 'SIM-SW1', 'SIM-F1'),
+             ('SQLF-0006', 'sqlh_a', '2 days', 'SIM-SW2', 'SIM-F1'),
+             ('SQLF-0006', 'sqlh_a', '10 minutes', 'SIM-SW2', 'SIM-F1'),
+             ('SQLF-0007', 'sqlh_a', '11 days', 'SIM-SW1', 'SIM-F1'),
+             ('SQLF-0007', 'sqlh_a', '10 days', 'SIM-SW2', 'SIM-F1')) v (s, c, i, sw, f1);
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s %s %s %s', serial, software, coalesce(firmware_1, 'NULL'),
+                            changed), ', ' ORDER BY serial)
+   FROM health.meter_firmware WHERE serial LIKE 'SQLF-%'),
+  'SQLF-0001 SIM-SW2 SIM-F1 t, SQLF-0002 SIM-SW1 SIM-F1 f, SQLF-0003 SIM-SW1 SIM-F1 f, '
+  || 'SQLF-0004 SIM-SW2 SIM-F1 t, SQLF-0005 SIM-SW1 NULL t, SQLF-0006 SIM-SW2 SIM-F1 f, '
+  || 'SQLF-0007 SIM-SW2 SIM-F1 t',
+  'each serial''s latest names are shown, and whether they differ from the record before them');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(subject, ', ' ORDER BY subject) FROM health.problems
+   WHERE kind = 'firmware_changed'),
+  'SQLF-0001, SQLF-0005, SQLF-0007',
+  'a firmware change is flagged while the record showing it arrived within the lookback, '
+  || 'and unchanged names are not');
+
+SELECT pg_temp.is(
+  (SELECT detail FROM health.problems WHERE kind = 'firmware_changed' AND subject = 'SQLF-0005'),
+  format('software SIM-SW1, firmware SIM-F1 / SIM-F2, modbus 0B03 (read %s) became '
+         || 'software SIM-SW1, firmware (none) / SIM-F2, modbus 0B03 (read %s), '
+         || 'at 10.0.0.1:502 unit 25 via sqlh_a',
+         now() - interval '3 days', now() - interval '10 minutes'),
+  'a firmware change''s problem says the names before and after, when each was read, and where');
+
 SELECT admin.set_health_thresholds(collector_silent_after => '3 hours',
   meter_silent_intervals => 10, backlog_near_capacity => 0.9, lookback => '4 days');
 
@@ -243,6 +303,12 @@ SELECT pg_temp.is(
   || 'serial_at_several_places SQLH-TWIN; unregistered_serial SQLH-OLD-STRAY; '
   || 'unregistered_serial SQLH-STRAY; unregistered_serial SQLH-TWIN',
   'the latest thresholds set are the ones judged by');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(subject, ', ' ORDER BY subject) FROM health.problems
+   WHERE kind = 'firmware_changed'),
+  'SQLF-0001, SQLF-0004, SQLF-0005, SQLF-0007',
+  'a firmware change is judged by the lookback in force');
 
 SELECT pg_temp.is(
   (SELECT format('%s %s %s %s', collector_silent_after, meter_silent_intervals,

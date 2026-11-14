@@ -166,6 +166,7 @@ SELECT pg_temp.is(pg_temp.sqlstate_as('collector_sqltest_grants', q), '42501',
 FROM unnest(ARRAY[
   'SELECT * FROM store.readings',
   'SELECT * FROM store.missed_reads',
+  'SELECT * FROM store.firmware_reads',
   'SELECT * FROM store.batches',
   'SELECT * FROM store.collectors',
   'SELECT * FROM registry.meter_versions',
@@ -174,6 +175,9 @@ FROM unnest(ARRAY[
   $q$UPDATE store.readings SET value = 0$q$,
   $q$DELETE FROM store.readings$q$,
   $q$TRUNCATE store.readings$q$,
+  $q$INSERT INTO store.firmware_reads VALUES ('S', 'P', now(), 'a', 'b', 'c', '0B03', 'h', 1, 1, 'c', gen_random_uuid())$q$,
+  $q$UPDATE store.firmware_reads SET software = 'x'$q$,
+  $q$DELETE FROM store.firmware_reads$q$,
   $q$SELECT admin.create_collector('sqltest_intruder')$q$,
   $q$SELECT admin.retire_meter('SQLREG-0001', now())$q$,
   $q$SELECT store.check_batch('{}')$q$,
@@ -198,9 +202,9 @@ CREATE TEMP VIEW monitor_roles AS
 SELECT pg_temp.is(
   (SELECT string_agg(c.relname::text, ', ' ORDER BY c.relname)
    FROM pg_class c WHERE c.relnamespace = 'health'::regnamespace AND c.relkind = 'v'),
-  'collectors, meters, misplaced_serials, problems, thresholds, unregistered_serial_places, '
-  || 'unregistered_serials',
-  'health holds the seven health views');
+  'collectors, meter_firmware, meters, misplaced_serials, problems, thresholds, '
+  || 'unregistered_serial_places, unregistered_serials',
+  'health holds the eight health views');
 
 SELECT pg_temp.is(
   (SELECT count(*) FROM pg_class c
@@ -285,6 +289,7 @@ FROM unnest(ARRAY[
   'SELECT * FROM health.unregistered_serials',
   'SELECT * FROM health.unregistered_serial_places',
   'SELECT * FROM health.misplaced_serials',
+  'SELECT * FROM health.meter_firmware',
   'SELECT * FROM health.thresholds'
 ]) q;
 
@@ -292,6 +297,7 @@ SELECT pg_temp.is(pg_temp.sqlstate_as('monitor', q), '42501', 'monitor is refuse
 FROM unnest(ARRAY[
   'SELECT * FROM store.readings',
   'SELECT * FROM store.uploads',
+  'SELECT * FROM store.firmware_reads',
   'SELECT * FROM registry.meter_versions',
   'SELECT * FROM registry.meter_history',
   'SELECT * FROM registry.health_thresholds',
