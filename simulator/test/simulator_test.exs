@@ -37,6 +37,16 @@ defmodule SimulatorTest do
         assert :gen_tcp.connect(~c"127.0.0.1", port, [active: false], 200) == {:error, :timeout}
       end
     end
+
+    test "a connect timer's message left behind by going offline does not stop the endpoint" do
+      {sim, port} = start_sim!()
+      :ok = Simulator.offline(sim)
+      send(sim, {:timeout, make_ref(), :inet})
+      :ok = Simulator.online(sim)
+
+      {:ok, socket} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false], 1_000)
+      assert <<0x00, 0x04, _::binary>> = request(socket, 4, 1)
+    end
   end
 
   describe "online/1" do

@@ -97,6 +97,10 @@ defmodule Simulator.Server do
   def handle_info({:EXIT, pid, _reason}, state),
     do: {:noreply, %{state | handlers: MapSet.delete(state.handlers, pid)}}
 
+  # The fill's last connect times out, and that can leave gen_tcp's timer
+  # message behind (`inet:stop_timer/1` flushes it with `after 0`).
+  def handle_info({:timeout, _timer, :inet}, state), do: {:noreply, state}
+
   @impl true
   def terminate(_reason, state), do: :gen_tcp.close(state.listen)
 
