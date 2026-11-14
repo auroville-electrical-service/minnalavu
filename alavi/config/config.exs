@@ -10,7 +10,8 @@ end
 # and beside the server's. Crash reports and supervisor reports are logged
 # (handle_sasl_reports), and the level is :debug because only then does a
 # GenServer's crash report include its state. The collector logs nothing at
-# debug itself; OTP adds a line or two at boot.
+# debug itself; OTP adds a line or two at boot. The log is a file, so no
+# colour codes: left on, they are written into it as escape sequences.
 if config_env() == :prod do
   config :logger,
     level: :debug,
@@ -18,5 +19,6 @@ if config_env() == :prod do
 
   config :logger, :default_formatter,
     format: "$date $time [$level] $message\n",
+    colors: [enabled: false],
     utc_log: true
 end
