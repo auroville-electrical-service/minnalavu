@@ -5,42 +5,73 @@ defmodule Alavi.Intake.Request do
   never by address.
   """
 
-  @enforce_keys [:id, :meters, :expires_at]
+  @enforce_keys [:id, :meters, :expires_at, :ttl_ms]
   defstruct @enforce_keys
 
-  @typedoc "`id` is lower case; `meters` are serials, each once, in the order asked."
-  @type t :: %__MODULE__{id: String.t(), meters: [String.t(), ...], expires_at: DateTime.t()}
+  @typedoc """
+  `id` is lower case; `meters` are serials, each once, in the order asked.
+  `ttl_ms` is the server's own `expires_at − requested_at`.
+  """
+  @type t :: %__MODULE__{
+          id: String.t(),
+          meters: [String.t(), ...],
+          expires_at: DateTime.t(),
+          ttl_ms: pos_integer()
+        }
 
   @uuid ~r/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/
 
   # contract: test/alavi/intake_test.exs "Request.parse/1"
   @doc """
   `{:refuse, id, expires_at, why}` for a well-formed job this collector does
-  not run, so that it is remembered like one it ran; `{:error, why}` for one
-  without a usable ID or expiry. Fields besides these four are ignored.
+  not run, so that it is remembered like one it ran, among them one without
+  a `requested_at` before its `expires_at`; `{:error, why}` for one without a
+  usable ID or expiry. Fields besides these five are ignored.
   """
   @spec parse(term()) ::
           {:ok, t()} | {:refuse, String.t(), DateTime.t(), String.t()} | {:error, String.t()}
   def parse(%{"request_id" => id, "expires_at" => expires} = job) do
     with {:ok, id} <- id(id),
-         {:ok, expires_at} <- expiry(expires, id) do
-      runnable(job, id, expires_at)
+         {:ok, expires_at} <- expiry(expires, id),
+         {:ok, ttl_ms} <- ttl(job, id, expires_at) do
+      runnable(job, id, expires_at, ttl_ms)
     end
   end
 
   def parse(job), do: {:error, "a job without a request_id and expires_at: #{excerpt(job)}"}
 
-  defp runnable(%{"kind" => "read_on_demand", "meters" => meters}, id, expires_at) do
+  defp runnable(%{"kind" => "read_on_demand", "meters" => meters}, id, expires_at, ttl_ms) do
     case serials(meters) do
-      {:ok, serials} -> {:ok, %__MODULE__{id: id, meters: serials, expires_at: expires_at}}
-      {:error, why} -> {:refuse, id, expires_at, why}
+      {:ok, serials} ->
+        {:ok, %__MODULE__{id: id, meters: serials, expires_at: expires_at, ttl_ms: ttl_ms}}
+
+      {:error, why} ->
+        {:refuse, id, expires_at, why}
     end
   end
 
-  defp runnable(%{"kind" => kind}, id, expires_at),
+  defp runnable(%{"kind" => kind}, id, expires_at, _ttl_ms),
     do: {:refuse, id, expires_at, "kind #{excerpt(kind)} is not run here: only read_on_demand"}
 
-  defp runnable(_job, id, expires_at), do: {:refuse, id, expires_at, "no kind"}
+  defp runnable(_job, id, expires_at, _ttl_ms), do: {:refuse, id, expires_at, "no kind"}
+
+  defp ttl(%{"requested_at" => text}, id, expires_at) when is_binary(text) do
+    with {:ok, requested_at, _offset} <- DateTime.from_iso8601(text),
+         ttl_ms when ttl_ms > 0 <- DateTime.diff(expires_at, requested_at, :millisecond) do
+      {:ok, ttl_ms}
+    else
+      {:error, _} ->
+        {:refuse, id, expires_at, "requested_at #{excerpt(text)} is not a timestamp"}
+
+      _not_after ->
+        {:refuse, id, expires_at, "expires_at is not after requested_at #{excerpt(text)}"}
+    end
+  end
+
+  defp ttl(job, id, expires_at),
+    do:
+      {:refuse, id, expires_at,
+       "requested_at #{excerpt(Map.get(job, "requested_at"))} is not a timestamp"}
 
   defp id(id) when is_binary(id) do
     lower = String.downcase(id)

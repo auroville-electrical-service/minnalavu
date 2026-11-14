@@ -118,7 +118,7 @@ defmodule Alavi.Uplink do
   # Every answer lists the pending jobs; one naming unknown requests is about the batch sent.
   defp answered(answer, state) do
     unknown(answer)
-    %{state | answered: monotonic(), intake: jobs(state.intake, answer, state.clock.())}
+    %{state | answered: monotonic(), intake: jobs(state.intake, answer, monotonic())}
   end
 
   defp jobs(intake, %{"jobs" => jobs}, now) when intake != :none,

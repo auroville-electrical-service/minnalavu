@@ -5,17 +5,21 @@ defmodule Alavi.Intake.Seen do
   or missed read arrives. Pure; held in memory only, so a restart forgets it,
   and a request still pending then is run again.
 
-  An ID is kept until an hour after its `expires_at` by the collector's
-  clock, which may run ahead of the server's, and at most 1,000 are kept,
-  those expiring last.
+  An ID is kept, by the collector's monotonic clock, from when it was first
+  received until the server's own lifetime for it (`expires_at` less
+  `requested_at`, both the server's times) and an hour more have passed; a
+  refused one for the hour alone. The collector's wall clock plays no part,
+  so a clock set hours wrong neither forgets an ID early nor keeps it long.
+  At most 1,000 are kept, those expiring last.
   """
 
   @enforce_keys [:ids]
   defstruct @enforce_keys
 
-  @type t :: %__MODULE__{ids: %{String.t() => DateTime.t()}}
+  @typedoc "When each ID is forgotten, in monotonic milliseconds."
+  @type t :: %__MODULE__{ids: %{String.t() => integer()}}
 
-  @grace_s 3_600
+  @grace_ms 3_600_000
   @limit 1_000
 
   @spec new() :: t()
@@ -25,21 +29,20 @@ defmodule Alavi.Intake.Seen do
   @spec seen?(t(), String.t()) :: boolean()
   def seen?(%__MODULE__{ids: ids}, id), do: Map.has_key?(ids, id)
 
-  @spec remember(t(), String.t(), DateTime.t()) :: t()
-  def remember(%__MODULE__{ids: ids}, id, expires_at) do
+  @doc "Remember `id`, received at `now` (monotonic milliseconds), for `ttl_ms` and the grace."
+  @spec remember(t(), String.t(), non_neg_integer(), integer()) :: t()
+  def remember(%__MODULE__{ids: ids}, id, ttl_ms, now) do
     kept =
       ids
-      |> Map.put(id, expires_at)
-      |> Enum.sort_by(fn {_id, at} -> at end, {:desc, DateTime})
+      |> Map.put(id, now + ttl_ms + @grace_ms)
+      |> Enum.sort_by(fn {_id, forget_at} -> forget_at end, :desc)
       |> Enum.take(@limit)
 
     %__MODULE__{ids: Map.new(kept)}
   end
 
-  @doc "Forget the IDs whose grace after expiry has passed at `now`."
-  @spec prune(t(), DateTime.t()) :: t()
-  def prune(%__MODULE__{ids: ids}, now) do
-    cutoff = DateTime.add(now, -@grace_s, :second)
-    %__MODULE__{ids: Map.reject(ids, fn {_id, at} -> DateTime.before?(at, cutoff) end)}
-  end
+  @doc "Forget the IDs whose time has passed at `now` (monotonic milliseconds)."
+  @spec prune(t(), integer()) :: t()
+  def prune(%__MODULE__{ids: ids}, now),
+    do: %__MODULE__{ids: Map.reject(ids, fn {_id, forget_at} -> forget_at < now end)}
 end

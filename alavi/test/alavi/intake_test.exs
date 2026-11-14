@@ -11,7 +11,7 @@ defmodule Alavi.IntakeTest do
   @host "127.0.0.1"
   @id "7d2c1f0e-4b3a-4c5d-8e6f-1a2b3c4d5e6f"
   @other "0b6f8d2e-5c1a-4e7b-9a3d-2f4c6e8a0b1c"
-  @now ~U[2026-11-01 00:00:00Z]
+  @now 0
 
   defp job(changes \\ %{}) do
     Map.merge(
@@ -47,7 +47,13 @@ defmodule Alavi.IntakeTest do
   describe "Request.parse/1" do
     test "a read on demand, its id in lower case" do
       assert Request.parse(job(%{"request_id" => String.upcase(@id), "meters" => ["A", "B"]})) ==
-               {:ok, %Request{id: @id, meters: ["A", "B"], expires_at: ~U[2026-11-01 01:00:00Z]}}
+               {:ok,
+                %Request{
+                  id: @id,
+                  meters: ["A", "B"],
+                  expires_at: ~U[2026-11-01 01:00:00Z],
+                  ttl_ms: 3_600_000
+                }}
     end
 
     test "another kind, or meters that are not distinct serials, is refused under its id" do
@@ -67,6 +73,21 @@ defmodule Alavi.IntakeTest do
       assert {:refuse, @id, ^expires, "no kind"} = Request.parse(Map.delete(job(), "kind"))
     end
 
+    test "a job without a requested_at before its expires_at is refused under its id" do
+      expires = ~U[2026-11-01 01:00:00Z]
+
+      for changes <- [
+            %{"requested_at" => "earlier"},
+            %{"requested_at" => nil},
+            %{"requested_at" => "2026-11-01T01:00:00+00:00"},
+            %{"requested_at" => "2026-11-01T02:00:00+00:00"}
+          ] do
+        assert {:refuse, @id, ^expires, _why} = Request.parse(job(changes))
+      end
+
+      assert {:refuse, @id, ^expires, _why} = Request.parse(Map.delete(job(), "requested_at"))
+    end
+
     test "a job without a usable id or expiry is an error" do
       for job <- [
             job(%{"request_id" => "request-1"}),
@@ -82,18 +103,18 @@ defmodule Alavi.IntakeTest do
   end
 
   describe "Seen" do
-    test "an id is remembered until an hour after it expires" do
-      seen = Seen.remember(Seen.new(), @id, @now)
+    test "an id is remembered from its receipt for its lifetime and an hour more" do
+      seen = Seen.remember(Seen.new(), @id, 3_600_000, @now)
       assert Seen.seen?(seen, @id)
       refute Seen.seen?(seen, @other)
-      assert seen |> Seen.prune(DateTime.add(@now, 3_600, :second)) |> Seen.seen?(@id)
-      refute seen |> Seen.prune(DateTime.add(@now, 3_601, :second)) |> Seen.seen?(@id)
+      assert seen |> Seen.prune(@now + 7_200_000) |> Seen.seen?(@id)
+      refute seen |> Seen.prune(@now + 7_200_001) |> Seen.seen?(@id)
     end
 
     test "at most 1,000 are kept, those expiring last" do
       seen =
         Enum.reduce(0..1_000, Seen.new(), fn n, seen ->
-          Seen.remember(seen, "id-#{n}", DateTime.add(@now, n, :second))
+          Seen.remember(seen, "id-#{n}", 3_600_000, @now + n)
         end)
 
       assert map_size(seen.ids) == 1_000
@@ -178,6 +199,25 @@ defmodule Alavi.IntakeTest do
       refute_receive {:recorded, [%{request_id: @id} | _]}, 300
     end
 
+    test "a request is run once however far the collector's clock is from the server's", ctx do
+      # Server times hours behind a fast collector clock, and years ahead of a slow one.
+      for {id, {requested, expires}} <- [
+            {@id, {"2000-01-01T00:00:00Z", "2000-01-01T01:00:00Z"}},
+            {@other, {"2100-01-01T00:00:00Z", "2100-01-01T01:00:00Z"}}
+          ] do
+        listed = [
+          job(%{"request_id" => id, "requested_at" => requested, "expires_at" => expires})
+        ]
+
+        intake = Intake.offer(ctx.intake, listed, @now)
+        assert [%Reading{unit_id: 3, request_id: ^id} | _] = requested!()
+
+        intake = Intake.offer(intake, listed, @now + 60_000)
+        Intake.offer(intake, listed, @now + 7_200_000)
+        refute_receive {:recorded, [%{request_id: ^id} | _]}, 300
+      end
+    end
+
     test "the serial read at a unit is what a request finds it by", ctx do
       Simulator.identify(ctx.sim, 2, :serial, "READ-2")
       # A read of unit 2 that reads the new serial, as a round would.
@@ -220,10 +260,11 @@ defmodule Alavi.IntakeTest do
       assert log =~ ~s|request_id "x" is not a UUID| and log =~ "jobs is not a list"
     end
 
-    test "an id expired an hour ago is forgotten, so listed again it is run again", ctx do
+    test "an id is forgotten its lifetime and an hour after receipt, so listed again it is run again",
+         ctx do
       intake = Intake.offer(ctx.intake, [job(%{"meters" => ["SIM-1"]})], @now)
       assert [%Reading{unit_id: 1, request_id: @id} | _] = requested!()
-      Intake.offer(intake, [job(%{"meters" => ["SIM-1"]})], ~U[2026-11-01 02:00:01Z])
+      Intake.offer(intake, [job(%{"meters" => ["SIM-1"]})], @now + 7_200_001)
       assert [%Reading{unit_id: 1, request_id: @id} | _] = requested!()
     end
   end

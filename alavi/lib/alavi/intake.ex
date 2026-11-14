@@ -33,11 +33,11 @@ defmodule Alavi.Intake do
     do: %__MODULE__{pollers: pollers, endpoints: endpoints, seen: Seen.new()}
 
   # contract: test/alavi/intake_test.exs "offer/3"
-  @doc "The answer's `jobs`, at `now` by the collector's clock."
-  @spec offer(t(), term(), DateTime.t()) :: t()
+  @doc "The answer's `jobs`, received at `now` (monotonic milliseconds)."
+  @spec offer(t(), term(), integer()) :: t()
   def offer(%__MODULE__{} = intake, jobs, now) when is_list(jobs) do
     intake = %{intake | seen: Seen.prune(intake.seen, now)}
-    Enum.reduce(jobs, intake, &take(Request.parse(&1), &2))
+    Enum.reduce(jobs, intake, &take(Request.parse(&1), &2, now))
   end
 
   def offer(intake, jobs, _now) do
@@ -45,25 +45,25 @@ defmodule Alavi.Intake do
     intake
   end
 
-  defp take({:error, why}, intake) do
+  defp take({:error, why}, intake, _now) do
     Logger.warning("alavi intake: job not run: #{why}")
     intake
   end
 
-  defp take({:refuse, id, expires_at, why}, intake) do
+  defp take({:refuse, id, _expires_at, why}, intake, now) do
     if Seen.seen?(intake.seen, id),
       do: intake,
-      else: refuse(remember(intake, id, expires_at), id, why)
+      else: refuse(remember(intake, id, 0, now), id, why)
   end
 
-  defp take({:ok, %Request{id: id} = request}, intake) do
+  defp take({:ok, %Request{id: id} = request}, intake, now) do
     if Seen.seen?(intake.seen, id),
       do: intake,
-      else: start(remember(intake, id, request.expires_at), request)
+      else: start(remember(intake, id, request.ttl_ms, now), request)
   end
 
-  defp remember(intake, id, expires_at),
-    do: %{intake | seen: Seen.remember(intake.seen, id, expires_at)}
+  defp remember(intake, id, ttl_ms, now),
+    do: %{intake | seen: Seen.remember(intake.seen, id, ttl_ms, now)}
 
   defp refuse(intake, id, why) do
     Logger.warning("alavi intake: request #{id} not run: #{why}")
