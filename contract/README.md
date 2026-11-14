@@ -9,7 +9,10 @@ What the collector and the server share. Nothing else is shared between them.
 - `profiles/*.json`: meter register maps. Each lists its `sources` by ID, and
   each entry and identity check names the one it came from (an entry may
   instead be marked `placeholder`). `verified_on_device` is the date an entry
-  was checked against a real meter, or null.
+  was checked against a real meter, or null. A profile's `firmware` section
+  says where the meter reports its software and firmware names and the Modbus
+  protocol version; they are informational, and never gate a read or label a
+  reading.
 - `fixtures/`: example messages. Both sides test against them; a fixture's raw
   words must decode to its stated value under its profile.
   `batch.v1.cases.json` lists changes to the basic batch that the schema must
@@ -32,6 +35,9 @@ What the collector and the server share. Nothing else is shared between them.
   order, and words that must decode to no value. Also computed independently
   of any collector. Every implementation that decodes registers must give
   each value and refuse each input; changing a value changes what is billed.
+  `firmware-names.v1.json` gives, under each profile, what is read for the
+  names, and words with the text each must decode to or the reason it must be
+  refused. Every implementation that reads names must give each.
 
 A batch says nothing about which collector sent it: the server takes that from
 the token the batch is sent with. A batch carries its readings, the reads that
@@ -43,6 +49,11 @@ serial read in its round, or null when none could be read.
 A batch may also carry `firmware_reads`: a meter's software and firmware
 names, each as decoded under its profile's `firmware` section or null when the
 meter did not give it, with the serial and product code read in that round.
+The collector reads the names in its first round after start, once a day, and
+in the round a meter's serial or product code changes; it sends a read only
+when the serial, product code or names differ from the last it sent for that
+endpoint and unit, and always the first after it starts. A batch with nothing
+changed has none. Readings do not carry firmware.
 
 Values are decimal strings, never JSON numbers, so no float ever carries
 energy or money.

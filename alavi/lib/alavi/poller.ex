@@ -1,4 +1,11 @@
 defmodule Alavi.Poller do
+  @moduledoc """
+  Polls one endpoint's meters. Each round, per meter: the identity, then the
+  registers, recorded to the sink; then its firmware names, when
+  `Alavi.Poller.Names` says they are due, unless the meter stopped answering
+  during its register reads.
+  """
+
   use GenServer
 
   require Logger

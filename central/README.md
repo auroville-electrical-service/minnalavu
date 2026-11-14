@@ -26,9 +26,11 @@ The directory is not named `minnalavu/`, since that is the repo itself.
   read is a fact about an address, keyed on `(collector_id, endpoint_host,
   endpoint_port, unit_id, register_key, read_at)`, and carries the serial read
   in its round, or none. `firmware_reads`: a meter's software and firmware
-  names as read, keyed like a missed read on its address and time, a name it
-  did not give NULL. `batches` (one row per batch, as
-  first received), `uploads` (every arrival of a batch, with the collector's
+  names as read, with the serial and product code read with them, keyed on
+  `(collector_id, endpoint_host, endpoint_port, unit_id, read_at)`, a name it
+  did not give NULL; a collector sends one when something in it changed, and
+  the first after it starts, so the latest record holds until the next.
+  `batches` (one row per batch, as first received), `uploads` (every arrival of a batch, with the collector's
   backlog), `reading_conflicts` (a reading whose key was already taken by one
   with other content) and `collectors`. Nothing in `store` can be updated,
   deleted or truncated, by any role (triggers).

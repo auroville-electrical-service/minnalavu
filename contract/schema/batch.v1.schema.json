@@ -68,7 +68,7 @@
       "items": { "$ref": "#/$defs/missed_read" }
     },
     "firmware_reads": {
-      "description": "Meters' software and firmware names. The collector sends a meter's when they differ from the last it sent for that address, and the first after it starts. Optional.",
+      "description": "Meters' software and firmware names. The collector sends a meter's when they, or the serial or product code read with them, differ from the last it sent for that endpoint and unit, and the first after it starts. Optional: a batch with nothing changed has none.",
       "type": "array",
       "items": { "$ref": "#/$defs/firmware_read" }
     }
@@ -209,7 +209,7 @@
       }
     },
     "name": {
-      "description": "A software or firmware name as decoded under the meter's profile (firmware section), or null when the meter did not give it: it answered blank, or refused the read.",
+      "description": "A software or firmware name as decoded under the meter's profile (firmware section), or null when the meter did not give it: it answered blank or with text that is not printable, or refused the read.",
       "type": ["string", "null"],
       "minLength": 1,
       "maxLength": 250,

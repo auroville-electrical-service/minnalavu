@@ -51,6 +51,16 @@ the serial read. A meter whose identity read fails, or whose serial is empty
 or not printable, gives missed reads for that round, with no serial if none
 was read.
 
+A meter's software and firmware names and Modbus protocol version (its
+profile's `firmware` section) are read after its readings are recorded: in the
+first round after start, when the last names read is a day old, and in the
+round its serial or product code differs from the last round's. They go to the
+server only when they, or the serial or product code read with them, differ
+from the last sent for that endpoint and unit, and always the first after
+start. A name the meter does not give is sent as null. A names read that fails
+is logged and tried again the next round; it is never a missed read, and
+readings never wait on it.
+
 ## Clock
 
 On Windows each batch's clock status comes from the Windows Time service:
@@ -65,9 +75,9 @@ display language. Elsewhere the status is always `unsynced`.
 What the collector is doing is kept in memory and written, every few seconds
 when it has changed, to `status.json` in `log.dir`, beside the log: per
 endpoint its last rounds and failures, per meter the serial and product code
-read and its register values as read, the raw-bytes lines, the buffer's
-backlog, the uplink's last and next attempt, the clock, the release version and
-the settings (never the token). It is replaced whole (a temporary file renamed
+read, its firmware names as last read and its register values as read, the
+raw-bytes lines, the buffer's backlog, the uplink's last and next attempt, the
+clock, the release version and the settings (never the token). It is replaced whole (a temporary file renamed
 over it), and the recent history in it is lost on restart: the log and the
 buffer are the record. Settings `schema_version` 1 files are refused: version 2
 added `status`.
@@ -78,8 +88,9 @@ The same is shown as a page, on the collector's own PC only: open
 few seconds; `/status.json` is the same data as the file. It shows the clock,
 uplink, buffer backlog, version and start time, then per endpoint its framing,
 last rounds per unit ID and recent failures, per meter the serial expected and
-read (a mismatch is marked), the product code, the register values as read and
-the missed reads, then the raw-bytes lines and the settings.
+read (a mismatch is marked), the product code, the firmware names, the
+register values as read and the missed reads, then the raw-bytes lines and the
+settings.
 
 What it does not do: it never acts. There is no control on it: no settings
 editing, no "poll now", no register read; any method but GET (and HEAD) is

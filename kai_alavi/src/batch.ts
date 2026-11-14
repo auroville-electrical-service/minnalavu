@@ -63,7 +63,8 @@ export interface MissedRead {
 
 /**
  * A meter's software and firmware names, read in a visit that also read its serial and product
- * code. A name is null where the meter did not give it: it answered blank, or refused the read.
+ * code. A name is null where the meter did not give it: it answered blank or with text that is not
+ * printable, or refused the read. A handheld reads the names on every visit.
  */
 export interface FirmwareRead {
   readonly meter: IdentifiedMeter;
