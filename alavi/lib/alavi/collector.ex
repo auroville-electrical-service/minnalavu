@@ -16,7 +16,9 @@ defmodule Alavi.Collector do
   `:none` for no uplink (tests that inspect the buffer); the pollers nudge it
   after a read on demand only if it has a `name`. `clock_status` is the
   options of an `Alavi.Clock.Windows` to start first, or `:none`; the buffer's
-  `clock_status` must read it if there is one.
+  `clock_status` must read it if there is one. `pollers` is the name to
+  register the `Alavi.Pollers` under; without it they are unnamed (tests that
+  start several collectors).
   """
   @type option ::
           {:config, Config.t()}
@@ -26,6 +28,7 @@ defmodule Alavi.Collector do
           | {:raw_log, RawLog.limits()}
           | {:clock_status, [Clock.Windows.option()] | :none}
           | {:status, GenServer.server()}
+          | {:pollers, atom()}
           | {:name, atom()}
 
   # contract: test/alavi/collector_test.exs "start_link/1"
@@ -56,7 +59,8 @@ defmodule Alavi.Collector do
          uplink: uplink,
          raw_log: settings.raw_bytes_log,
          clock_status: watch,
-         status: Status
+         status: Status,
+         pollers: Pollers
        ]}
     end
   end
@@ -85,6 +89,8 @@ defmodule Alavi.Collector do
       status: status,
       uplink: nudge
     ]
+
+    pollers = pollers ++ for {:pollers, name} <- opts, do: {:name, name}
 
     watch =
       case Keyword.fetch!(opts, :clock_status) do

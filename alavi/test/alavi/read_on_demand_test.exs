@@ -31,6 +31,10 @@ defmodule Alavi.ReadOnDemandTest do
     events
   end
 
+  # A suspended poller has the call in its mailbox.
+  defp await_queued!(pid),
+    do: eventually!(fn -> Process.info(pid, :message_queue_len) == {:message_queue_len, 1} end)
+
   # The next sink or answer message, whichever the poller sent first.
   defp next_message! do
     receive do
@@ -88,21 +92,29 @@ defmodule Alavi.ReadOnDemandTest do
 
     test "leaves when each meter is next due as it was" do
       {_sim, port} = start_sim!(:tcp)
+      interval = 2_000
+      started = System.monotonic_time(:millisecond)
 
       sup =
-        start_pollers!([endpoint(port, "tcp", [meter(1, "elite_440")], %{"interval_ms" => 600})])
+        start_pollers!([
+          endpoint(port, "tcp", [meter(1, "elite_440")], %{"interval_ms" => interval})
+        ])
 
       recorded!()
-      first = System.monotonic_time(:millisecond)
-
-      Process.sleep(400)
+      Process.sleep(div(interval, 2))
+      asked = System.monotonic_time(:millisecond)
       assert {:ok, ref} = Poller.read_now(poller!(sup), [1])
       answer!(ref)
       recorded!()
 
-      # Due 600 ms after the first round; reset by the request it would be about 1 000 ms.
-      recorded!()
-      assert System.monotonic_time(:millisecond) - first < 850
+      # The first round started after `started`, so the next is due no earlier
+      # than `started + interval`: a request that made the meter due at once
+      # breaks the first bound, one that pushed it to `asked + interval` the
+      # second. A round may start up to `asked - started` late and still pass.
+      recorded!(2 * interval)
+      next = System.monotonic_time(:millisecond)
+      assert next >= started + interval
+      assert next < asked + interval
     end
 
     test "requests run one after another, in the order asked" do
@@ -127,9 +139,23 @@ defmodule Alavi.ReadOnDemandTest do
       assert {:ok, ref} = Poller.read_now(poller!(sup), [1, 2])
       events = answer!(ref, 2_000)
 
-      # On the connection the round held, or a new one refused: either way, missed.
       assert Enum.map(events, & &1.unit_id) == [1, 1, 2, 2]
       assert Enum.all?(events, &match?(%MissedRead{}, &1))
+      [held, held_rest, next, next_rest] = Enum.map(events, &{&1.reason, &1.attempts})
+
+      # Meter 1's reads on the connection the round held get no reply, and the
+      # client drops it; meter 2's connect then times out on the full backlog
+      # (`Simulator.offline/1`), or, if a loaded machine let it through, its
+      # reads time out as meter 1's did.
+      assert [held, held_rest] == [{:timeout, 3}, {:timeout, 0}]
+
+      assert [next, next_rest] in [
+               [
+                 {{:unreachable, {:socket, :timeout}}, 1},
+                 {{:unreachable, {:socket, :timeout}}, 0}
+               ],
+               [{:timeout, 3}, {:timeout, 0}]
+             ]
     end
 
     test "no unit IDs, or one not on the endpoint, is refused and nothing is read" do
@@ -199,6 +225,25 @@ defmodule Alavi.ReadOnDemandTest do
       assert length(readings) == 4
       assert Enum.take(readings, -2) == Enum.map(events, &Reading.to_wire/1)
     end
+
+    test "a requester gone before its read runs still has its meters read and recorded" do
+      {_sim, port} = start_sim!(:tcp)
+      sup = start_pollers!([chain(port)])
+      round!()
+      pid = poller!(sup)
+
+      # Suspended, the poller holds the call until the requester is dead.
+      :ok = :sys.suspend(pid)
+      requester = spawn(fn -> Poller.read_now(pid, [3]) end)
+      :ok = await_queued!(pid)
+      Process.exit(requester, :kill)
+      refute Process.alive?(requester)
+      :ok = :sys.resume(pid)
+
+      assert [%Reading{unit_id: 3} | _] = recorded!()
+      assert {:ok, ref} = Poller.read_now(pid, [1])
+      assert [%Reading{unit_id: 1} | _] = answer!(ref)
+    end
   end
 
   describe "Pollers.read_now/3" do
@@ -226,6 +271,21 @@ defmodule Alavi.ReadOnDemandTest do
       assert Pollers.read_now(sup, {@host, other}, [1]) == {:error, :polled_by_other_system}
       assert Pollers.read_now(sup, {"10.9.9.9", port}, [1]) == {:error, :unknown_endpoint}
       assert Pollers.read_now(sup, {@host, port}, [7]) == {:error, {:unknown_units, [7]}}
+    end
+
+    test "a poller that exits before it replies is reported, and the caller lives on" do
+      {_sim, port} = start_sim!(:tcp)
+      sup = start_pollers!([chain(port)])
+      round!()
+      pid = poller!(sup)
+
+      # Suspended, the poller holds the call unanswered until it is killed.
+      :ok = :sys.suspend(pid)
+      call = Task.async(fn -> Pollers.read_now(sup, {@host, port}, [1]) end)
+      :ok = await_queued!(pid)
+      Process.exit(pid, :kill)
+
+      assert Task.await(call) == {:error, :poller_down}
     end
   end
 end

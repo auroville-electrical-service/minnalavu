@@ -28,7 +28,8 @@ defmodule Alavi.CollectorTest do
          endpoints,
          uplink \\ :none,
          status \\ no_status(),
-         clock \\ fixed_clock()
+         clock \\ fixed_clock(),
+         named \\ []
        ) do
     name = :"buffer_#{System.unique_integer([:positive])}"
 
@@ -50,7 +51,7 @@ defmodule Alavi.CollectorTest do
       status: status
     ]
 
-    {start_supervised!({Collector, opts}, id: :collector), name}
+    {start_supervised!({Collector, opts ++ named}, id: :collector), name}
   end
 
   defp await_events!(buffer, n, tries \\ 100) do
@@ -199,6 +200,23 @@ defmodule Alavi.CollectorTest do
     keys
     |> Enum.map(fn {_port, unit} = k -> div(Map.get(counts, k, 0), @round[unit]) end)
     |> Enum.min()
+  end
+
+  describe "start_link/1, with its pollers named" do
+    test "a read on demand reaches them by name", ctx do
+      {_sim, port} = start_sim!(:tcp)
+      endpoints = [endpoint(port, "tcp", [meter(1, "elite_440")])]
+      pollers = :"pollers_#{System.unique_integer([:positive])}"
+
+      {collector, _buffer} =
+        start_collector!(ctx.tmp_dir, endpoints, :none, no_status(), fixed_clock(),
+          pollers: pollers
+        )
+
+      assert children(collector)[Alavi.Pollers] == Process.whereis(pollers)
+      assert {:ok, ref} = Alavi.Pollers.read_now(pollers, {"127.0.0.1", port}, [1])
+      assert_receive {:alavi_read, ^ref, [%Reading{unit_id: 1} | _]}, 2_000
+    end
   end
 
   describe "start_link/1, fed to a status" do
@@ -358,6 +376,11 @@ defmodule Alavi.CollectorTest do
 
       assert %{max_bytes: 2_000_000_000, max_batch_events: 1000, name: Buffer} =
                Map.new(opts[:buffer])
+    end
+
+    test "names the pollers, for a read on demand to reach", %{settings: settings} do
+      assert {:ok, opts} = Collector.load(settings, @linux)
+      assert opts[:pollers] == Alavi.Pollers
     end
 
     test "loads the uplink's settings, verifying the server against the OS's CAs",

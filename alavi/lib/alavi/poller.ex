@@ -52,6 +52,9 @@ defmodule Alavi.Poller do
   once the step under way ends, and the caller is then sent
   `{:alavi_read, ref, events}`: the readings and missed reads it recorded,
   in the order read. The reply waits for that step.
+
+  The caller is not monitored: if it is gone by then, the read still runs
+  and its events are recorded like a round's; only the answer is lost.
   """
   @spec read_now(GenServer.server(), [1..247]) ::
           {:ok, reference()} | {:error, :no_units | {:unknown_units, [term()]}}
@@ -126,6 +129,8 @@ defmodule Alavi.Poller do
 
   # Waiting on the timer, wake now and leave the timer stale; with no timer a
   # `:step` is already on its way, and a second would break the one wake-up.
+  # No test shows it: a second `:step` reorders nothing (the schedule picks
+  # each step), it only delays later calls in the mailbox by a step.
   defp queued(%{timer: nil} = state, ref), do: {:reply, {:ok, ref}, state}
   defp queued(state, ref), do: {:reply, {:ok, ref}, %{state | timer: nil}, {:continue, :poll}}
 

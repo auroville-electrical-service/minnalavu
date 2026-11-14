@@ -28,21 +28,31 @@ defmodule Alavi.Pollers do
   end
 
   # contract: test/alavi/read_on_demand_test.exs "Pollers.read_now/3"
-  @doc "`Alavi.Poller.read_now/2` on the poller of the endpoint at `host` and `port`."
+  @doc """
+  `Alavi.Poller.read_now/2` on the poller of the endpoint at `host` and
+  `port`. A poller that exits before it replies gives `:poller_down`.
+  """
   @spec read_now(Supervisor.supervisor(), {String.t(), :inet.port_number()}, [1..247]) ::
           {:ok, reference()}
           | {:error,
              :unknown_endpoint
              | :polled_by_other_system
              | :restarting
+             | :poller_down
              | :no_units
              | {:unknown_units, [term()]}}
   def read_now(pollers, {host, port}, units) do
     case List.keyfind(Supervisor.which_children(pollers), {Poller, host, port}, 0) do
-      {_id, pid, _type, _modules} when is_pid(pid) -> Poller.read_now(pid, units)
+      {_id, pid, _type, _modules} when is_pid(pid) -> call(pid, units)
       {_id, :undefined, _type, _modules} -> {:error, :polled_by_other_system}
       {_id, :restarting, _type, _modules} -> {:error, :restarting}
       nil -> {:error, :unknown_endpoint}
     end
+  end
+
+  defp call(pid, units) do
+    Poller.read_now(pid, units)
+  catch
+    :exit, _reason -> {:error, :poller_down}
   end
 end
