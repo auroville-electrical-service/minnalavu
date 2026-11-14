@@ -38,6 +38,8 @@ defmodule Alavi.UplinkTest do
       target: target,
       clock: fn -> ~U[2026-11-01 00:05:00Z] end,
       idle_ms: 20,
+      heartbeat_ms: 60_000,
+      intake: :none,
       backoff_ms: %{min: 10, max: 40},
       timeout_ms: 2_000,
       status: Alavi.NoStatus
@@ -251,6 +253,88 @@ defmodule Alavi.UplinkTest do
     end
   end
 
+  describe "start_link/1, with nothing to send" do
+    defp valid!(json) do
+      schema =
+        @contract |> Path.join("schema/batch.v1.schema.json") |> File.read!() |> JSON.decode!()
+
+      assert {:ok, _} = JSV.validate(json, JSV.build!(schema, formats: true))
+    end
+
+    test "with nothing to send for heartbeat_ms, an empty batch in the schema's shape", ctx do
+      server = server!([TestServer.stored()])
+      uplink!(ctx.buffer, TestServer.port(server), heartbeat_ms: 150)
+      refute_receive {:request, _}, 100
+
+      first = request!().json
+      valid!(first)
+
+      assert %{"readings" => [], "missed_reads" => [], "clock" => %{"source" => "unsynced"}} =
+               first
+
+      assert first["backlog"]["events"] == 0
+
+      # The next only once heartbeat_ms has passed again, under a new id.
+      refute_receive {:request, _}, 100
+      assert request!().json["batch_id"] != first["batch_id"]
+      assert %{batches: 0, events: 0} = Buffer.backlog(ctx.buffer)
+    end
+
+    test "an answer to a batch puts the heartbeat off", ctx do
+      server = server!([TestServer.stored()])
+      record!(ctx.buffer, 1)
+      uplink!(ctx.buffer, TestServer.port(server), heartbeat_ms: 300)
+
+      assert request!().json["readings"] != []
+      refute_receive {:request, _}, 200
+      assert request!().json["readings"] == []
+    end
+
+    test "a heartbeat that is not stored is sent again, as a new one, after the backoff", ctx do
+      server = server!([TestServer.status(503), TestServer.stored()])
+
+      log =
+        capture_log(fn ->
+          uplink!(ctx.buffer, TestServer.port(server),
+            heartbeat_ms: 1,
+            backoff_ms: %{min: 100, max: 100}
+          )
+
+          first = request!().json["batch_id"]
+          refute_receive {:request, _}, 50
+          assert request!().json["batch_id"] != first
+        end)
+
+      assert log =~ "heartbeat" and log =~ "HTTP 503"
+      assert %{batches: 0, quarantined: 0} = Buffer.backlog(ctx.buffer)
+    end
+
+    test "jobs and unknown requests in an answer are logged when there is no intake", ctx do
+      answer = fn %{body: body} ->
+        {200,
+         JSON.encode!(%{
+           "batch_id" => JSON.decode!(body)["batch_id"],
+           "readings" => %{},
+           "missed_reads" => %{},
+           "jobs" => [%{"request_id" => "7d2c1f0e-4b3a-4c5d-8e6f-1a2b3c4d5e6f"}],
+           "unknown_requests" => ["0b6f8d2e-5c1a-4e7b-9a3d-2f4c6e8a0b1c"]
+         })}
+      end
+
+      record!(ctx.buffer, 1)
+      server = server!([answer, TestServer.stored()])
+
+      log =
+        capture_log(fn ->
+          uplink!(ctx.buffer, TestServer.port(server))
+          await_backlog!(ctx.buffer, &(&1.batches == 0))
+        end)
+
+      assert log =~ "no intake to run them" and log =~ "7d2c1f0e"
+      assert log =~ "does not know" and log =~ "0b6f8d2e"
+    end
+  end
+
   describe "nudge/1" do
     test "an idle uplink sends what was recorded at once, not after its idle wait", ctx do
       server = server!([TestServer.stored()])
@@ -266,6 +350,17 @@ defmodule Alavi.UplinkTest do
       # The idle wait it replaced sends nothing more.
       Uplink.nudge(uplink)
       refute_receive {:request, _}, 200
+    end
+
+    test "a nudge after a heartbeat sends what was recorded at once", ctx do
+      server = server!([TestServer.stored()])
+      uplink = uplink!(ctx.buffer, TestServer.port(server), idle_ms: 60_000, heartbeat_ms: 1)
+      assert request!().json["readings"] == []
+      refute_receive {:request, _}, 100
+
+      record!(ctx.buffer, 1)
+      Uplink.nudge(uplink)
+      assert %{json: %{"readings" => [_, _]}} = request!()
     end
 
     test "an uplink backing off after a failed send waits out its backoff", ctx do

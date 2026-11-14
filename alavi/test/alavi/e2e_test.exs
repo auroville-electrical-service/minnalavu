@@ -10,7 +10,7 @@ defmodule Alavi.EndToEndTest do
 
   import Alavi.PollerCase
 
-  alias Alavi.{Buffer, Clock, Collector}
+  alias Alavi.{Buffer, Clock, Collector, Uplink}
   alias Alavi.Uplink.Target
 
   @moduletag :e2e
@@ -41,7 +41,7 @@ defmodule Alavi.EndToEndTest do
     String.trim(token)
   end
 
-  defp start_collector!(dir, endpoints, token) do
+  defp start_collector!(dir, endpoints, token, named \\ []) do
     {:ok, target} =
       Target.parse(env!("MINNALAVU_API_URL"), token, allow_http: true, cacerts: [])
 
@@ -71,7 +71,7 @@ defmodule Alavi.EndToEndTest do
       status: no_status()
     ]
 
-    start_supervised!({Collector, opts})
+    start_supervised!({Collector, opts ++ named})
   end
 
   defp await!(what, check, tries \\ 200) do
@@ -187,5 +187,132 @@ defmodule Alavi.EndToEndTest do
 
     assert %{"clock" => "unsynced", "backlog_max_bytes" => 1_000_000} = upload
     assert upload["backlog_events"] >= 1
+  end
+
+  defp new_collector! do
+    # Random, not unique_integer: the dev database keeps earlier runs' collectors.
+    id = "e2e_#{Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)}"
+    {id, collector!(id)}
+  end
+
+  test "a request made through jobs.request_job is read by the collector and answered", ctx do
+    {id, token} = new_collector!()
+    {sim, port} = start_sim!(:tcp)
+    serial = String.upcase(id)
+    :ok = Simulator.identify(sim, 3, :serial, serial)
+
+    # The registry knows the meter by the serial it reports; the polling config expects none.
+    sql!("""
+    SELECT to_json(admin.register_endpoint(
+      endpoint_id => '#{id}_ep', valid_from => '2026-01-01Z', collector_id => '#{id}',
+      host => '127.0.0.1', port => #{port}, framing => 'tcp', polled_by_other_system => false,
+      timeout_ms => 100, max_timeouts => 3, retries => 2, busy_backoff_ms => 10,
+      reconnect_backoff_min_ms => 10, reconnect_backoff_max_ms => 40, interval_ms => 1500))
+    """)
+
+    sql!("""
+    SELECT to_json(admin.register_meter(serial => '#{serial}', valid_from => '2026-01-01Z',
+      endpoint_id => '#{id}_ep', unit_id => 3, profile => 'elite_500', interval_ms => NULL))
+    """)
+
+    meters = [meter(1, "elite_440"), Map.delete(meter(3, "elite_500"), "serial")]
+    endpoints = [endpoint(port, "tcp", meters, %{"interval_ms" => 1_500})]
+    start_collector!(ctx.tmp_dir, endpoints, token, pollers: Alavi.Pollers)
+
+    count = fn -> sql!("SELECT count(*) FROM store.readings WHERE collector_id = '#{id}'") end
+    await!("the first round stored", fn -> count.() >= 6 end)
+
+    request =
+      sql!("""
+      SET ROLE minkanakku_staff;
+      SELECT to_json(jobs.request_job(collector_id => '#{id}', kind => 'read_on_demand',
+        meters => ARRAY['#{serial}'], requester => 'e2e'))
+      """)
+
+    status = fn ->
+      [row] =
+        rows!("""
+        SELECT state::text AS state, readings, missed_reads, meters
+        FROM jobs.request_status WHERE request_id = '#{request}'
+        """)
+
+      row
+    end
+
+    await!("the request answered", fn -> status.()["state"] == "answered" end)
+    # Every reading of the read is linked: all of the meter's registers.
+    await!("the read's 4 readings linked", fn -> status.()["readings"] == 4 end)
+    assert %{"missed_reads" => 0, "meters" => [^serial]} = status.()
+
+    linked =
+      rows!("""
+      SELECT l.meter_serial, l.register_key, r.unit_id, r.value::text AS value
+      FROM jobs.request_readings l
+      JOIN store.readings r ON r.collector_id = '#{id}' AND r.meter_serial = l.meter_serial
+        AND r.register_key = l.register_key AND r.read_at = l.read_at
+      WHERE l.request_id = '#{request}'
+      """)
+
+    assert length(linked) == 4
+    assert Enum.all?(linked, &match?(%{"meter_serial" => ^serial, "unit_id" => 3}, &1))
+
+    # Listed in no answer once answered, and run once: no more linked as rounds go on.
+    Process.sleep(3_500)
+    assert status.()["readings"] == 4
+  end
+
+  test "a heartbeat is stored as an upload of nothing", ctx do
+    {id, token} = new_collector!()
+
+    {:ok, target} =
+      Target.parse(env!("MINNALAVU_API_URL"), token, allow_http: true, cacerts: [])
+
+    buffer = :"buffer_#{id}"
+
+    start_supervised!(
+      {Buffer,
+       dir: ctx.tmp_dir,
+       max_bytes: 1_000_000,
+       max_batch_events: 1_000,
+       clock_status: &Clock.unsynced/0,
+       name: buffer}
+    )
+
+    start_supervised!(
+      {Uplink,
+       buffer: buffer,
+       target: target,
+       clock: &DateTime.utc_now/0,
+       idle_ms: 50,
+       heartbeat_ms: 100,
+       intake: :none,
+       backoff_ms: %{min: 50, max: 500},
+       timeout_ms: 5_000,
+       status: no_status()}
+    )
+
+    uploads = fn ->
+      rows!("""
+      SELECT u.readings_inserted, u.missed_reads_inserted, u.backlog_events,
+             b.clock_source::text AS clock
+      FROM store.uploads u JOIN store.batches b USING (batch_id)
+      WHERE u.collector_id = '#{id}'
+      """)
+    end
+
+    await!("two heartbeats stored", fn -> length(uploads.()) >= 2 end)
+
+    assert Enum.all?(
+             uploads.(),
+             &match?(
+               %{
+                 "readings_inserted" => 0,
+                 "missed_reads_inserted" => 0,
+                 "backlog_events" => 0,
+                 "clock" => "unsynced"
+               },
+               &1
+             )
+           )
   end
 end

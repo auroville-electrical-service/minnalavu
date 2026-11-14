@@ -217,6 +217,44 @@ defmodule Alavi.CollectorTest do
       assert {:ok, ref} = Alavi.Pollers.read_now(pollers, {"127.0.0.1", port}, [1])
       assert_receive {:alavi_read, ^ref, [%Reading{unit_id: 1} | _]}, 2_000
     end
+
+    test "a job the server lists is read once, and its readings sent at once, tagged", ctx do
+      {_sim, port} = start_sim!(:tcp)
+      endpoints = [endpoint(port, "tcp", [meter(1, "elite_440"), meter(3, "elite_500")])]
+      pollers = :"pollers_#{System.unique_integer([:positive])}"
+      id = "7d2c1f0e-4b3a-4c5d-8e6f-1a2b3c4d5e6f"
+
+      job = %{
+        "request_id" => id,
+        "kind" => "read_on_demand",
+        "meters" => ["SIM-3"],
+        "requested_at" => "2026-11-01T00:00:00Z",
+        "expires_at" => DateTime.utc_now() |> DateTime.add(3_600) |> DateTime.to_iso8601()
+      }
+
+      # As the server does, the job is listed in every answer.
+      answer = fn %{body: body} ->
+        {200, JSON.encode!(%{"batch_id" => JSON.decode!(body)["batch_id"], "jobs" => [job]})}
+      end
+
+      server = start_supervised!({TestServer, owner: self(), answers: [answer]})
+      uplink = uplink_to(TestServer.port(server)) ++ [name: :"uplink_#{pollers}"]
+
+      start_collector!(ctx.tmp_dir, endpoints, uplink, no_status(), &DateTime.utc_now/0,
+        pollers: pollers
+      )
+
+      tagged =
+        posted!([], fn events -> Enum.count(events, &(&1.wire["request_id"] == id)) >= 4 end)
+        |> Enum.filter(&(&1.wire["request_id"] == id))
+
+      assert Enum.all?(tagged, &(key(&1) == {port, 3} and &1.kind == :reading))
+
+      # Listed again in every answer, it is not read again.
+      Process.sleep(300)
+      later = posted_now()
+      refute Enum.any?(later, &(&1.wire["request_id"] == id))
+    end
   end
 
   describe "start_link/1, fed to a status" do
@@ -274,6 +312,15 @@ defmodule Alavi.CollectorTest do
 
       true ->
         flunk("the posted events never matched")
+    end
+  end
+
+  # The readings and missed reads of every request already received.
+  defp posted_now do
+    receive do
+      {:request, %{body: body}} -> events(JSON.decode!(body)) ++ posted_now()
+    after
+      0 -> []
     end
   end
 

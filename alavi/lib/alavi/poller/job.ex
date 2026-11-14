@@ -25,7 +25,8 @@ defmodule Alavi.Poller.Job do
     :names_left,
     :events,
     :down,
-    :requester
+    :requester,
+    :request_id
   ]
   defstruct @enforce_keys
 
@@ -48,7 +49,8 @@ defmodule Alavi.Poller.Job do
           names_left: [identified()],
           events: [[event()]],
           down: term(),
-          requester: requester() | nil
+          requester: requester() | nil,
+          request_id: String.t() | nil
         }
 
   @doc "A round over `meters`, started at `started` (monotonic milliseconds)."
@@ -62,26 +64,31 @@ defmodule Alavi.Poller.Job do
       names_left: [],
       events: [],
       down: nil,
-      requester: nil
+      requester: nil,
+      request_id: nil
     }
   end
 
   # contract: test/alavi/poller/job_test.exs "read_on_demand/4"
   @doc """
   A read on demand of the `units` named, from the endpoint's `meters`, in
-  their chain order, started at `started` (monotonic milliseconds).
+  their chain order, started at `started` (monotonic milliseconds). Its
+  readings and missed reads carry `request_id`.
   """
-  @spec read_on_demand([Meter.t()], [1..247], integer(), requester()) ::
+  @spec read_on_demand([Meter.t()], [1..247], integer(), requester(), String.t() | nil) ::
           {:ok, t()} | {:error, :no_units | {:unknown_units, [term()]}}
-  def read_on_demand(_meters, [], _started, _requester), do: {:error, :no_units}
+  def read_on_demand(meters, units, started, requester, request_id \\ nil)
 
-  def read_on_demand(meters, units, started, requester) when is_list(units) do
+  def read_on_demand(_meters, [], _started, _requester, _request_id), do: {:error, :no_units}
+
+  def read_on_demand(meters, units, started, requester, request_id) when is_list(units) do
     known = Enum.map(meters, & &1.unit_id)
 
     case Enum.reject(units, &(&1 in known)) do
       [] ->
         named = Enum.filter(meters, &(&1.unit_id in units))
-        {:ok, %{poll_round(named, started) | kind: :read_on_demand, requester: requester}}
+        job = poll_round(named, started)
+        {:ok, %{job | kind: :read_on_demand, requester: requester, request_id: request_id}}
 
       unknown ->
         {:error, {:unknown_units, Enum.uniq(unknown)}}

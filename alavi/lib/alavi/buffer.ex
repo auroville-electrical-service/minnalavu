@@ -45,6 +45,11 @@ defmodule Alavi.Buffer do
   @spec take(GenServer.server()) :: {:ok, Batch.t()} | :empty
   def take(buffer), do: GenServer.call(buffer, :take, :infinity)
 
+  # contract: test/alavi/buffer_test.exs "heartbeat/1"
+  @doc "An empty batch with a new ID and the clock's status now, to send when there is nothing else."
+  @spec heartbeat(GenServer.server()) :: Batch.t()
+  def heartbeat(buffer), do: GenServer.call(buffer, :heartbeat, :infinity)
+
   # contract: test/alavi/buffer_test.exs "ack/2"
   @spec ack(GenServer.server(), String.t()) ::
           :ok | {:error, :unknown_batch | {:delete, File.posix()}}
@@ -106,6 +111,11 @@ defmodule Alavi.Buffer do
       state ->
         {:reply, :empty, state}
     end
+  end
+
+  def handle_call(:heartbeat, _from, state) do
+    id = Codec.uuid(Codec.uuid_v4(:crypto.strong_rand_bytes(16)))
+    {:reply, %Batch{id: id, clock: state.clock_status.(), events: []}, state}
   end
 
   def handle_call({:ack, id}, _from, state) do

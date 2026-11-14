@@ -85,6 +85,25 @@ defmodule Alavi.WireTest do
       assert valid?(wire)
       refute Map.has_key?(wire, "firmware_reads")
     end
+
+    test "a heartbeat, a batch with no events, still carries the clock and backlog" do
+      wire = wire([])
+      assert valid?(wire)
+
+      assert %{"readings" => [], "missed_reads" => [], "clock" => %{"source" => "unsynced"}} =
+               wire
+
+      assert wire["backlog"]["events"] == 2
+    end
+
+    test "readings and missed reads of a request carry its id, valid in the schema" do
+      id = "7d2c1f0e-4b3a-4c5d-8e6f-1a2b3c4d5e6f"
+      wire = wire([%{reading() | request_id: id}, %{missed(:timeout) | request_id: id}, names()])
+      assert valid?(wire)
+      assert [%{"request_id" => ^id}] = wire["readings"]
+      assert [%{"request_id" => ^id}] = wire["missed_reads"]
+      refute Map.has_key?(hd(wire["firmware_reads"]), "request_id")
+    end
   end
 
   describe "FirmwareRead.to_wire/1" do
@@ -121,6 +140,13 @@ defmodule Alavi.WireTest do
       assert %{"meter_serial" => "SIM-9", "product_code" => "ELITE440-445"} =
                Reading.to_wire(reading)
     end
+
+    test "a request id only when there is one: the schema refuses null" do
+      refute Map.has_key?(Reading.to_wire(reading()), "request_id")
+
+      assert %{"request_id" => "7d2c1f0e-4b3a-4c5d-8e6f-1a2b3c4d5e6f"} =
+               Reading.to_wire(%{reading() | request_id: "7d2c1f0e-4b3a-4c5d-8e6f-1a2b3c4d5e6f"})
+    end
   end
 
   describe "MissedRead.to_wire/1" do
@@ -140,6 +166,12 @@ defmodule Alavi.WireTest do
 
     defp reason_of(reason) do
       missed(reason) |> MissedRead.to_wire() |> Map.take(["reason", "exception_code", "detail"])
+    end
+
+    test "a request id only when there is one" do
+      refute Map.has_key?(MissedRead.to_wire(missed(:timeout)), "request_id")
+      id = "7d2c1f0e-4b3a-4c5d-8e6f-1a2b3c4d5e6f"
+      assert %{"request_id" => ^id} = MissedRead.to_wire(%{missed(:timeout) | request_id: id})
     end
 
     test "a missed read with no serial read carries null, and never a product code" do

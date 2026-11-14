@@ -4,6 +4,7 @@ defmodule Alavi.Reading do
   `product_code` are what the meter reported in the round the reading was
   taken in, never the config's. `raw_words` keeps what the meter sent, so a
   reading can be decoded again if its profile entry turns out to be wrong.
+  `request_id` is the request a read on demand was made for, or nil.
   """
 
   @enforce_keys [
@@ -18,7 +19,7 @@ defmodule Alavi.Reading do
     :value,
     :unit
   ]
-  defstruct @enforce_keys
+  defstruct @enforce_keys ++ [request_id: nil]
 
   @type endpoint :: %{host: String.t(), port: :inet.port_number()}
 
@@ -33,7 +34,8 @@ defmodule Alavi.Reading do
           timestamp: DateTime.t(),
           raw_words: [0..0xFFFF, ...],
           value: Decimal.t(),
-          unit: String.t()
+          unit: String.t(),
+          request_id: String.t() | nil
         }
 
   # contract: test/alavi/wire_test.exs "Reading.to_wire/1"
@@ -51,5 +53,12 @@ defmodule Alavi.Reading do
       "value" => Decimal.to_string(r.value, :normal),
       "unit" => r.unit
     }
+    |> request(r.request_id)
   end
+
+  # contract: test/alavi/wire_test.exs "Reading.to_wire/1"
+  @doc "`request_id` is on the wire only when set: the schema refuses null."
+  @spec request(map(), String.t() | nil) :: map()
+  def request(wire, nil), do: wire
+  def request(wire, id), do: Map.put(wire, "request_id", id)
 end

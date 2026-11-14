@@ -197,6 +197,8 @@ defmodule Alavi.ReadOnDemandTest do
          target: target,
          clock: &DateTime.utc_now/0,
          idle_ms: 60_000,
+         heartbeat_ms: 60_000,
+         intake: :none,
          backoff_ms: %{min: 10, max: 40},
          timeout_ms: 2_000,
          status: no_status(),
@@ -224,6 +226,25 @@ defmodule Alavi.ReadOnDemandTest do
       readings = JSON.decode!(request.body)["readings"]
       assert length(readings) == 4
       assert Enum.take(readings, -2) == Enum.map(events, &Reading.to_wire/1)
+    end
+
+    test "a request id tags every reading and missed read of the read, and no round's" do
+      {_sim, port} = start_sim!(:tcp, missing_units: :gateway_error)
+      meters = [meter(1, "elite_440"), meter(9, "elite_440")]
+      sup = start_pollers!([endpoint(port, "tcp", meters, %{"interval_ms" => 500})])
+      assert [%{request_id: nil} | _] = recorded!()
+      assert [%{request_id: nil} | _] = recorded!()
+
+      id = "7d2c1f0e-4b3a-4c5d-8e6f-1a2b3c4d5e6f"
+      assert {:ok, ref} = Poller.read_now(poller!(sup), [9, 1], id)
+      events = answer!(ref)
+
+      assert [%Reading{unit_id: 1}, %Reading{}, %MissedRead{unit_id: 9}, %MissedRead{}] = events
+      assert Enum.all?(events, &(&1.request_id == id))
+
+      # Recorded like a round's, meter by meter; the rounds that follow carry none.
+      for _ <- 1..2, do: assert(Enum.all?(recorded!(), &(&1.request_id == id)))
+      for _ <- 1..4, do: assert(Enum.all?(recorded!(), &(&1.request_id == nil)))
     end
 
     test "a requester gone before its read runs still has its meters read and recorded" do
@@ -254,6 +275,10 @@ defmodule Alavi.ReadOnDemandTest do
 
       assert {:ok, ref} = Pollers.read_now(sup, {@host, port}, [2])
       assert [%Reading{unit_id: 2, endpoint: %{port: ^port}} | _] = answer!(ref)
+
+      id = "7d2c1f0e-4b3a-4c5d-8e6f-1a2b3c4d5e6f"
+      assert {:ok, ref} = Pollers.read_now(sup, {@host, port}, [2], id)
+      assert [%Reading{unit_id: 2, request_id: ^id} | _] = answer!(ref)
     end
 
     test "an endpoint not configured, or polled by another system, is refused" do

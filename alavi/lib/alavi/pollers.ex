@@ -29,10 +29,15 @@ defmodule Alavi.Pollers do
 
   # contract: test/alavi/read_on_demand_test.exs "Pollers.read_now/3"
   @doc """
-  `Alavi.Poller.read_now/2` on the poller of the endpoint at `host` and
+  `Alavi.Poller.read_now/3` on the poller of the endpoint at `host` and
   `port`. A poller that exits before it replies gives `:poller_down`.
   """
-  @spec read_now(Supervisor.supervisor(), {String.t(), :inet.port_number()}, [1..247]) ::
+  @spec read_now(
+          Supervisor.supervisor(),
+          {String.t(), :inet.port_number()},
+          [1..247],
+          String.t() | nil
+        ) ::
           {:ok, reference()}
           | {:error,
              :unknown_endpoint
@@ -41,18 +46,50 @@ defmodule Alavi.Pollers do
              | :poller_down
              | :no_units
              | {:unknown_units, [term()]}}
-  def read_now(pollers, {host, port}, units) do
+  def read_now(pollers, {host, port}, units, request_id \\ nil) do
     case List.keyfind(Supervisor.which_children(pollers), {Poller, host, port}, 0) do
-      {_id, pid, _type, _modules} when is_pid(pid) -> call(pid, units)
+      {_id, pid, _type, _modules} when is_pid(pid) -> call(pid, units, request_id)
       {_id, :undefined, _type, _modules} -> {:error, :polled_by_other_system}
       {_id, :restarting, _type, _modules} -> {:error, :restarting}
       nil -> {:error, :unknown_endpoint}
     end
   end
 
-  defp call(pid, units) do
-    Poller.read_now(pid, units)
+  defp call(pid, units, request_id) do
+    Poller.read_now(pid, units, request_id)
   catch
     :exit, _reason -> {:error, :poller_down}
+  end
+
+  # contract: test/alavi/intake_test.exs "Pollers.serials/1"
+  @doc """
+  `Alavi.Poller.serials/1` of every running poller, asked at once, by its
+  endpoint's host and port. A poller that is not running, or exits before
+  it replies, is absent.
+  """
+  @spec serials(Supervisor.supervisor()) ::
+          %{{String.t(), :inet.port_number()} => %{(1..247) => String.t()}}
+  def serials(pollers) do
+    running =
+      for {{Poller, host, port}, pid, _, _} <- Supervisor.which_children(pollers),
+          is_pid(pid),
+          do: {{host, port}, pid}
+
+    running
+    |> Task.async_stream(fn {endpoint, pid} -> {endpoint, serials_of(pid)} end,
+      timeout: :infinity,
+      max_concurrency: max(length(running), 1)
+    )
+    |> Enum.flat_map(fn
+      {:ok, {_endpoint, nil}} -> []
+      {:ok, found} -> [found]
+    end)
+    |> Map.new()
+  end
+
+  defp serials_of(pid) do
+    Poller.serials(pid)
+  catch
+    :exit, _reason -> nil
   end
 end

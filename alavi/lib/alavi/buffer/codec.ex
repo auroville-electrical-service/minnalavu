@@ -1,6 +1,6 @@
 defmodule Alavi.Buffer.Codec do
   @moduledoc false
-  # The on-disk format of a buffer segment, version 3. Pure: binaries in and out.
+  # The on-disk format of a buffer segment, version 4. Pure: binaries in and out.
   #
   #     segment = magic, header frame, record frame*
   #     magic   = "ALAVIBUF", format version (1 byte)
@@ -10,14 +10,16 @@ defmodule Alavi.Buffer.Codec do
   # one `Alavi.Buffer.record/2` call. Payloads are plain tuples, not structs, so
   # a later release still decodes them.
   #
-  # Version 3 adds firmware reads to version 2's events and still reads
-  # version 2, so an upgrade sends what was buffered; a release that knows only
-  # version 2 sets a version 3 segment aside rather than crash on it.
+  # Version 3 added firmware reads to version 2's events; version 4 adds the
+  # request ID (or nil) as the last element of a reading or missed read. Both
+  # earlier versions are still read, their events with no request ID, so an
+  # upgrade sends what was buffered; a release that knows only earlier
+  # versions sets a later segment aside rather than crash on it.
 
   alias Alavi.{Clock, FirmwareRead, MissedRead, Reading, Sink}
 
-  @magic <<"ALAVIBUF", 3>>
-  @readable [2, 3]
+  @magic <<"ALAVIBUF", 4>>
+  @readable [2, 3, 4]
 
   @typedoc "`size` is the length of the longest valid prefix."
   @type parsed :: %{
@@ -90,12 +92,13 @@ defmodule Alavi.Buffer.Codec do
     %Decimal{sign: sign, coef: coef, exp: exp} = r.value
 
     {:reading, r.endpoint.host, r.endpoint.port, r.unit_id, r.meter_serial, r.product_code,
-     r.profile, r.register_key, iso(r.timestamp), r.raw_words, {sign, coef, exp}, r.unit}
+     r.profile, r.register_key, iso(r.timestamp), r.raw_words, {sign, coef, exp}, r.unit,
+     r.request_id}
   end
 
   defp encode_event(%MissedRead{} = m) do
     {:missed, m.endpoint.host, m.endpoint.port, m.unit_id, m.meter_serial, m.profile,
-     m.register_key, iso(m.timestamp), m.reason, m.attempts, m.raw_words}
+     m.register_key, iso(m.timestamp), m.reason, m.attempts, m.raw_words, m.request_id}
   end
 
   defp encode_event(%FirmwareRead{} = f) do
@@ -103,9 +106,16 @@ defmodule Alavi.Buffer.Codec do
      iso(f.timestamp), f.software, f.firmware_1, f.firmware_2, f.modbus_version}
   end
 
+  # Versions 2 and 3: no request ID.
+  defp decode_event({:reading, _, _, _, _, _, _, _, _, _, _, _} = old),
+    do: decode_event(Tuple.insert_at(old, 12, nil))
+
+  defp decode_event({:missed, _, _, _, _, _, _, _, _, _, _} = old),
+    do: decode_event(Tuple.insert_at(old, 11, nil))
+
   defp decode_event(
          {:reading, host, port, unit_id, serial, product_code, profile, key, ts, words,
-          {sign, coef, exp}, unit}
+          {sign, coef, exp}, unit, request_id}
        ) do
     %Reading{
       endpoint: %{host: host, port: port},
@@ -117,12 +127,14 @@ defmodule Alavi.Buffer.Codec do
       timestamp: datetime(ts),
       raw_words: words,
       value: %Decimal{sign: sign, coef: coef, exp: exp},
-      unit: unit
+      unit: unit,
+      request_id: request_id
     }
   end
 
   defp decode_event(
-         {:missed, host, port, unit_id, serial, profile, key, ts, reason, attempts, words}
+         {:missed, host, port, unit_id, serial, profile, key, ts, reason, attempts, words,
+          request_id}
        ) do
     %MissedRead{
       endpoint: %{host: host, port: port},
@@ -133,7 +145,8 @@ defmodule Alavi.Buffer.Codec do
       timestamp: datetime(ts),
       reason: reason,
       attempts: attempts,
-      raw_words: words
+      raw_words: words,
+      request_id: request_id
     }
   end
 

@@ -7,14 +7,18 @@ defmodule Alavi.Collector do
 
   use Supervisor
 
-  alias Alavi.{Buffer, Clock, Config, Poller, Pollers, Profile, Settings, Status, Uplink}
+  alias Alavi.{Buffer, Clock, Config, Intake, Poller, Pollers, Profile, Settings, Status, Uplink}
   alias Alavi.Poller.RawLog
   alias Alavi.Uplink.Target
 
   @typedoc """
-  `uplink` is the uplink's options but `buffer` (the collector supplies it), or
-  `:none` for no uplink (tests that inspect the buffer); the pollers nudge it
-  after a read on demand only if it has a `name`. `clock_status` is the
+  `uplink` is the uplink's options but `buffer`, `status`, `heartbeat_ms` and
+  `intake` (the collector supplies them), or `:none` for no uplink (tests that
+  inspect the buffer); the pollers nudge it after a read on demand only if it
+  has a `name`. Its heartbeat is due after the shortest polling interval of
+  any meter in the config without an answer from the server: one round of the
+  meter polled most often. Its intake runs the jobs the server lists only if
+  `pollers` is given, for it reaches them by that name. `clock_status` is the
   options of an `Alavi.Clock.Windows` to start first, or `:none`; the buffer's
   `clock_status` must read it if there is one. `pollers` is the name to
   register the `Alavi.Pollers` under; without it they are unnamed (tests that
@@ -70,6 +74,7 @@ defmodule Alavi.Collector do
     buffer = Keyword.fetch!(opts, :buffer)
     sink = {Buffer, Keyword.fetch!(buffer, :name)}
     status = Keyword.fetch!(opts, :status)
+    config = Keyword.fetch!(opts, :config)
 
     {uplink, nudge} =
       case Keyword.fetch!(opts, :uplink) do
@@ -77,12 +82,18 @@ defmodule Alavi.Collector do
           {[], :none}
 
         uplink ->
-          {[{Uplink, uplink ++ [buffer: Keyword.fetch!(buffer, :name), status: status]}],
-           Keyword.get(uplink, :name, :none)}
+          supplied = [
+            buffer: Keyword.fetch!(buffer, :name),
+            status: status,
+            heartbeat_ms: heartbeat_ms(config),
+            intake: intake(Keyword.get(opts, :pollers), config)
+          ]
+
+          {[{Uplink, uplink ++ supplied}], Keyword.get(uplink, :name, :none)}
       end
 
     pollers = [
-      config: Keyword.fetch!(opts, :config),
+      config: config,
       sink: sink,
       clock: Keyword.fetch!(opts, :clock),
       raw_log: Keyword.fetch!(opts, :raw_log),
@@ -102,6 +113,12 @@ defmodule Alavi.Collector do
       strategy: :rest_for_one
     )
   end
+
+  defp heartbeat_ms(%Config{endpoints: endpoints}),
+    do: endpoints |> Enum.flat_map(& &1.meters) |> Enum.map(& &1.interval_ms) |> Enum.min()
+
+  defp intake(nil, _config), do: :none
+  defp intake(pollers, config), do: Intake.new(pollers, config)
 
   defp clock({:win32, _}, refresh_ms) do
     watch = [

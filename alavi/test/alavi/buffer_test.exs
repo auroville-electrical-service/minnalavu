@@ -218,6 +218,20 @@ defmodule Alavi.BufferTest do
     end
   end
 
+  describe "heartbeat/1" do
+    test "an empty batch with a new id each time and the clock now, never on disk",
+         %{tmp_dir: dir} do
+      synced = %{source: :ntp, last_sync_at: ~U[2026-11-01 00:00:00Z]}
+      buffer = start!(dir, clock_status: fn -> synced end)
+
+      assert %Batch{id: first, clock: ^synced, events: []} = Buffer.heartbeat(buffer)
+      assert %Batch{id: second} = Buffer.heartbeat(buffer)
+      assert first != second and first =~ ~r/\A[0-9a-f]{8}-[0-9a-f]{4}-4/
+      assert Buffer.take(buffer) == :empty
+      assert segments(dir) == []
+    end
+  end
+
   describe "ack/2" do
     test "batches can be acknowledged out of order", %{tmp_dir: dir} do
       buffer = start!(dir, max_batch_events: 3)
@@ -417,6 +431,76 @@ defmodule Alavi.BufferTest do
       assert {:ok, %Batch{events: [%Reading{unit_id: 2} = read]}} = Buffer.take(buffer)
       assert read.value == Decimal.new("2.5")
       assert %{discarded_files: 0} = Buffer.backlog(buffer)
+    end
+
+    test "a segment in format 3, as written before request ids, is still read, with none",
+         %{tmp_dir: dir} do
+      reading =
+        {:reading, "127.0.0.1", 5020, 2, "SIM-2", "ELITE440-445", "elite_440",
+         "active_energy_import", "2026-11-01T00:00:00Z", [0x4700, 0x0000], {1, 25, -1}, "Wh"}
+
+      missed =
+        {:missed, "127.0.0.1", 5020, 3, nil, "elite_500", "active_energy_import",
+         "2026-11-01T00:00:01Z", {:exception, 11}, 3, nil}
+
+      names =
+        {:firmware, "127.0.0.1", 5020, 2, "SIM-2", "ELITE440-445", "2026-11-01T00:00:02Z",
+         "SIM-SW", nil, "SIM-F2", "0100"}
+
+      id = <<2::128>>
+
+      File.write!(
+        Path.join(dir, "00000000000000000007.seg"),
+        <<"ALAVIBUF", 3>> <>
+          frame({id, {:ntp, "2026-10-31T23:00:00Z"}}) <>
+          frame([reading, missed]) <> frame([names])
+      )
+
+      buffer = start!(dir)
+      assert {:ok, %Batch{id: batch_id, clock: clock, events: events}} = Buffer.take(buffer)
+      assert batch_id == "00000000-0000-0000-0000-000000000002"
+      assert clock == %{source: :ntp, last_sync_at: ~U[2026-10-31 23:00:00Z]}
+
+      assert [
+               %Reading{unit_id: 2, request_id: nil} = read,
+               %MissedRead{unit_id: 3, reason: {:exception, 11}, attempts: 3, request_id: nil},
+               %FirmwareRead{unit_id: 2, software: "SIM-SW", firmware_1: nil}
+             ] = events
+
+      assert read.value == Decimal.new("2.5")
+      assert %{discarded_files: 0, events: 3} = Buffer.backlog(buffer)
+    end
+
+    test "a request id is kept with its reading and missed read, across a restart",
+         %{tmp_dir: dir} do
+      id = "7d2c1f0e-4b3a-4c5d-8e6f-1a2b3c4d5e6f"
+
+      read = %{
+        reading(1, "active_energy_import", "1.5", ~U[2026-11-01 00:00:00Z])
+        | request_id: id
+      }
+
+      missed = %MissedRead{
+        endpoint: %{host: "127.0.0.1", port: 5020},
+        unit_id: 2,
+        meter_serial: "SIM-2",
+        profile: "elite_440",
+        register_key: "active_energy_import",
+        timestamp: ~U[2026-11-01 00:00:01Z],
+        reason: :timeout,
+        attempts: 3,
+        raw_words: nil,
+        request_id: id
+      }
+
+      buffer = start!(dir)
+      :ok = Buffer.record(buffer, meter(3))
+      :ok = Buffer.record(buffer, [read, missed])
+      buffer = restart!(dir)
+
+      assert {:ok, %Batch{events: events}} = Buffer.take(buffer)
+      assert events == meter(3) ++ [read, missed]
+      assert Enum.map(events, & &1.request_id) == [nil, nil, nil, id, id]
     end
 
     test "a firmware read is kept with the readings, across a restart", %{tmp_dir: dir} do

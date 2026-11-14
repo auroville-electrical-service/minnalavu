@@ -55,10 +55,20 @@ defmodule Alavi.Poller do
 
   The caller is not monitored: if it is gone by then, the read still runs
   and its events are recorded like a round's; only the answer is lost.
+  Its readings and missed reads carry `request_id`.
   """
-  @spec read_now(GenServer.server(), [1..247]) ::
+  @spec read_now(GenServer.server(), [1..247], String.t() | nil) ::
           {:ok, reference()} | {:error, :no_units | {:unknown_units, [term()]}}
-  def read_now(server, units), do: GenServer.call(server, {:read_now, units}, :infinity)
+  def read_now(server, units, request_id \\ nil),
+    do: GenServer.call(server, {:read_now, units, request_id}, :infinity)
+
+  # contract: test/alavi/intake_test.exs "Pollers.serials/1"
+  @doc """
+  The serial last read at each unit since the poller started, by unit ID;
+  a unit none was read at is absent. The reply waits for the step under way.
+  """
+  @spec serials(GenServer.server()) :: %{(1..247) => String.t()}
+  def serials(server), do: GenServer.call(server, :serials, :infinity)
 
   @spec child_spec([option()]) :: Supervisor.child_spec()
   def child_spec(opts) do
@@ -80,14 +90,16 @@ defmodule Alavi.Poller do
   def handle_continue(:poll, state), do: {:noreply, wake(state)}
 
   @impl true
-  def handle_call({:read_now, units}, {pid, _tag}, state) do
+  def handle_call({:read_now, units, request_id}, {pid, _tag}, state) do
     ref = make_ref()
 
-    case Job.read_on_demand(state.endpoint.meters, units, now(), {pid, ref}) do
+    case Job.read_on_demand(state.endpoint.meters, units, now(), {pid, ref}, request_id) do
       {:ok, job} -> queued(%{state | queue: state.queue ++ [job]}, ref)
       {:error, _reason} = error -> {:reply, error, state}
     end
   end
+
+  def handle_call(:serials, _from, state), do: {:reply, state.serials, state}
 
   @impl true
   def handle_info(:step, state), do: {:noreply, wake(state)}
@@ -120,6 +132,7 @@ defmodule Alavi.Poller do
       timer: nil,
       due: Map.new(endpoint.meters, &{&1.unit_id, now}),
       names: Map.new(endpoint.meters, &{&1.unit_id, Names.new()}),
+      serials: %{},
       backoff: endpoint.reconnect_backoff_ms.min,
       reconnect_at: now
     }
@@ -204,16 +217,23 @@ defmodule Alavi.Poller do
   defp poll_meter(meter, state) do
     case identify(meter, state) do
       {{:ok, seen}, state} ->
+        state = serial_read(state, meter, seen.serial)
         {events, skip, state} = read_registers(meter, seen, state)
         recorded(events, state)
         {events, {meter, seen, skip}, state}
 
       {{:missed, reason, n, serial}, state} ->
+        state = serial_read(state, meter, serial)
         events = missed_all(state, meter, serial, reason, n)
         recorded(events, state)
         {events, nil, state}
     end
   end
+
+  defp serial_read(state, _meter, nil), do: state
+
+  defp serial_read(state, %Meter{unit_id: unit}, serial),
+    do: %{state | serials: Map.put(state.serials, unit, serial)}
 
   # A refusal is the sink's to report (see `Alavi.Sink`); the round goes on.
   defp recorded(events, state), do: Sink.record(state.sink, events)
@@ -511,7 +531,8 @@ defmodule Alavi.Poller do
       timestamp: state.clock.(),
       raw_words: words,
       value: value,
-      unit: reg.unit
+      unit: reg.unit,
+      request_id: state.job.request_id
     }
   end
 
@@ -525,7 +546,8 @@ defmodule Alavi.Poller do
       timestamp: state.clock.(),
       reason: reason,
       attempts: attempts,
-      raw_words: nil
+      raw_words: nil,
+      request_id: state.job.request_id
     }
   end
 

@@ -3,7 +3,8 @@ defmodule Alavi.MissedRead do
   A register the poller was due to read and did not, with why. `meter_serial`
   is the serial the meter reported that round, or nil when none was read.
   `attempts` 0 means it was not tried: the meter or endpoint was already known
-  unreachable, or did not match its profile, this round.
+  unreachable, or did not match its profile, this round. `request_id` is the
+  request a read on demand was made for, or nil.
   """
 
   alias Alavi.{Decode, Modbus.Client, Reading}
@@ -19,7 +20,7 @@ defmodule Alavi.MissedRead do
     :attempts,
     :raw_words
   ]
-  defstruct @enforce_keys
+  defstruct @enforce_keys ++ [request_id: nil]
 
   @type reason ::
           Client.error()
@@ -36,7 +37,8 @@ defmodule Alavi.MissedRead do
           timestamp: DateTime.t(),
           reason: reason(),
           attempts: non_neg_integer(),
-          raw_words: [0..0xFFFF] | nil
+          raw_words: [0..0xFFFF] | nil,
+          request_id: String.t() | nil
         }
 
   # contract: test/alavi/wire_test.exs "MissedRead.to_wire/1"
@@ -57,6 +59,7 @@ defmodule Alavi.MissedRead do
       "attempts" => m.attempts,
       "raw_words" => m.raw_words
     }
+    |> Reading.request(m.request_id)
   end
 
   @plain [
