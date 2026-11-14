@@ -15,9 +15,9 @@ defmodule Alavi.PollerTest do
   @contract Path.expand("../../../contract", __DIR__)
 
   describe "start_link/1" do
-    for framing <- ["tcp", "rtu_over_tcp"] do
+    for {framing, mode} <- [{"tcp", :tcp}, {"rtu_over_tcp", :rtu_over_tcp}] do
       test "#{framing}: reads every register of every meter on the chain, in order, as Decimal" do
-        {_sim, port} = start_sim!(String.to_existing_atom(unquote(framing)))
+        {_sim, port} = start_sim!(unquote(mode))
         meters = [meter(1, "elite_440"), meter(2, "elite_440"), meter(3, "elite_500")]
         clock = fn -> ~U[2026-11-01 00:00:00Z] end
         start_pollers!([endpoint(port, unquote(framing), meters)], clock)
@@ -41,7 +41,7 @@ defmodule Alavi.PollerTest do
       end
 
       test "#{framing}: a silent meter is missed after its retries and the rest of the chain is read" do
-        {sim, port} = start_sim!(String.to_existing_atom(unquote(framing)))
+        {sim, port} = start_sim!(unquote(mode))
         Simulator.faults(sim, silent_units: [2])
         meters = [meter(1, "elite_440"), meter(2, "elite_440"), meter(3, "elite_500")]
         start_pollers!([endpoint(port, unquote(framing), meters, %{"timeout_ms" => 50})])
