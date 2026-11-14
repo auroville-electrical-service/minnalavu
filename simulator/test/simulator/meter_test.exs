@@ -44,4 +44,36 @@ defmodule Simulator.MeterTest do
       assert :unmapped = meter |> Meter.name(:software, :absent) |> Meter.read(:holding, 2007, 4)
     end
   end
+
+  describe "write/4" do
+    test "an Elite 440 takes 06 on its selectors, and the selector reads back" do
+      meter = Meter.new(1, Profile.load!("elite_440"))
+      assert {:ok, [0]} = Meter.read(meter, :holding, 520, 1)
+
+      for address <- [520, 700, 800, 801] do
+        assert {:ok, written} = Meter.write(meter, 6, address, 3)
+        assert {:ok, [3]} = Meter.read(written, :holding, address, 1)
+      end
+    end
+
+    test "an Elite 440 refuses 16 with exception 02, and any other address with 02" do
+      meter = Meter.new(1, Profile.load!("elite_440"))
+      assert {:exception, 2} = Meter.write(meter, 16, 520, 1)
+      assert {:exception, 2} = Meter.write(meter, 6, 519, 1)
+      assert {:exception, 2} = Meter.write(meter, 6, 199, 1)
+    end
+
+    test "an Elite 500 takes 16 on its selectors, refuses 06 with 01, and other addresses with 02" do
+      meter = Meter.new(3, Profile.load!("elite_500"))
+
+      for address <- [900, 1500, 5002, 5003] do
+        assert {:ok, written} = Meter.write(meter, 16, address, 9)
+        assert {:ok, [9]} = Meter.read(written, :holding, address, 1)
+      end
+
+      assert {:exception, 1} = Meter.write(meter, 6, 900, 1)
+      assert {:exception, 2} = Meter.write(meter, 16, 5001, 1)
+      assert {:exception, 2} = Meter.write(meter, 16, 5000, 1)
+    end
+  end
 end

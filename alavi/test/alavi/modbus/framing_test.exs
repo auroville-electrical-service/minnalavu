@@ -5,7 +5,7 @@ defmodule Alavi.Modbus.FramingTest do
   doctest Alavi.Modbus.CRC
   doctest Alavi.Modbus.PDU
 
-  alias Alavi.Modbus.{CRC, Framing, PDU}
+  alias Alavi.Modbus.{CRC, Framing, PDU, Selector}
 
   describe "encode/4" do
     test "RTU request matches a published example frame" do
@@ -14,7 +14,32 @@ defmodule Alavi.Modbus.FramingTest do
     end
   end
 
+  describe "encode_selector/4" do
+    test "frames a selector write as it frames a read" do
+      {:ok, w440} = Selector.request("elite_440", :history, 1, 6)
+
+      assert Framing.encode_selector(:tcp, 7, 1, w440) ==
+               <<7::16, 0::16, 6::16, 1, 6, 520::16, 1::16>>
+
+      assert <<1, 6, 520::16, 1::16, _crc::16>> =
+               Framing.encode_selector(:rtu_over_tcp, 0, 1, w440)
+
+      {:ok, w500} = Selector.request("elite_500", :history, 1, 6)
+
+      assert Framing.encode_selector(:tcp, 7, 1, w500) ==
+               <<7::16, 0::16, 9::16, 1, 16, 900::16, 1::16, 2, 1::16>>
+    end
+  end
+
   describe "decode_response/2" do
+    test "an RTU echo of a selector write decodes" do
+      for pdu <- [<<6, 520::16, 1::16>>, <<16, 900::16, 1::16>>] do
+        frame = CRC.append(<<1, pdu::binary>>)
+        assert :incomplete = Framing.decode_response(:rtu_over_tcp, binary_part(frame, 0, 7))
+        assert {:ok, %{pdu: ^pdu}, ""} = Framing.decode_response(:rtu_over_tcp, frame)
+      end
+    end
+
     test "RTU response with a corrupted CRC is rejected" do
       frame = CRC.append(<<1, 4, 4, 0, 1, 0, 2>>)
       corrupted = binary_part(frame, 0, byte_size(frame) - 1) <> <<0>>

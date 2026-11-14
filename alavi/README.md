@@ -1,7 +1,8 @@
 # alavi (அளவி)
 
 On-site meter collector. Polls Secure Elite meters over read-only Modbus
-(TCP or RTU over TCP), keeps every reading in a disk buffer, and sends the
+(TCP or RTU over TCP; the one write is an allowlisted selector register,
+`Alavi.Modbus.Selector`), keeps every reading in a disk buffer, and sends the
 buffered batches over HTTPS to the central server, deleting each only once the
 server has stored it. A plain OTP app: runs on Windows, Linux, macOS, and later
 on Nerves hardware.

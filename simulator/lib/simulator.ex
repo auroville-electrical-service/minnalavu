@@ -7,8 +7,9 @@ defmodule Simulator do
       {:ok, sim} = Simulator.start_link(framing: :tcp, meters: [Simulator.Meter.new(1, profile)])
       port = Simulator.port(sim)
 
-  Only read requests (function codes 03/04) are answered; anything else gets
-  exception 01, illegal function.
+  Read requests (function codes 03/04) are answered, and selector writes as
+  `Simulator.Meter` describes; any other function gets exception 01, illegal
+  function.
   """
 
   alias Simulator.{Faults, Meter}

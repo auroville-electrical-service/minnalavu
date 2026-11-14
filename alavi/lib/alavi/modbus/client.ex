@@ -1,11 +1,12 @@
 defmodule Alavi.Modbus.Client do
   @moduledoc """
-  A read-only Modbus client for one TCP endpoint, one request in flight at a
-  time. Reconnecting is not free: small bridges may hold a closed connection's
-  slot for a while and refuse the next one.
+  A Modbus client for one TCP endpoint, one request in flight at a time. It
+  sends reads, and the one write `Alavi.Modbus.Selector` builds. Reconnecting
+  is not free: small bridges may hold a closed connection's slot for a while
+  and refuse the next one.
   """
 
-  alias Alavi.Modbus.{Framing, PDU}
+  alias Alavi.Modbus.{Framing, PDU, Selector}
 
   @enforce_keys [:socket, :framing, :timeout, :max_timeouts]
   defstruct [
@@ -32,9 +33,9 @@ defmodule Alavi.Modbus.Client do
         }
 
   @typedoc """
-  Bytes from the endpoint that were not a usable reply, during a read of
+  Bytes from the endpoint that were not a usable reply, during a request to
   `unit_id`. `:skipped` is what was dropped ahead of the reply (or of the
-  timeout, if none came); `:rejected` is what was in hand when the read failed
+  timeout, if none came); `:rejected` is what was in hand when the request failed
   on it. `bytes` is not capped here; capping what is logged is the caller's.
   """
   @type anomaly ::
@@ -44,7 +45,7 @@ defmodule Alavi.Modbus.Client do
             reasons: [Framing.skipped(), ...],
             bytes: binary()
           }
-          | %{kind: :rejected, unit_id: 1..247, reason: error(), bytes: binary()}
+          | %{kind: :rejected, unit_id: 1..247, reason: error() | :echo_mismatch, bytes: binary()}
 
   @typedoc "`timeout` is in ms, for the connect and for each request."
   @type option :: {:timeout, pos_integer()} | {:max_timeouts, pos_integer()}
@@ -57,6 +58,14 @@ defmodule Alavi.Modbus.Client do
           | :unexpected_response
           | Framing.decode_error()
           | :malformed_response
+          | {:socket, term()}
+
+  @type write_error ::
+          Selector.reply_error()
+          | :closed
+          | :timeout
+          | :unexpected_response
+          | Framing.decode_error()
           | {:socket, term()}
 
   @socket_opts [:binary, active: false, packet: :raw, nodelay: true]
@@ -108,7 +117,11 @@ defmodule Alavi.Modbus.Client do
   def read(client, unit_id, table, address, count) when unit_id in 1..247 do
     case PDU.read_request(table, address, count) do
       {:ok, request} ->
-        client |> exchange(unit_id, table, request) |> parse(unit_id, table, count)
+        frame = &Framing.encode(&1, &2, unit_id, request)
+
+        client
+        |> exchange(unit_id, PDU.function_code(table), frame)
+        |> parse(unit_id, table, count)
 
       {:error, :invalid_request} ->
         {:error, :invalid_request, client}
@@ -117,15 +130,34 @@ defmodule Alavi.Modbus.Client do
 
   def read(client, _unit_id, _table, _address, _count), do: {:error, :invalid_request, client}
 
+  # contract: test/alavi/modbus/client_test.exs "write_selector/3"
+  @doc """
+  Sends one selector write, once: it is never retried here, since a write whose
+  reply was lost may have landed. Any failure but a Modbus exception closes the
+  connection, so a late echo cannot be taken for another reply. Returns after
+  the selector's settle time.
+  """
+  @spec write_selector(t(), 1..247, Selector.t()) :: {:ok, t()} | {:error, write_error(), t()}
+  def write_selector(%__MODULE__{socket: nil} = client, _unit_id, _request),
+    do: {:error, :closed, client}
+
+  def write_selector(client, unit_id, request) when unit_id in 1..247 do
+    frame = &Framing.encode_selector(&1, &2, unit_id, request)
+
+    client
+    |> exchange(unit_id, Selector.function_code(request), frame)
+    |> echoed(unit_id, request)
+  end
+
   defp max_timeouts(:tcp, opts), do: Keyword.fetch!(opts, :max_timeouts)
   # RTU frames carry no transaction id, so a late reply could not be told from the next one.
   defp max_timeouts(:rtu_over_tcp, _opts), do: 1
 
-  defp exchange(client, unit_id, table, request) do
+  defp exchange(client, unit_id, function_code, encode) do
     tid = client.transaction_id
     client = %{client | transaction_id: rem(tid + 1, 0x10000)}
-    expected = %{transaction_id: tid, unit_id: unit_id, function_code: PDU.function_code(table)}
-    frame = Framing.encode(client.framing, tid, unit_id, request)
+    expected = %{transaction_id: tid, unit_id: unit_id, function_code: function_code}
+    frame = encode.(client.framing, tid)
 
     case :gen_tcp.send(client.socket, frame) do
       :ok -> await(client, expected, deadline(client.timeout), nil)
@@ -142,6 +174,22 @@ defmodule Alavi.Modbus.Client do
   end
 
   defp parse({:error, reason, client}, _unit_id, _table, _count), do: fail(client, reason)
+
+  defp echoed({:ok, pdu, client}, unit_id, request) do
+    case Selector.parse_reply(request, pdu) do
+      :ok ->
+        Process.sleep(Selector.settle_ms(request))
+        {:ok, %{client | timeouts: 0}}
+
+      {:error, {:exception, _} = reason} ->
+        {:error, reason, %{client | timeouts: 0}}
+
+      {:error, :echo_mismatch} ->
+        {:error, :echo_mismatch, client |> rejected(unit_id, :echo_mismatch, pdu) |> close()}
+    end
+  end
+
+  defp echoed({:error, reason, client}, _unit_id, _request), do: {:error, reason, close(client)}
 
   # A deadline reached after a bad CRC reports the corruption, not a plain timeout.
   defp await(client, expected, deadline, skipped) do

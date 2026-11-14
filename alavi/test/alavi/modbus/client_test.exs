@@ -1,7 +1,7 @@
 defmodule Alavi.Modbus.ClientTest do
   use ExUnit.Case, async: true
 
-  alias Alavi.Modbus.Client
+  alias Alavi.Modbus.{Client, Selector}
   alias Alavi.{Profile, Reader}
   alias Simulator.Meter
 
@@ -241,6 +241,69 @@ defmodule Alavi.Modbus.ClientTest do
 
       assert {[%{kind: :rejected, reason: :malformed_frame, bytes: ^frame}], _} =
                Client.take_anomalies(client)
+    end
+  end
+
+  describe "write_selector/3" do
+    for framing <- [:tcp, :rtu_over_tcp] do
+      test "#{framing}: each model's selector is written with its own code, and reads back" do
+        ctx = start_chain(unquote(framing))
+        {:ok, client} = connect(ctx)
+
+        {:ok, w440} = Selector.request("elite_440", :history, 4, 6)
+        assert {:ok, client} = Client.write_selector(client, 1, w440)
+        assert {:ok, [4], client} = Client.read(client, 1, :holding, 520, 1)
+
+        {:ok, w500} = Selector.request("elite_500", :snapshot, 9, 52)
+        assert {:ok, client} = Client.write_selector(client, 3, w500)
+        assert {:ok, [9], _client} = Client.read(client, 3, :holding, 1500, 1)
+      end
+    end
+
+    test "a 500 load-survey selector write returns no sooner than 100 ms after its echo" do
+      {:ok, client} = connect(start_chain(:tcp))
+      {:ok, day} = Selector.request("elite_500", :load_survey_day, 1, 333)
+      {elapsed, {:ok, client}} = :timer.tc(fn -> Client.write_selector(client, 3, day) end)
+      assert elapsed >= 100_000
+
+      {:ok, history} = Selector.request("elite_500", :history, 1, 6)
+      {elapsed, {:ok, _}} = :timer.tc(fn -> Client.write_selector(client, 3, history) end)
+      assert elapsed < 100_000
+    end
+
+    test "a 440 selector written to a 500 is the meter's exception, and keeps the connection" do
+      {:ok, client} = connect(start_chain(:tcp))
+      {:ok, w440} = Selector.request("elite_440", :history, 1, 6)
+
+      assert {:error, {:exception, 1}, %Client{socket: socket} = client} =
+               Client.write_selector(client, 3, w440)
+
+      assert socket != nil
+      assert {:ok, [0], _} = Client.read(client, 3, :holding, 900, 1)
+    end
+
+    test "a reply that is not the exact echo fails, is kept, and closes the connection" do
+      echo = <<6, 520::16, 2::16>>
+
+      port =
+        reply_once(fn <<tid::16, _::binary>> -> <<tid::16, 0::16, 6::16, 1, echo::binary>> end)
+
+      {:ok, client} = Client.connect("127.0.0.1", port, :tcp, timeout: @timeout, max_timeouts: 3)
+      {:ok, write} = Selector.request("elite_440", :history, 1, 6)
+
+      assert {:error, :echo_mismatch, %Client{socket: nil} = client} =
+               Client.write_selector(client, 1, write)
+
+      assert {[%{kind: :rejected, reason: :echo_mismatch, bytes: ^echo}], _} =
+               Client.take_anomalies(client)
+    end
+
+    test "tcp: a write that times out closes the connection, though reads would keep it" do
+      ctx = start_chain(:tcp)
+      Simulator.faults(ctx.sim, delay_ms: @timeout * 2)
+      {:ok, client} = connect(ctx)
+      {:ok, write} = Selector.request("elite_440", :history, 1, 6)
+      assert {:error, :timeout, %Client{socket: nil}} = Client.write_selector(client, 1, write)
     end
   end
 

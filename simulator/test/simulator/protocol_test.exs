@@ -75,6 +75,22 @@ defmodule Simulator.ProtocolTest do
                )
     end
 
+    test "a selector write is echoed, with the meter that now holds it", %{meters: meters} do
+      assert {:write, <<16, 900::16, 1::16>>, meter} =
+               Protocol.respond(meters, %Faults{}, 1, <<16, 900::16, 1::16, 2, 4::16>>)
+
+      assert {:ok, [4]} = Meter.read(meter, :holding, 900, 1)
+    end
+
+    test "a write the meter refuses is its exception, and a multi-register 16 is 03",
+         %{meters: meters} do
+      assert {:reply, <<0x90, 2>>} =
+               Protocol.respond(meters, %Faults{}, 1, <<16, 5001::16, 1::16, 2, 0::16>>)
+
+      assert {:reply, <<0x90, 3>>} =
+               Protocol.respond(meters, %Faults{}, 1, <<16, 900::16, 2::16, 4, 0::32>>)
+    end
+
     test "busy endpoint is exception 06", %{meters: meters} do
       assert {:reply, <<0x83, 6>>} =
                Protocol.respond(meters, %Faults{busy: true}, 1, <<3, 11_149::16, 2::16>>)
@@ -99,6 +115,17 @@ defmodule Simulator.ProtocolTest do
     test "RTU requests are rejected on bad CRC" do
       assert {:error, :bad_crc} =
                Protocol.decode_request(:rtu_over_tcp, <<1, 3, 0, 0, 0, 2, 0, 0>>)
+    end
+
+    test "an RTU function 16 request is taken whole, with its data" do
+      pdu = <<16, 900::16, 1::16, 2, 4::16>>
+      # A request frames as a reply does in RTU: unit, PDU, CRC.
+      request = %{transaction_id: 0, unit_id: 1, pdu: <<>>}
+      frame = Protocol.encode_response(:rtu_over_tcp, %Faults{}, request, pdu)
+      assert :incomplete = Protocol.decode_request(:rtu_over_tcp, binary_part(frame, 0, 10))
+
+      assert {:ok, %{unit_id: 1, pdu: ^pdu}, <<0xAA>>} =
+               Protocol.decode_request(:rtu_over_tcp, frame <> <<0xAA>>)
     end
   end
 end

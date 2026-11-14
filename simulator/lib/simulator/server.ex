@@ -54,8 +54,13 @@ defmodule Simulator.Server do
       do: {:reply, {:silent, state.faults}, state}
 
   def handle_call({:respond, unit_id, pdu}, _from, state) do
-    response = Protocol.respond(state.meters, state.faults, unit_id, pdu, state.missing_units)
-    {:reply, {response, state.faults}, state}
+    case Protocol.respond(state.meters, state.faults, unit_id, pdu, state.missing_units) do
+      {:write, reply, meter} ->
+        {:reply, {{:reply, reply}, state.faults}, change(state, unit_id, fn _ -> meter end)}
+
+      response ->
+        {:reply, {response, state.faults}, state}
+    end
   end
 
   def handle_call({:put, unit_id, key, value}, _from, state),

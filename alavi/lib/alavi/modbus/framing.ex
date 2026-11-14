@@ -6,7 +6,7 @@ defmodule Alavi.Modbus.Framing do
     is matched to its request only by order.
   """
 
-  alias Alavi.Modbus.{CRC, PDU}
+  alias Alavi.Modbus.{CRC, PDU, Selector}
 
   @type t :: :tcp | :rtu_over_tcp
   @type unit_id :: 0..255
@@ -14,21 +14,34 @@ defmodule Alavi.Modbus.Framing do
   @type frame :: %{unit_id: unit_id(), transaction_id: transaction_id() | nil, pdu: binary()}
   @type decode_error :: :bad_crc | :malformed_frame
   @typedoc "What the reply to one request must carry."
-  @type expected :: %{transaction_id: transaction_id(), unit_id: unit_id(), function_code: 3 | 4}
+  @type expected :: %{
+          transaction_id: transaction_id(),
+          unit_id: unit_id(),
+          function_code: 3 | 4 | Selector.function_code()
+        }
   @type skipped :: :stale | :noise | :bad_crc
 
   # contract: test/alavi/modbus/framing_test.exs "encode/4"
   @spec encode(t(), transaction_id(), unit_id(), PDU.t()) :: binary()
-  def encode(:tcp, transaction_id, unit_id, request) do
-    pdu = PDU.bytes(request)
-    <<transaction_id::16, 0::16, byte_size(pdu) + 1::16, unit_id, pdu::binary>>
-  end
+  def encode(framing, transaction_id, unit_id, request),
+    do: frame(framing, transaction_id, unit_id, PDU.bytes(request))
 
-  def encode(:rtu_over_tcp, _transaction_id, unit_id, request),
-    do: CRC.append(<<unit_id, PDU.bytes(request)::binary>>)
+  # contract: test/alavi/modbus/framing_test.exs "encode_selector/4"
+  @spec encode_selector(t(), transaction_id(), unit_id(), Selector.t()) :: binary()
+  def encode_selector(framing, transaction_id, unit_id, request),
+    do: frame(framing, transaction_id, unit_id, Selector.bytes(request))
+
+  defp frame(:tcp, transaction_id, unit_id, pdu),
+    do: <<transaction_id::16, 0::16, byte_size(pdu) + 1::16, unit_id, pdu::binary>>
+
+  defp frame(:rtu_over_tcp, _transaction_id, unit_id, pdu),
+    do: CRC.append(<<unit_id, pdu::binary>>)
 
   # contract: test/alavi/modbus/framing_test.exs "decode_response/2"
-  @doc "RTU decoding assumes the frame answers a read (function code 03/04 or its exception)."
+  @doc """
+  RTU decoding assumes the frame answers a read (function code 03/04), a
+  selector write (06/16, a fixed four bytes after the code) or is an exception.
+  """
   @spec decode_response(t(), binary()) ::
           {:ok, frame(), binary()} | :incomplete | {:error, decode_error()}
   def decode_response(:tcp, <<tid::16, 0::16, len::16, unit_id, rest::binary>>)
@@ -55,6 +68,9 @@ defmodule Alavi.Modbus.Framing do
   def decode_response(:rtu_over_tcp, <<_unit, fc, count, _::binary>> = buffer)
       when fc in [3, 4],
       do: take_rtu(buffer, 3 + count)
+
+  def decode_response(:rtu_over_tcp, <<_unit, fc, _::binary>> = buffer) when fc in [6, 16],
+    do: take_rtu(buffer, 6)
 
   def decode_response(:rtu_over_tcp, <<_unit, fc, _::binary>>) when fc not in [3, 4],
     do: {:error, :malformed_frame}

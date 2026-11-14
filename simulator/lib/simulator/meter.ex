@@ -12,12 +12,29 @@ defmodule Simulator.Meter do
   `:absent` to unmap them. A new meter's names are invented too (`SIM-SW`,
   `SIM-F1`, `SIM-F2`, version `0100`); the version is the hex digits of its
   word.
+
+  `selectors` holds the selector registers a profile's meter lets a client
+  write, by PDU address, each starting at 0: the stored history, snapshot and
+  load-survey day and parameter to show. A write of one, with the model's own
+  function code (06 on the Elite 440 family, 16 on the Elite 500), is echoed
+  and the register reads back the new value. Any other address is exception 02.
+  The 440 family answers 16 with exception 02 and the 500 answers 06 with
+  exception 01, as real meters do. Values are not range-checked: what a meter
+  does with one out of range is not known.
   """
 
   alias Simulator.{Encode, Profile}
 
   @enforce_keys [:unit_id, :profile, :values]
-  defstruct [:unit_id, :profile, :values, word_order: nil, identity: %{}, firmware: %{}]
+  defstruct [
+    :unit_id,
+    :profile,
+    :values,
+    word_order: nil,
+    identity: %{},
+    firmware: %{},
+    selectors: %{}
+  ]
 
   @type check :: :product_code | :serial | :energy_unit
   @type t :: %__MODULE__{
@@ -26,14 +43,25 @@ defmodule Simulator.Meter do
           values: %{String.t() => Decimal.t()},
           word_order: :high_first | :low_first | nil,
           identity: %{optional(check()) => String.t() | 0..0xFFFF | :absent},
-          firmware: %{optional(Profile.firmware_name()) => String.t() | :absent}
+          firmware: %{optional(Profile.firmware_name()) => String.t() | :absent},
+          selectors: %{optional(0..0xFFFF) => 0..0xFFFF}
         }
+
+  @type write_code :: 6 | 16
 
   @names %{
     software: "SIM-SW",
     firmware_1: "SIM-F1",
     firmware_2: "SIM-F2",
     modbus_version: "0100"
+  }
+
+  # Selector PDU addresses (register number − 40001), source IDs elite_440-a
+  # and elite_500-a: history, snapshot, load-survey parameter and day (440);
+  # history, snapshot, load-survey day and parameter (500).
+  @selectors %{
+    "elite_440" => %{function_code: 6, other: {16, 2}, addresses: [520, 700, 800, 801]},
+    "elite_500" => %{function_code: 16, other: {6, 1}, addresses: [900, 1500, 5002, 5003]}
   }
 
   @doc "A meter whose registers all start at zero, then take `values`."
@@ -46,8 +74,43 @@ defmodule Simulator.Meter do
       profile: profile,
       values: Map.merge(zeros, values),
       identity: %{serial: "SIM-#{unit_id}"},
-      firmware: @names
+      firmware: @names,
+      selectors: selectors(profile)
     }
+  end
+
+  defp selectors(%Profile{name: name}) do
+    case @selectors do
+      %{^name => %{addresses: addresses}} -> Map.new(addresses, &{&1, 0})
+      _ -> %{}
+    end
+  end
+
+  # contract: test/simulator/meter_test.exs "write/4"
+  @doc """
+  Write one selector register, as function code `function_code`. Anything
+  but a selector write this model takes is the exception code a meter answers.
+  """
+  @spec write(t(), write_code(), 0..0xFFFF, 0..0xFFFF) :: {:ok, t()} | {:exception, 1..2}
+  def write(
+        %__MODULE__{profile: %Profile{name: name}, selectors: selectors} = meter,
+        fc,
+        address,
+        value
+      ) do
+    case @selectors do
+      %{^name => %{function_code: ^fc}} when is_map_key(selectors, address) ->
+        {:ok, %{meter | selectors: Map.put(selectors, address, value)}}
+
+      %{^name => %{function_code: ^fc}} ->
+        {:exception, 2}
+
+      %{^name => %{other: {^fc, code}}} ->
+        {:exception, code}
+
+      _ ->
+        {:exception, 1}
+    end
   end
 
   @doc "Set one register's value."
@@ -81,8 +144,14 @@ defmodule Simulator.Meter do
           into: %{},
           do: {spec.address + offset, word}
 
-    registers |> Map.merge(identity_bank(meter, table)) |> Map.merge(firmware_bank(meter, table))
+    registers
+    |> Map.merge(identity_bank(meter, table))
+    |> Map.merge(firmware_bank(meter, table))
+    |> Map.merge(selector_bank(meter, table))
   end
+
+  defp selector_bank(%__MODULE__{selectors: selectors}, :holding), do: selectors
+  defp selector_bank(_meter, :input), do: %{}
 
   defp firmware_bank(%__MODULE__{profile: profile, firmware: names}, table) do
     for {name, %{table: ^table} = spec} <- profile.firmware,

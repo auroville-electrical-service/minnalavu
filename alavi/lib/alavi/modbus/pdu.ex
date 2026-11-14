@@ -1,7 +1,8 @@
 defmodule Alavi.Modbus.PDU do
   @moduledoc """
   Only function codes 03 and 04 exist here. There is deliberately no way to
-  build a write request: this system never writes to meters.
+  build a write request: the one write this system makes, a selector, is
+  built only by `Alavi.Modbus.Selector`.
   """
 
   @enforce_keys [:bytes]

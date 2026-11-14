@@ -1,6 +1,7 @@
 defmodule Simulator.Protocol do
   @moduledoc """
-  Server side of Modbus TCP and RTU-over-TCP for read requests, with faults.
+  Server side of Modbus TCP and RTU-over-TCP for read requests and selector
+  writes, with faults.
   """
 
   import Bitwise
@@ -34,24 +35,42 @@ defmodule Simulator.Protocol do
     {:ok, %{transaction_id: tid, unit_id: unit, pdu: pdu}, tail}
   end
 
-  # Every read request is 8 bytes in RTU framing: unit, fc, address, count, CRC.
-  def decode_request(:rtu_over_tcp, <<body::binary-size(6), crc::little-16, tail::binary>>) do
-    <<unit, pdu::binary>> = body
+  # A function 16 request is 9 bytes and its data in RTU framing: unit, fc,
+  # address, count, byte count, data, CRC. Every other is 8: unit, fc, two
+  # words, CRC.
+  def decode_request(:rtu_over_tcp, <<_unit, 16, _::32, byte_count, _::binary>> = buffer),
+    do: take_rtu(buffer, 7 + byte_count)
 
-    if crc(body) == crc,
-      do: {:ok, %{transaction_id: 0, unit_id: unit, pdu: pdu}, tail},
-      else: {:error, :bad_crc}
-  end
+  def decode_request(:rtu_over_tcp, <<_unit, fc, _::binary>> = buffer) when fc != 16,
+    do: take_rtu(buffer, 6)
 
   def decode_request(_framing, _buffer), do: :incomplete
+
+  defp take_rtu(buffer, body_len) do
+    case buffer do
+      <<body::binary-size(^body_len), crc::little-16, tail::binary>> ->
+        <<unit, pdu::binary>> = body
+
+        if crc(body) == crc,
+          do: {:ok, %{transaction_id: 0, unit_id: unit, pdu: pdu}, tail},
+          else: {:error, :bad_crc}
+
+      _ ->
+        :incomplete
+    end
+  end
 
   # contract: test/simulator/protocol_test.exs "respond/5"
   @doc """
   The response PDU for a request, or `:silent` when nothing would answer.
   `{:reply_as, unit, pdu}` is framed under `unit` instead of the unit asked for.
+  `{:write, pdu, meter}` answers a selector write that `meter` now holds.
   """
   @spec respond([Meter.t()], Faults.t(), 0..255, binary(), missing_units()) ::
-          {:reply, binary()} | {:reply_as, 0..255, binary()} | :silent
+          {:reply, binary()}
+          | {:reply_as, 0..255, binary()}
+          | {:write, binary(), Meter.t()}
+          | :silent
   def respond(meters, %Faults{} = faults, unit_id, <<fc, _::binary>> = pdu, missing \\ :silent) do
     read = read_at(unit_id, pdu)
 
@@ -111,7 +130,18 @@ defmodule Simulator.Protocol do
   defp answer(_meter, <<fc, _address::16, _count::16>>) when fc in [3, 4],
     do: {:reply, exception(fc, @illegal_value)}
 
+  defp answer(meter, <<6, address::16, value::16>> = pdu),
+    do: written(Meter.write(meter, 6, address, value), 6, pdu)
+
+  defp answer(meter, <<16, address::16, 1::16, 2, value::16>>),
+    do: written(Meter.write(meter, 16, address, value), 16, <<16, address::16, 1::16>>)
+
+  defp answer(_meter, <<16, _::binary>>), do: {:reply, exception(16, @illegal_value)}
+
   defp answer(_meter, <<fc, _::binary>>), do: {:reply, exception(fc, @illegal_function)}
+
+  defp written({:ok, meter}, _fc, echo), do: {:write, echo, meter}
+  defp written({:exception, code}, fc, _echo), do: {:reply, exception(fc, code)}
 
   defp exception(fc, code), do: <<fc ||| 0x80, code>>
 

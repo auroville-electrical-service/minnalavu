@@ -6,7 +6,8 @@ each meter read. Accounts, rating and billing are a separate project that reads
 the store.
 
 - **`alavi/`**: the on-site collector. Polls Secure Elite meters over Modbus
-  (read-only), buffers readings on local disk, forwards them to the server.
+  (read-only, but for one allowlisted selector write that chooses which
+  stored entry a meter shows), buffers readings on local disk, forwards them to the server.
 - **`contract/`**: the versioned collector ↔ server message schema, meter
   register profiles and shared fixtures.
 - **`kai_alavi/`** (கை அளவி, "hand meter"): a TypeScript library with no I/O

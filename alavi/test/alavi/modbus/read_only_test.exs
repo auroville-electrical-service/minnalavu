@@ -1,7 +1,9 @@
 defmodule Alavi.Modbus.ReadOnlyTest do
   @moduledoc """
-  The collector never writes to a meter: the only request `Alavi.Modbus.PDU`
-  can build is a read, and only the client touches a socket a meter could be on.
+  The collector writes nothing to a meter but a selector: the only request
+  `Alavi.Modbus.PDU` can build is a read, the one exception is
+  `Alavi.Modbus.Selector` (its own tests pin what it can build), and only the
+  client touches a socket a meter could be on.
   """
   use ExUnit.Case, async: true
   use ExUnitProperties
@@ -15,6 +17,11 @@ defmodule Alavi.Modbus.ReadOnlyTest do
   # server through :httpc over TLS, which no meter speaks, so :ssl is not here.
   @socket_owners ["alavi/modbus/client.ex"]
   @socket_modules [:gen_tcp, :gen_udp, :gen_sctp, :socket]
+
+  # The one module allowed to build a write request.
+  @selector "alavi/modbus/selector.ex"
+  # Modbus write function codes: coil, register, coils, registers, mask, read/write.
+  @write_codes [5, 6, 15, 16, 22, 23]
 
   describe "read_request/3" do
     test "no request can be built for anything but a read" do
@@ -38,14 +45,28 @@ defmodule Alavi.Modbus.ReadOnlyTest do
       end
     end
 
-    test "a request struct is built only in read_request/3" do
+    test "a request struct is built only in read_request/3, and a write's only in the selector" do
       constructions =
         for file <- lib_files(),
             {name, struct} <- struct_constructions(file),
-            pdu_struct?(struct, file),
-            do: {relative(file), name}
+            kind = request_struct(struct, file),
+            kind != nil,
+            do: {kind, relative(file), name}
 
-      assert constructions == [{"alavi/modbus/pdu.ex", :read_request}]
+      assert Enum.sort(constructions) == [
+               {:read, "alavi/modbus/pdu.ex", :read_request},
+               {:write, @selector, :build}
+             ]
+    end
+
+    test "no binary outside the selector starts with a write function code" do
+      files =
+        for file <- lib_files(),
+            write_binaries(file) != [],
+            uniq: true,
+            do: relative(file)
+
+      assert files == [@selector]
     end
 
     test "no module but the client calls a socket module" do
@@ -164,9 +185,35 @@ defmodule Alavi.Modbus.ReadOnlyTest do
   defp def_name({:when, _, [call | _]}), do: def_name(call)
   defp def_name({name, _, _}), do: name
 
-  defp pdu_struct?({:__MODULE__, _, _}, file), do: relative(file) == "alavi/modbus/pdu.ex"
-  defp pdu_struct?({:__aliases__, _, parts}, _file), do: List.last(parts) == :PDU
-  defp pdu_struct?(_other, _file), do: false
+  defp request_struct({:__MODULE__, _, _}, file), do: own_struct(relative(file))
+  defp request_struct({:__aliases__, _, parts}, _file), do: aliased_struct(List.last(parts))
+  defp request_struct(_other, _file), do: nil
+
+  defp own_struct("alavi/modbus/pdu.ex"), do: :read
+  defp own_struct(@selector), do: :write
+  defp own_struct(_file), do: nil
+
+  defp aliased_struct(:PDU), do: :read
+  defp aliased_struct(:Selector), do: :write
+  defp aliased_struct(_name), do: nil
+
+  # Every bitstring whose first segment is a literal write function code,
+  # bare (`<<6, ...>>`) or sized (`<<16::8, ...>>`), constructed or matched.
+  defp write_binaries(file) do
+    {_, found} =
+      Macro.prewalk(quoted(file), [], fn
+        {:<<>>, _, [first | _]} = node, acc ->
+          if write_code?(first), do: {node, [node | acc]}, else: {node, acc}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    found
+  end
+
+  defp write_code?({:"::", _, [code, _size]}), do: write_code?(code)
+  defp write_code?(code), do: code in @write_codes
 
   # Erlang modules called in a file: remote calls and captures
   # (`:gen_tcp.send(...)`, `&:gen_tcp.send/2`) and `apply/3` with a literal module.
