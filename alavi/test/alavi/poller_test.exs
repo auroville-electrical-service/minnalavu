@@ -191,6 +191,20 @@ defmodule Alavi.PollerTest do
       for _ <- 1..3, do: assert([%Reading{} | _] = recorded!())
       assert [{_, ^pid, _, _}] = Supervisor.which_children(sup)
     end
+
+    test "a connect timer's message left behind does not stop the poller" do
+      {_sim, port} = start_sim!(:tcp)
+
+      sup =
+        start_pollers!([endpoint(port, "tcp", [meter(1, "elite_440")], %{"interval_ms" => 5})])
+
+      [{_, pid, _, _}] = Supervisor.which_children(sup)
+      assert [%Reading{} | _] = recorded!()
+
+      send(pid, {:timeout, make_ref(), :inet})
+      for _ <- 1..3, do: assert([%Reading{} | _] = recorded!())
+      assert [{_, ^pid, _, _}] = Supervisor.which_children(sup)
+    end
   end
 
   describe "Pollers.start_link/1" do

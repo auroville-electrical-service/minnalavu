@@ -52,6 +52,10 @@ defmodule Alavi.Poller do
   @impl true
   def handle_info(:poll, state), do: {:noreply, poll_round(state)}
 
+  # A connect timeout that races the connect can leave gen_tcp's timer message
+  # behind (`inet:stop_timer/1` flushes it with `after 0`); it means nothing here.
+  def handle_info({:timeout, _timer, :inet}, state), do: {:noreply, state}
+
   defp start(%Endpoint{polled_by_other_system: true}, _feeds, _clock, _raw_log), do: :ignore
 
   defp start(endpoint, {sink, status}, clock, raw_log) do
