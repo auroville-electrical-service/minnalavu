@@ -37,6 +37,40 @@
       "verified_on_device": null
     }
   },
+  "firmware": {
+    "software": {
+      "table": "holding",
+      "address": 4,
+      "count": 4,
+      "type": "ascii",
+      "source": "elite_440-a",
+      "verified_on_device": null
+    },
+    "firmware_1": {
+      "table": "holding",
+      "address": 8,
+      "count": 4,
+      "type": "ascii",
+      "source": "elite_440-a",
+      "verified_on_device": null
+    },
+    "firmware_2": {
+      "table": "holding",
+      "address": 12,
+      "count": 4,
+      "type": "ascii",
+      "source": "elite_440-a",
+      "verified_on_device": null
+    },
+    "modbus_version": {
+      "table": "holding",
+      "address": 18,
+      "count": 1,
+      "type": "hex",
+      "source": "elite_440-a",
+      "verified_on_device": null
+    }
+  },
   "registers": [
     {
       "key": "active_energy_import",

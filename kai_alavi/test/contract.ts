@@ -121,6 +121,26 @@ const identityFixture = z.object({
   ),
 });
 
+const firmwareName = z.enum(["software", "firmware_1", "firmware_2", "modbus_version"]);
+
+const firmwareFixture = z.object({
+  format: z.literal("firmware-names/1"),
+  reads: z.record(z.string(), z.array(z.tuple([firmwareName, z.string(), z.int(), z.int()]))),
+  cases: z.array(
+    z.union([
+      z.strictObject({ why: z.string(), profile: z.string(), name: firmwareName, words, value: z.string() }),
+      z.strictObject({
+        why: z.string(),
+        profile: z.string(),
+        name: firmwareName,
+        words,
+        refused: z.enum(["wrong_word_count", "empty", "not_printable"]),
+      }),
+    ]),
+  ),
+});
+
+export const loadFirmwareFixture = () => firmwareFixture.parse(json("fixtures/firmware-names.v1.json"));
 export const loadIdentityFixture = () => identityFixture.parse(json("fixtures/identity-checks.v1.json"));
 export const loadDecodeFixture = () => decodeFixture.parse(json("fixtures/register-decode.v1.json"));
 export const loadRequestFixture = () => requestFixture.parse(json("fixtures/modbus-read-requests.v1.json"));

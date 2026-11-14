@@ -4,9 +4,9 @@ defmodule Alavi.Profile do
   with the simulator and the server.
   """
 
-  alias Alavi.Profile.{Identity, Register}
+  alias Alavi.Profile.{Firmware, Identity, Register}
 
-  @enforce_keys [:name, :models, :sources, :identity, :registers]
+  @enforce_keys [:name, :models, :sources, :identity, :firmware, :registers]
   defstruct @enforce_keys
 
   @type t :: %__MODULE__{
@@ -14,6 +14,7 @@ defmodule Alavi.Profile do
           models: [String.t()],
           sources: [Register.source()],
           identity: Identity.t(),
+          firmware: Firmware.t() | nil,
           registers: [Register.t()]
         }
 
@@ -49,26 +50,30 @@ defmodule Alavi.Profile do
 
   # contract: test/alavi/profile_test.exs "parse/1"
   @spec parse(term()) :: {:ok, t()} | {:error, String.t()}
-  def parse(%{
-        "schema_version" => 1,
-        "profile" => name,
-        "models" => [_ | _] = models,
-        "sources" => [_ | _] = source_entries,
-        "identity" => identity_json,
-        "registers" => [_ | _] = entries
-      })
+  def parse(
+        %{
+          "schema_version" => 1,
+          "profile" => name,
+          "models" => [_ | _] = models,
+          "sources" => [_ | _] = source_entries,
+          "identity" => identity_json,
+          "registers" => [_ | _] = entries
+        } = json
+      )
       when is_binary(name) do
     with {:ok, sources} <- parse_sources(source_entries),
          {:ok, identity} <- Identity.parse(identity_json),
+         {:ok, firmware} <- parse_firmware(json),
          {:ok, registers} <- parse_registers(entries),
          :ok <- unique_keys(registers),
-         :ok <- known_sources(sources, identity, registers) do
+         :ok <- known_sources(sources, identity, firmware, registers) do
       {:ok,
        %__MODULE__{
          name: name,
          models: models,
          sources: sources,
          identity: identity,
+         firmware: firmware,
          registers: registers
        }}
     end
@@ -80,7 +85,7 @@ defmodule Alavi.Profile do
   def parse(_json),
     do:
       {:error,
-       "expected schema_version, profile, models, a non-empty sources list, identity and a non-empty registers list"}
+       "expected schema_version, profile, models, a non-empty sources list, identity, optionally firmware, and a non-empty registers list"}
 
   @spec register(t(), String.t()) :: {:ok, Register.t()} | {:error, :unknown_register}
   def register(%__MODULE__{registers: registers}, key) do
@@ -117,14 +122,22 @@ defmodule Alavi.Profile do
       else: {:error, "sources lists an ID more than once"}
   end
 
-  defp known_sources(sources, identity, registers) do
-    used = Identity.sources(identity) ++ for(%{source: id} <- registers, id != nil, do: id)
+  defp known_sources(sources, identity, firmware, registers) do
+    used =
+      Identity.sources(identity) ++
+        firmware_sources(firmware) ++ for(%{source: id} <- registers, id != nil, do: id)
 
     case Enum.reject(used, &(&1 in sources)) do
       [] -> :ok
       [id | _] -> {:error, "source #{inspect(id)} is not in sources"}
     end
   end
+
+  defp parse_firmware(%{"firmware" => json}), do: Firmware.parse(json)
+  defp parse_firmware(_json), do: {:ok, nil}
+
+  defp firmware_sources(nil), do: []
+  defp firmware_sources(firmware), do: Firmware.sources(firmware)
 
   defp parse_registers(entries) do
     entries

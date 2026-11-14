@@ -4,7 +4,7 @@ defmodule Simulator.Profile do
   Parsed independently of `alavi`, so the two sides cross-check each other.
   """
 
-  @enforce_keys [:name, :registers, :identity]
+  @enforce_keys [:name, :registers, :identity, :firmware]
   defstruct @enforce_keys
 
   @type table :: :holding | :input
@@ -36,10 +36,25 @@ defmodule Simulator.Profile do
             value: 0..0xFFFF
           }
         }
+  @type firmware_name :: :software | :firmware_1 | :firmware_2 | :modbus_version
+  @typedoc """
+  Where a meter of this profile reports its names, empty where the profile has
+  no `firmware` section. The names have no profile value: each meter has its
+  own (`Simulator.Meter`).
+  """
+  @type firmware :: %{
+          optional(firmware_name()) => %{
+            table: table(),
+            address: 0..0xFFFF,
+            count: pos_integer(),
+            type: :ascii | :hex
+          }
+        }
   @type t :: %__MODULE__{
           name: String.t(),
           registers: %{String.t() => spec()},
-          identity: identity()
+          identity: identity(),
+          firmware: firmware()
         }
 
   @doc "The repo's shared profile directory."
@@ -55,7 +70,8 @@ defmodule Simulator.Profile do
     %__MODULE__{
       name: name,
       registers: Map.new(entries, &spec/1),
-      identity: Map.new(identity, &identity_spec/1)
+      identity: Map.new(identity, &identity_spec/1),
+      firmware: json |> Map.get("firmware", %{}) |> Map.new(&firmware_spec/1)
     }
   end
 
@@ -93,6 +109,24 @@ defmodule Simulator.Profile do
        value: entry["expect"]
      }}
   end
+
+  defp firmware_spec({name, entry}) do
+    {firmware_name(name),
+     %{
+       table: table(entry["table"]),
+       address: entry["address"],
+       count: entry["count"],
+       type: firmware_type(entry["type"])
+     }}
+  end
+
+  defp firmware_name("software"), do: :software
+  defp firmware_name("firmware_1"), do: :firmware_1
+  defp firmware_name("firmware_2"), do: :firmware_2
+  defp firmware_name("modbus_version"), do: :modbus_version
+
+  defp firmware_type("ascii"), do: :ascii
+  defp firmware_type("hex"), do: :hex
 
   defp part("high_byte"), do: :high_byte
   defp part("word"), do: :word

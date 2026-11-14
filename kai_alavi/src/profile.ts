@@ -48,17 +48,28 @@ const identity = z.strictObject({
     .optional(),
 });
 
+// Informational only: no accept or expect, so a names read can never gate or label a reading.
+const nameEntry = z.strictObject({ table, address, count, type: z.enum(["ascii", "hex"]), source, verified_on_device });
+const firmware = z.strictObject({
+  software: nameEntry,
+  firmware_1: nameEntry,
+  firmware_2: nameEntry,
+  modbus_version: nameEntry,
+});
+
 const usedSources = (p: {
   readonly identity: {
     readonly product_code?: { readonly source: string } | undefined;
     readonly serial?: { readonly source: string } | undefined;
     readonly energy_unit?: { readonly source: string } | undefined;
   };
+  readonly firmware?: Readonly<Record<string, { readonly source: string }>> | undefined;
   readonly registers: readonly { readonly source: string | null }[];
 }): string[] => [
   ...[p.identity.product_code, p.identity.serial, p.identity.energy_unit].flatMap((check) =>
     check ? [check.source] : [],
   ),
+  ...Object.values(p.firmware ?? {}).map((name) => name.source),
   ...p.registers.flatMap((r) => (r.source === null ? [] : [r.source])),
 ];
 
@@ -69,6 +80,7 @@ const profile = z
     models: z.array(z.string()).min(1),
     sources: z.array(source).min(1),
     identity,
+    firmware: firmware.optional(),
     registers: z.array(register).min(1),
   })
   .readonly()
@@ -82,6 +94,9 @@ const profile = z
 
 export type Profile = z.infer<typeof profile>;
 export type Register = z.infer<typeof register>;
+export type Firmware = z.infer<typeof firmware>;
+export type FirmwareName = keyof Firmware;
+export type NameEntry = z.infer<typeof nameEntry>;
 export type DataType = Register["type"];
 export type WordOrder = Register["word_order"];
 

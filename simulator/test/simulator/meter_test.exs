@@ -23,5 +23,25 @@ defmodule Simulator.MeterTest do
       assert text(serial) == "SIM00440"
       assert :unmapped = meter |> Meter.identify(:serial, :absent) |> Meter.read(:holding, 0, 4)
     end
+
+    test "an Elite 440 answers its invented names; the registers between them stay unmapped" do
+      meter = Meter.new(1, Profile.load!("elite_440"))
+      assert {:ok, software} = Meter.read(meter, :holding, 4, 4)
+      assert text(software) == "SIM-SW"
+      assert {:ok, [0x0100]} = Meter.read(meter, :holding, 18, 1)
+      assert :unmapped = Meter.read(meter, :holding, 0, 25)
+    end
+
+    test "an Elite 500's names, in its three-register module 2, can be overridden or unmapped" do
+      meter = Meter.new(2, Profile.load!("elite_500"))
+      assert {:ok, module_2} = Meter.read(meter, :holding, 2015, 3)
+      assert text(module_2) == "SIM-F2"
+
+      renamed = meter |> Meter.name(:firmware_2, "SIM-F9") |> Meter.name(:modbus_version, "0B03")
+      assert {:ok, module_2} = Meter.read(renamed, :holding, 2015, 3)
+      assert text(module_2) == "SIM-F9"
+      assert {:ok, [0x0B03]} = Meter.read(renamed, :holding, 2020, 1)
+      assert :unmapped = meter |> Meter.name(:software, :absent) |> Meter.read(:holding, 2007, 4)
+    end
   end
 end

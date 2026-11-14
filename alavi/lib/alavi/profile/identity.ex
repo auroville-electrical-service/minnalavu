@@ -8,7 +8,7 @@ defmodule Alavi.Profile.Identity do
 
   alias Alavi.Config.Fields
   alias Alavi.Modbus.{Client, PDU}
-  alias Alavi.Profile.Register
+  alias Alavi.Profile.{Register, Text}
 
   @enforce_keys [:product_code, :serial, :energy_unit]
   defstruct @enforce_keys
@@ -115,7 +115,7 @@ defmodule Alavi.Profile.Identity do
     end)
   end
 
-  defp observe({:ok, words}), do: words |> ascii() |> printable()
+  defp observe({:ok, words}), do: words |> Text.trimmed() |> Text.printable()
   defp observe({:error, _}), do: nil
   defp observe(nil), do: nil
 
@@ -126,7 +126,7 @@ defmodule Alavi.Profile.Identity do
   defp words(_check, %{count: count}), do: count
 
   defp judge(:product_code, spec, {:ok, words}) do
-    code = ascii(words)
+    code = Text.trimmed(words)
 
     if code in spec.accept,
       do: :ok,
@@ -136,9 +136,9 @@ defmodule Alavi.Profile.Identity do
   end
 
   defp judge(:serial, _spec, {:ok, words}) do
-    text = ascii(words)
+    text = Text.trimmed(words)
 
-    if printable(text),
+    if Text.printable(text),
       do: :ok,
       else: {:mismatch, "serial #{inspect(text)} is empty or not printable ASCII"}
   end
@@ -159,16 +159,6 @@ defmodule Alavi.Profile.Identity do
 
   defp part(:high_byte, word), do: Bitwise.bsr(word, 8)
   defp part(:word, word), do: word
-
-  # Trailing NULs, then surrounding ASCII whitespace; matched bytewise, so
-  # `kai_alavi` trims exactly the same bytes.
-  defp ascii(words) do
-    unpadded = words |> Enum.map_join(&<<&1::16>>) |> String.trim_trailing(<<0>>)
-    [text] = Regex.run(~r/\A[\t-\r ]*(.*?)[\t-\r ]*\z/s, unpadded, capture: :all_but_first)
-    text
-  end
-
-  defp printable(text), do: if(text =~ ~r/\A[\x20-\x7E]+\z/, do: text)
 
   defp optional(json, field, parse) do
     case Map.fetch(json, field) do
@@ -238,7 +228,7 @@ defmodule Alavi.Profile.Identity do
   end
 
   defp accept(%{"accept" => [_ | _] = codes}) do
-    if Enum.all?(codes, &(is_binary(&1) and printable(&1) != nil)),
+    if Enum.all?(codes, &(is_binary(&1) and Text.printable(&1) != nil)),
       do: {:ok, codes},
       else: {:error, "accept must list non-empty strings of printable ASCII"}
   end

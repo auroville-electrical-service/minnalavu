@@ -7,12 +7,17 @@ defmodule Simulator.Meter do
   a product code, a serial, an energy unit code, or `:absent` to leave the
   register unmapped (exception 02), as on a meter with no unit setting. A new
   meter's serial is `SIM-<unit_id>`, an invented value.
+
+  `firmware` holds what the profile's name registers report, per name, or
+  `:absent` to unmap them. A new meter's names are invented too (`SIM-SW`,
+  `SIM-F1`, `SIM-F2`, version `0100`); the version is the hex digits of its
+  word.
   """
 
   alias Simulator.{Encode, Profile}
 
   @enforce_keys [:unit_id, :profile, :values]
-  defstruct [:unit_id, :profile, :values, word_order: nil, identity: %{}]
+  defstruct [:unit_id, :profile, :values, word_order: nil, identity: %{}, firmware: %{}]
 
   @type check :: :product_code | :serial | :energy_unit
   @type t :: %__MODULE__{
@@ -20,8 +25,16 @@ defmodule Simulator.Meter do
           profile: Profile.t(),
           values: %{String.t() => Decimal.t()},
           word_order: :high_first | :low_first | nil,
-          identity: %{optional(check()) => String.t() | 0..0xFFFF | :absent}
+          identity: %{optional(check()) => String.t() | 0..0xFFFF | :absent},
+          firmware: %{optional(Profile.firmware_name()) => String.t() | :absent}
         }
+
+  @names %{
+    software: "SIM-SW",
+    firmware_1: "SIM-F1",
+    firmware_2: "SIM-F2",
+    modbus_version: "0100"
+  }
 
   @doc "A meter whose registers all start at zero, then take `values`."
   @spec new(1..247, Profile.t(), %{String.t() => Decimal.t()}) :: t()
@@ -32,7 +45,8 @@ defmodule Simulator.Meter do
       unit_id: unit_id,
       profile: profile,
       values: Map.merge(zeros, values),
-      identity: %{serial: "SIM-#{unit_id}"}
+      identity: %{serial: "SIM-#{unit_id}"},
+      firmware: @names
     }
   end
 
@@ -46,6 +60,11 @@ defmodule Simulator.Meter do
   def identify(%__MODULE__{identity: identity} = meter, check, value)
       when check in [:product_code, :serial, :energy_unit],
       do: %{meter | identity: Map.put(identity, check, value)}
+
+  @doc "Override what the meter reports for one name (`:absent` unmaps it)."
+  @spec name(t(), Profile.firmware_name(), String.t() | :absent) :: t()
+  def name(%__MODULE__{firmware: firmware} = meter, name, value) when is_map_key(@names, name),
+    do: %{meter | firmware: Map.put(firmware, name, value)}
 
   @doc "The words at `count` consecutive addresses, or `:unmapped` if any address holds nothing."
   @spec read(t(), Profile.table(), 0..0xFFFF, pos_integer()) :: {:ok, [0..0xFFFF]} | :unmapped
@@ -62,8 +81,20 @@ defmodule Simulator.Meter do
           into: %{},
           do: {spec.address + offset, word}
 
-    Map.merge(registers, identity_bank(meter, table))
+    registers |> Map.merge(identity_bank(meter, table)) |> Map.merge(firmware_bank(meter, table))
   end
+
+  defp firmware_bank(%__MODULE__{profile: profile, firmware: names}, table) do
+    for {name, %{table: ^table} = spec} <- profile.firmware,
+        value = Map.fetch!(names, name),
+        value != :absent,
+        {word, offset} <- Enum.with_index(name_words(spec, value)),
+        into: %{},
+        do: {spec.address + offset, word}
+  end
+
+  defp name_words(%{type: :ascii, count: count}, text), do: text_words(text, count)
+  defp name_words(%{type: :hex}, digits), do: for(<<w::16 <- Base.decode16!(digits)>>, do: w)
 
   defp identity_bank(%__MODULE__{profile: profile, identity: overrides}, table) do
     for {check, %{table: ^table} = spec} <- profile.identity,
@@ -74,13 +105,16 @@ defmodule Simulator.Meter do
         do: {spec.address + offset, word}
   end
 
-  defp identity_words(check, %{count: count}, text) when check in [:product_code, :serial] do
-    padded = String.pad_trailing(text, count * 2, <<0>>)
-    for <<word::16 <- binary_part(padded, 0, count * 2)>>, do: word
-  end
+  defp identity_words(check, %{count: count}, text) when check in [:product_code, :serial],
+    do: text_words(text, count)
 
   defp identity_words(:energy_unit, %{part: :high_byte}, code), do: [Bitwise.bsl(code, 8)]
   defp identity_words(:energy_unit, %{part: :word}, code), do: [code]
+
+  defp text_words(text, count) do
+    padded = String.pad_trailing(text, count * 2, <<0>>)
+    for <<word::16 <- binary_part(padded, 0, count * 2)>>, do: word
+  end
 
   defp order(spec, nil), do: spec
   defp order(spec, word_order), do: %{spec | word_order: word_order}

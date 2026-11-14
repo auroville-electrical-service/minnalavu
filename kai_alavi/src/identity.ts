@@ -1,6 +1,7 @@
 import type { Table } from "./pdu";
 import type { Profile } from "./profile";
 import type { Result } from "./result";
+import { bytesOf, printable, trimmed } from "./text";
 
 // The checks guard against a meter registered under the wrong model and say what the meter
 // reported; they follow `alavi`'s `Alavi.Profile.Identity`.
@@ -93,7 +94,6 @@ const isException = (result: ReadResult, code: number): boolean =>
   !result.ok && result.error.kind === "exception" && result.error.code === code;
 
 const utf8 = new TextEncoder();
-const bytesOf = (words: readonly number[]): readonly number[] => words.flatMap((w) => [w >> 8, w & 0xff]);
 const shown = (bytes: readonly number[]): string => JSON.stringify(new TextDecoder().decode(Uint8Array.from(bytes)));
 
 const productCode = (accept: readonly string[], words: readonly number[]): Outcome => {
@@ -125,18 +125,4 @@ const energyUnit = (
         kind: "mismatch",
         detail: `energy unit code ${code} at ${unit.table} ${unit.address}, expected ${unit.expect}`,
       };
-};
-
-const printable = (bytes: readonly number[]): string | null =>
-  bytes.length > 0 && bytes.every((b) => b >= 0x20 && b <= 0x7e) ? String.fromCharCode(...bytes) : null;
-
-// Trailing NULs, then surrounding ASCII whitespace: the bytes alavi trims.
-const space = (b: number): boolean => b === 0x20 || (b >= 0x09 && b <= 0x0d);
-
-const trimmed = (bytes: readonly number[]): readonly number[] => {
-  const end = bytes.findLastIndex((b) => b !== 0) + 1;
-  const unpadded = bytes.slice(0, end);
-  const first = unpadded.findIndex((b) => !space(b));
-  if (first === -1) return [];
-  return unpadded.slice(first, unpadded.findLastIndex((b) => !space(b)) + 1);
 };

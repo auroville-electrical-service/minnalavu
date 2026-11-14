@@ -43,6 +43,28 @@ describe("parseProfile", () => {
     ]);
   });
 
+  test("firmware names cite a listed source, and take no accept or expect", () => {
+    const p = parsed("elite_440");
+    if (!p.ok) throw new Error("elite_440 does not parse");
+    const { value } = p;
+    const names = value.firmware;
+    if (!names) throw new Error("elite_440 has no firmware section");
+    const withSoftware = (extra: object) =>
+      parseProfile({ ...value, firmware: { ...names, software: { ...names.software, ...extra } } }).ok;
+    expect([
+      withSoftware({}),
+      withSoftware({ source: "other" }),
+      withSoftware({ accept: ["X"] }),
+      withSoftware({ expect: 1 }),
+      withSoftware({ type: "u16" }),
+    ]).toEqual([true, false, false, false, false]);
+    const { firmware_2: _, ...missing } = names;
+    expect(parseProfile({ ...value, firmware: missing }).ok).toBe(false);
+    const { firmware: __, ...without } = value;
+    const parsedWithout = parseProfile(without);
+    expect(parsedWithout.ok && parsedWithout.value.firmware).toBeUndefined();
+  });
+
   test("verified_on_device is null or a date", () => {
     const p = parsed("elite_440");
     if (!p.ok) throw new Error("elite_440 does not parse");

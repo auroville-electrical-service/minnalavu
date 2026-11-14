@@ -1,0 +1,284 @@
+{
+  "format": "firmware-names/1",
+  "description": "The software and firmware names a meter reports, under each profile's firmware section. reads: what each profile reads for its names, in order, as [name, table, address, count]. cases: words as read, in register-address order, and the text each must decode to (value), or the reason it must be refused (refused). An ascii entry is decoded as the serial is: two bytes per register, high byte first, with trailing NULs and then surrounding ASCII whitespace trimmed; what is left must be non-empty (else empty) and printable ASCII, 0x20 to 0x7E (else not_printable). A hex entry is each byte as two uppercase hex digits, high byte first; any word decodes. A read of other than the entry's count of words is wrong_word_count. Names are informational: they never gate a read or label a reading. All names here are invented. Every implementation that reads names must give every value and refuse every refused case.",
+  "reads": {
+    "elite_440": [
+      [
+        "software",
+        "holding",
+        4,
+        4
+      ],
+      [
+        "firmware_1",
+        "holding",
+        8,
+        4
+      ],
+      [
+        "firmware_2",
+        "holding",
+        12,
+        4
+      ],
+      [
+        "modbus_version",
+        "holding",
+        18,
+        1
+      ]
+    ],
+    "elite_500": [
+      [
+        "software",
+        "holding",
+        2007,
+        4
+      ],
+      [
+        "firmware_1",
+        "holding",
+        2011,
+        4
+      ],
+      [
+        "firmware_2",
+        "holding",
+        2015,
+        3
+      ],
+      [
+        "modbus_version",
+        "holding",
+        2020,
+        1
+      ]
+    ]
+  },
+  "cases": [
+    {
+      "why": "a name filling all its registers",
+      "profile": "elite_440",
+      "name": "software",
+      "words": [
+        21321,
+        19757,
+        21335,
+        13364
+      ],
+      "value": "SIM-SW44"
+    },
+    {
+      "why": "a shorter name, NUL-padded",
+      "profile": "elite_440",
+      "name": "software",
+      "words": [
+        21321,
+        19757,
+        14080,
+        0
+      ],
+      "value": "SIM-7"
+    },
+    {
+      "why": "a shorter name, space-padded",
+      "profile": "elite_440",
+      "name": "firmware_1",
+      "words": [
+        21321,
+        19757,
+        14112,
+        8224
+      ],
+      "value": "SIM-7"
+    },
+    {
+      "why": "surrounding spaces are trimmed, an inner one kept",
+      "profile": "elite_440",
+      "name": "firmware_1",
+      "words": [
+        8224,
+        21321,
+        19744,
+        14112
+      ],
+      "value": "SIM 7"
+    },
+    {
+      "why": "trailing NULs, then spaces before them",
+      "profile": "elite_440",
+      "name": "firmware_2",
+      "words": [
+        20079,
+        8269,
+        28516,
+        0
+      ],
+      "value": "No Mod"
+    },
+    {
+      "why": "a NUL before trailing spaces is not padding",
+      "profile": "elite_440",
+      "name": "firmware_2",
+      "words": [
+        21321,
+        19757,
+        14112,
+        32
+      ],
+      "refused": "not_printable"
+    },
+    {
+      "why": "a NUL inside a name is not padding",
+      "profile": "elite_440",
+      "name": "firmware_2",
+      "words": [
+        21321,
+        19712,
+        11575,
+        0
+      ],
+      "refused": "not_printable"
+    },
+    {
+      "why": "a byte outside printable ASCII",
+      "profile": "elite_440",
+      "name": "software",
+      "words": [
+        21321,
+        19913,
+        14080,
+        0
+      ],
+      "refused": "not_printable"
+    },
+    {
+      "why": "a tab inside a name is not printable",
+      "profile": "elite_440",
+      "name": "software",
+      "words": [
+        21321,
+        19721,
+        14080,
+        0
+      ],
+      "refused": "not_printable"
+    },
+    {
+      "why": "only NULs: no name",
+      "profile": "elite_440",
+      "name": "firmware_1",
+      "words": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "refused": "empty"
+    },
+    {
+      "why": "only spaces and then NULs: no name",
+      "profile": "elite_440",
+      "name": "firmware_1",
+      "words": [
+        8224,
+        8224,
+        0,
+        0
+      ],
+      "refused": "empty"
+    },
+    {
+      "why": "fewer words than the entry's count",
+      "profile": "elite_440",
+      "name": "software",
+      "words": [
+        21321,
+        19757,
+        14080
+      ],
+      "refused": "wrong_word_count"
+    },
+    {
+      "why": "the 500's three-register name, full",
+      "profile": "elite_500",
+      "name": "firmware_2",
+      "words": [
+        21321,
+        19757,
+        17970
+      ],
+      "value": "SIM-F2"
+    },
+    {
+      "why": "an odd length leaves a NUL low byte",
+      "profile": "elite_500",
+      "name": "software",
+      "words": [
+        21321,
+        19757,
+        21335,
+        13568
+      ],
+      "value": "SIM-SW5"
+    },
+    {
+      "why": "more words than the entry's count",
+      "profile": "elite_500",
+      "name": "firmware_2",
+      "words": [
+        21321,
+        19757,
+        17970,
+        0
+      ],
+      "refused": "wrong_word_count"
+    },
+    {
+      "why": "the version word as its two bytes, high byte first",
+      "profile": "elite_440",
+      "name": "modbus_version",
+      "words": [
+        2819
+      ],
+      "value": "0B03"
+    },
+    {
+      "why": "each byte as two digits, uppercase, leading zeros kept",
+      "profile": "elite_440",
+      "name": "modbus_version",
+      "words": [
+        255
+      ],
+      "value": "00FF"
+    },
+    {
+      "why": "a zero version word is a value, not padding",
+      "profile": "elite_500",
+      "name": "modbus_version",
+      "words": [
+        0
+      ],
+      "value": "0000"
+    },
+    {
+      "why": "any word is a version",
+      "profile": "elite_500",
+      "name": "modbus_version",
+      "words": [
+        65040
+      ],
+      "value": "FE10"
+    },
+    {
+      "why": "the version is one word",
+      "profile": "elite_500",
+      "name": "modbus_version",
+      "words": [
+        2819,
+        0
+      ],
+      "refused": "wrong_word_count"
+    }
+  ]
+}

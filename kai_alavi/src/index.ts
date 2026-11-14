@@ -13,6 +13,7 @@ export {
 } from "./batch";
 export { crc16 } from "./crc";
 export { type DecodeError, decodeValue, wordCount } from "./decode";
+export { decodeName, firmwareReads, type NameError, type NameRead } from "./firmware";
 export { encodeRequest, type Framing } from "./framing";
 export {
   type Check,
@@ -26,7 +27,17 @@ export {
   type Verdict,
 } from "./identity";
 export { functionCode, type ReadRequest, readRequest, type Table } from "./pdu";
-export { type DataType, findRegister, type Profile, parseProfile, type Register, type WordOrder } from "./profile";
+export {
+  type DataType,
+  type Firmware,
+  type FirmwareName,
+  findRegister,
+  type NameEntry,
+  type Profile,
+  parseProfile,
+  type Register,
+  type WordOrder,
+} from "./profile";
 export {
   type Expected,
   type FrameError,
