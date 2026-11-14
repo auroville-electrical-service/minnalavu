@@ -27,6 +27,28 @@ A batch the server rejects for good is moved to `<buffer dir>/quarantine/`
 with the server's reason beside it, and never deleted; see `Alavi.Uplink.Response`
 for which answers count as that.
 
+## Windows service
+
+From the release root, in an administrator's command prompt:
+
+1. Copy `settings.example.json` to `settings.json` and fill it in (or copy
+   the old release's).
+2. With no service running, check the settings: `bin\alavi.bat start` runs the
+   collector in the console, and a settings error is printed there. Stop it
+   with Ctrl+C.
+3. `bin\alavi.bat install` adds the service `alavi_alavi` (LocalSystem,
+   automatic start), and prints the path of its `erlsrv.exe`, written
+   `erlsrv` below.
+4. `erlsrv start alavi_alavi`.
+
+`erlsrv list alavi_alavi` should show `OnFail: restart`: the release's
+`bin\alavi.bat` installs the service with `-onfail restart` (`mix.exs`), so
+erlsrv restarts a node that stops on its own. A node that stops again within
+10 seconds of being restarted, as one does with an invalid settings file, is
+left stopped rather than restarted in a loop: fix the cause (the log, or step
+2) and start it again. To install a new release, `erlsrv remove alavi_alavi`,
+then the steps above from the new release root.
+
 ## Logs
 
 A release logs to `alavi.log` in the settings' `log.dir`, rotated at

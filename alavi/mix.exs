@@ -10,6 +10,7 @@ defmodule Alavi.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
       aliases: aliases(),
+      releases: [alavi: [steps: [:assemble, &restart_on_failure/1]]],
       dialyzer: [plt_add_apps: [:mix, :ex_unit]]
     ]
   end
@@ -37,6 +38,27 @@ defmodule Alavi.MixProject do
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
     ]
+  end
+
+  # Mix's bin\alavi.bat installs the Windows service with erlsrv's default,
+  # -onfail ignore, so a node that stops stays down, and it has no option for
+  # it. `restart`, not `restart_always`: a node that stops again within 10 s of
+  # a restart (a bad settings file stops it in under a second) is left stopped,
+  # not restarted in a loop.
+  defp restart_on_failure(release) do
+    bat = Path.join([release.path, "bin", "#{release.name}.bat"])
+    add = ~s|"!ERLSRV!" add "!RELEASE_NAME!_!RELEASE_NAME!" ^\n|
+
+    case String.split(File.read!(bat), add) do
+      [head, tail] ->
+        File.write!(bat, head <> add <> "  -onfail restart ^\n" <> tail)
+        release
+
+      _ ->
+        Mix.raise(
+          "#{bat}: no single erlsrv add line to put -onfail on; has Mix's template changed?"
+        )
+    end
   end
 
   defp aliases do
