@@ -151,6 +151,18 @@ defmodule Alavi.PollerCase do
     end
   end
 
+  @doc """
+  A port that refuses connections for as long as the calling process lives: a
+  socket bound to it, never listening, keeps any other test from taking it.
+  """
+  @spec refusing_port!() :: :inet.port_number()
+  def refusing_port! do
+    {:ok, socket} = :socket.open(:inet, :stream, :tcp)
+    :ok = :socket.bind(socket, %{family: :inet, addr: {127, 0, 0, 1}, port: 0})
+    {:ok, %{port: port}} = :socket.sockname(socket)
+    port
+  end
+
   @doc "A port with nothing listening on it (for now)."
   @spec free_port() :: :inet.port_number()
   def free_port do

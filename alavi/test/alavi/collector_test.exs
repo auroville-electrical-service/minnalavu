@@ -3,7 +3,18 @@ defmodule Alavi.CollectorTest do
 
   import Alavi.PollerCase
 
-  alias Alavi.{Buffer, Clock, Collector, FirmwareRead, MissedRead, Reading, Settings, Wire}
+  alias Alavi.{
+    Buffer,
+    Clock,
+    Collector,
+    FirmwareRead,
+    MissedRead,
+    Reading,
+    Settings,
+    TestServer,
+    Wire
+  }
+
   alias Alavi.Buffer.Batch
   alias Alavi.Uplink.Target
 
@@ -12,7 +23,13 @@ defmodule Alavi.CollectorTest do
   @contract Path.expand("../../../contract", __DIR__)
   @linux {:unix, :linux}
 
-  defp start_collector!(dir, endpoints, uplink \\ :none, status \\ no_status()) do
+  defp start_collector!(
+         dir,
+         endpoints,
+         uplink \\ :none,
+         status \\ no_status(),
+         clock \\ fixed_clock()
+       ) do
     name = :"buffer_#{System.unique_integer([:positive])}"
 
     buffer = [
@@ -26,7 +43,7 @@ defmodule Alavi.CollectorTest do
     opts = [
       config: config!(endpoints),
       buffer: buffer,
-      clock: fn -> ~U[2026-11-01 00:00:00Z] end,
+      clock: clock,
       uplink: uplink,
       raw_log: raw_log(),
       clock_status: :none,
@@ -96,6 +113,92 @@ defmodule Alavi.CollectorTest do
       third = await_restart!(collector, [Alavi.Buffer, Alavi.Pollers, Alavi.Uplink], second)
       assert Map.keys(third) |> Enum.sort() == [Alavi.Buffer, Alavi.Pollers, Alavi.Uplink]
     end
+
+    # Per meter, a round's missed reads: one per register.
+    @round %{1 => 2, 3 => 4}
+    @outage %{
+      "interval_ms" => 50,
+      "timeout_ms" => 50,
+      "reconnect_backoff_ms" => %{"min" => 10, "max" => 100}
+    }
+    # Back online, a poller finishes the connect in flight, waits out its
+    # backoff, at its max by then, and connects: within an interval of that.
+    @back_ms 50 + 100 + 50
+
+    test "every endpoint unreachable at once: each meter is missed, then read again soon after, " <>
+           "with nothing restarted, past an endpoint that refuses throughout",
+         ctx do
+      sims = for _ <- 1..3, do: start_sim!(:tcp)
+      refusing = refusing_port!()
+      live = for {_sim, port} <- sims, unit <- [1, 3], do: {port, unit}
+      endpoints = [{nil, refusing} | sims] |> Enum.with_index() |> Enum.map(&outage_endpoint/1)
+      server = start_supervised!({TestServer, owner: self(), answers: [TestServer.stored()]})
+      uplink = uplink_to(TestServer.port(server))
+
+      {collector, _buffer} =
+        start_collector!(ctx.tmp_dir, endpoints, uplink, no_status(), &DateTime.utc_now/0)
+
+      posted = posted!([], &each?(&1, live, fn e -> e.kind == :reading end))
+      tree = tree(collector)
+
+      Enum.each(sims, &Simulator.offline(elem(&1, 0)))
+      off = DateTime.utc_now()
+      # Five rounds take the backoff to its max; eight leave an uncapped one far past it.
+      posted = posted!(posted, &(rounds_unreachable(&1, live, off) >= 8))
+
+      on = DateTime.utc_now()
+      Enum.each(sims, &Simulator.online(elem(&1, 0)))
+      posted = posted!(posted, &each?(&1, live, fn e -> e.kind == :reading and after?(e, on) end))
+
+      assert tree(collector) == tree
+      {refused, seen} = Enum.split_with(posted, &(elem(key(&1), 0) == refusing))
+
+      for e <- seen, after?(e, off) and not after?(e, on) do
+        assert e.kind == :missed and (e.wire["reason"] == "timeout" or connect_timeout?(e))
+      end
+
+      for {{_port, unit}, events} <- Enum.group_by(seen, &key/1) do
+        for kind <- [:reading, :missed], as_posted = Enum.filter(events, &(&1.kind == kind)) do
+          assert Enum.sort_by(as_posted, & &1.at, DateTime) == as_posted
+        end
+
+        events = Enum.sort_by(events, & &1.at, DateTime)
+        assert events |> Enum.map(& &1.kind) |> Enum.dedup() == [:reading, :missed, :reading]
+
+        {missed, [back | _]} =
+          events |> Enum.filter(&after?(&1, on)) |> Enum.split_while(&(&1.kind == :missed))
+
+        assert length(missed) <= @round[unit]
+        assert DateTime.diff(back.at, on, :millisecond) < @back_ms + 200
+      end
+
+      assert refused != [] and
+               Enum.all?(refused, &(&1.kind == :missed and &1.wire["detail"] == "econnrefused"))
+    end
+  end
+
+  # Units 1 and 3, under serials unique to the endpoint, set on its simulator if it has one.
+  defp outage_endpoint({{sim, port}, n}) do
+    meters =
+      for {unit, profile} <- [{1, "elite_440"}, {3, "elite_500"}] do
+        serial = "SIM-#{n}-#{unit}"
+        if sim, do: :ok = Simulator.identify(sim, unit, :serial, serial)
+        meter(unit, profile, %{"serial" => serial})
+      end
+
+    endpoint(port, "tcp", meters, @outage)
+  end
+
+  # The fewest rounds any of `keys` has been missed as unreachable since `since`.
+  defp rounds_unreachable(events, keys, since) do
+    counts =
+      events
+      |> Enum.filter(&(after?(&1, since) and connect_timeout?(&1)))
+      |> Enum.frequencies_by(&key/1)
+
+    keys
+    |> Enum.map(fn {_port, unit} = k -> div(Map.get(counts, k, 0), @round[unit]) end)
+    |> Enum.min()
   end
 
   describe "start_link/1, fed to a status" do
@@ -124,6 +227,59 @@ defmodule Alavi.CollectorTest do
       Process.sleep(50)
       assert children(collector) == before
     end
+  end
+
+  defp fixed_clock, do: fn -> ~U[2026-11-01 00:00:00Z] end
+
+  defp uplink_to(port) do
+    {:ok, target} =
+      Target.parse("http://127.0.0.1:#{port}", "t.o.k", allow_http: true, cacerts: [])
+
+    [
+      target: target,
+      clock: &DateTime.utc_now/0,
+      idle_ms: 20,
+      timeout_ms: 1_000,
+      backoff_ms: %{min: 10, max: 40}
+    ]
+  end
+
+  # The readings and missed reads posted so far, in the order posted, until `done?` holds.
+  defp posted!(events, done?, tries \\ 500) do
+    cond do
+      done?.(events) ->
+        events
+
+      tries > 0 ->
+        assert_receive {:request, %{body: body}}, 2_000
+        posted!(events ++ events(JSON.decode!(body)), done?, tries - 1)
+
+      true ->
+        flunk("the posted events never matched")
+    end
+  end
+
+  defp events(batch) do
+    for {kind, field} <- [reading: "readings", missed: "missed_reads"], wire <- batch[field] do
+      {:ok, at, 0} = DateTime.from_iso8601(wire["timestamp"])
+      %{kind: kind, at: at, wire: wire}
+    end
+  end
+
+  defp key(%{wire: wire}), do: {wire["endpoint"]["port"], wire["unit_id"]}
+
+  defp each?(events, keys, pred),
+    do: Enum.all?(keys, fn k -> Enum.any?(events, &(key(&1) == k and pred.(&1))) end)
+
+  defp after?(event, at), do: DateTime.compare(event.at, at) != :lt
+
+  defp connect_timeout?(%{wire: wire}),
+    do: wire["reason"] == "unreachable" and wire["detail"] == "timeout"
+
+  # The collector's children and the pollers under them.
+  defp tree(collector) do
+    top = children(collector)
+    Map.merge(top, children(top[Alavi.Pollers]))
   end
 
   defp await_serial!(status, serial, tries \\ 100) do
