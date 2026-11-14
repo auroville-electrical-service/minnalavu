@@ -1,9 +1,10 @@
 defmodule Alavi.Poller do
   @moduledoc """
   Polls one endpoint's meters. Each round, per meter: the identity, then the
-  registers, recorded to the sink; then its firmware names, when
+  registers, recorded to the sink. Then, once every meter's readings are
+  recorded, the firmware names of each meter whose identity was read, when
   `Alavi.Poller.Names` says they are due, unless the meter stopped answering
-  during its register reads.
+  during its register reads or the endpoint went down in the round.
   """
 
   use GenServer
@@ -77,7 +78,11 @@ defmodule Alavi.Poller do
     started = now()
     state = log_raw(state, &RawLog.flush(&1, started))
     due = Enum.filter(state.endpoint.meters, &(state.due[&1.unit_id] <= started))
-    {events, state} = Enum.flat_map_reduce(due, %{state | down: nil}, &poll_meter/2)
+
+    {events, {state, identified}} =
+      Enum.flat_map_reduce(due, {%{state | down: nil}, []}, &poll_meter/2)
+
+    state = identified |> Enum.reverse() |> Enum.reduce(state, &names/2)
     Status.round(state.status, events)
     due_at = Map.merge(state.due, Map.new(due, &{&1.unit_id, started + &1.interval_ms}))
     next = due_at |> Map.values() |> Enum.min()
@@ -85,17 +90,19 @@ defmodule Alavi.Poller do
     %{state | due: due_at}
   end
 
-  defp poll_meter(meter, state) do
+  # Each meter identified, with what it reported, for the names read at the
+  # end of the round.
+  defp poll_meter(meter, {state, identified}) do
     case identify(meter, state) do
       {{:ok, seen}, state} ->
         {events, skip, state} = read_registers(meter, seen, state)
         recorded(events, state)
-        {events, names(meter, seen, skip, state)}
+        {events, {state, [{meter, seen, skip} | identified]}}
 
       {{:missed, reason, n, serial}, state} ->
         events = missed_all(state, meter, serial, reason, n)
         recorded(events, state)
-        {events, state}
+        {events, {state, identified}}
     end
   end
 
@@ -109,10 +116,11 @@ defmodule Alavi.Poller do
     {events, skip, state}
   end
 
-  # After the meter's readings are recorded, so they never wait on the names.
-  defp names(%Meter{profile: %{firmware: nil}}, _seen, _skip, state), do: state
+  # After every meter's readings in the round are recorded, so that no reading
+  # waits on the names, and a names read that fails costs no meter its readings.
+  defp names({%Meter{profile: %{firmware: nil}}, _seen, _skip}, state), do: state
 
-  defp names(%Meter{unit_id: unit} = meter, seen, skip, state) do
+  defp names({%Meter{unit_id: unit} = meter, seen, skip}, state) do
     names = Names.observe(state.names[unit], {seen.serial, seen.product_code}, state.clock.())
 
     {names, state} =
@@ -123,6 +131,11 @@ defmodule Alavi.Poller do
     %{state | names: Map.put(state.names, unit, names)}
   end
 
+  defp read_names(meter, _seen, names, %{down: down} = state) when down != nil do
+    not_read(state, meter, {:unreachable, down})
+    {names, state}
+  end
+
   defp read_names(meter, seen, names, state) do
     case name_words(meter, state) do
       {{:ok, results}, state} ->
@@ -131,7 +144,7 @@ defmodule Alavi.Poller do
         {sent(Names.read(names, read.timestamp), read, state), state}
 
       {{:error, reason}, state} ->
-        warn(state, meter, "firmware names not read, again next round: #{inspect(reason)}")
+        not_read(state, meter, reason)
         {names, state}
     end
   end
@@ -141,13 +154,24 @@ defmodule Alavi.Poller do
     |> Firmware.reads()
     |> Enum.reduce_while({{:ok, %{}}, state}, fn {name, table, address, count},
                                                  {{:ok, acc}, state} ->
-      case read_words(state, {unit, table, address, count}, 1) do
-        {{:ok, words, _n}, state} -> {:cont, {{:ok, Map.put(acc, name, {:ok, words})}, state}}
-        {{:skip_register, error, _n}, state} -> {:cont, {{:ok, Map.put(acc, name, error)}, state}}
-        {{:skip_meter, reason, _n}, state} -> {:halt, {{:error, reason}, state}}
+      case name_result(read_words(state, {unit, table, address, count}, 1)) do
+        {{:ok, result}, state} -> {:cont, {{:ok, Map.put(acc, name, result)}, state}}
+        {{:error, reason}, state} -> {:halt, {{:error, reason}, state}}
       end
     end)
   end
+
+  # Exception 02, illegal data address: the meter has no such register, so the
+  # name is not given. Any other refusal may pass, so the read is tried again.
+  defp name_result({{:ok, words, _n}, state}), do: {{:ok, {:ok, words}}, state}
+
+  defp name_result({{:skip_register, {:exception, 2} = error, _n}, state}),
+    do: {{:ok, error}, state}
+
+  defp name_result({{_skip, reason, _n}, state}), do: {{:error, reason}, state}
+
+  defp not_read(state, meter, reason),
+    do: warn(state, meter, "firmware names not read, again next round: #{inspect(reason)}")
 
   defp firmware_read(state, meter, seen, results) do
     names = Map.new(results, fn {name, result} -> {name, name(state, meter, name, result)} end)

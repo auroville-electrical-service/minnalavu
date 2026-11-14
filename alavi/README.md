@@ -52,14 +52,16 @@ or not printable, gives missed reads for that round, with no serial if none
 was read.
 
 A meter's software and firmware names and Modbus protocol version (its
-profile's `firmware` section) are read after its readings are recorded: in the
-first round after start, when the last names read is a day old, and in the
-round its serial or product code differs from the last round's. They go to the
+profile's `firmware` section) are read after every meter's readings in the
+round are recorded: in the first round after start, when the last names read is
+a day old, and in the round its serial or product code differs from the last
+round's. They go to the
 server only when they, or the serial or product code read with them, differ
 from the last sent for that endpoint and unit, and always the first after
-start. A name the meter does not give is sent as null. A names read that fails
-is logged and tried again the next round; it is never a missed read, and
-readings never wait on it.
+start. A name the meter does not give (blank, not printable, or exception 02,
+no such register) is sent as null; any other refusal fails the names read. A
+names read that fails is logged and tried again the next round; it is never a
+missed read, and readings never wait on it.
 
 ## Clock
 

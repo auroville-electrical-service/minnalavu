@@ -2,8 +2,8 @@ defmodule Alavi.FirmwareRead do
   @moduledoc """
   A meter's software and firmware names, read in a round that also read its
   serial and product code. A name is nil where the meter did not give it: it
-  answered blank or with text that is not printable, or refused that read.
-  Informational only: nothing about a reading depends on it.
+  answered blank or with text that is not printable, or with exception 02 (no
+  such register). Informational only: nothing about a reading depends on it.
   """
 
   alias Alavi.Reading

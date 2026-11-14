@@ -36,6 +36,15 @@ defmodule Simulator.ProtocolTest do
                Protocol.respond(meters, faults, 1, <<3, 11_150::16, 1::16>>)
     end
 
+    test "a refused read gets its exception, and the unit's other reads are answered",
+         %{meters: meters} do
+      faults = %Faults{refused_reads: %{{1, 11_149} => 4}}
+      assert {:reply, <<0x83, 4>>} = Protocol.respond(meters, faults, 1, <<3, 11_149::16, 2::16>>)
+
+      assert {:reply, <<3, 2, _::16>>} =
+               Protocol.respond(meters, faults, 1, <<3, 11_150::16, 1::16>>)
+    end
+
     test "no meter at a unit id stays silent", %{meters: meters} do
       assert :silent = Protocol.respond(meters, %Faults{}, 2, <<3, 11_149::16, 2::16>>)
     end

@@ -54,7 +54,7 @@ defmodule Alavi.CollectorTest do
       :ok = await_events!(buffer, 10)
       {:ok, %Batch{events: events} = batch} = Buffer.take(buffer)
 
-      assert Enum.map(events, & &1.unit_id) |> Enum.dedup() == [1, 9, 3]
+      assert Enum.map(events, & &1.unit_id) |> Enum.dedup() == [1, 9, 3, 1, 3]
 
       %{Reading => readings, MissedRead => missed, FirmwareRead => names} =
         Enum.group_by(events, & &1.__struct__)

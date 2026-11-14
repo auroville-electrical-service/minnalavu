@@ -50,11 +50,23 @@ defmodule Simulator.Protocol do
   @spec respond([Meter.t()], Faults.t(), 0..255, binary(), missing_units()) ::
           {:reply, binary()} | :silent
   def respond(meters, %Faults{} = faults, unit_id, <<fc, _::binary>> = pdu, missing \\ :silent) do
+    read = read_at(unit_id, pdu)
+
     cond do
-      MapSet.member?(faults.silent_units, unit_id) -> :silent
-      silent_read?(faults, unit_id, pdu) -> :silent
-      faults.busy -> {:reply, exception(fc, @busy)}
-      true -> meters |> Enum.find(&(&1.unit_id == unit_id)) |> answer(pdu, missing)
+      MapSet.member?(faults.silent_units, unit_id) ->
+        :silent
+
+      MapSet.member?(faults.silent_reads, read) ->
+        :silent
+
+      is_map_key(faults.refused_reads, read) ->
+        {:reply, exception(fc, faults.refused_reads[read])}
+
+      faults.busy ->
+        {:reply, exception(fc, @busy)}
+
+      true ->
+        meters |> Enum.find(&(&1.unit_id == unit_id)) |> answer(pdu, missing)
     end
   end
 
@@ -70,10 +82,8 @@ defmodule Simulator.Protocol do
     <<faults.noise::binary, body::binary, crc::little-16>>
   end
 
-  defp silent_read?(faults, unit_id, <<_fc, address::16, _::binary>>),
-    do: MapSet.member?(faults.silent_reads, {unit_id, address})
-
-  defp silent_read?(_faults, _unit_id, _pdu), do: false
+  defp read_at(unit_id, <<_fc, address::16, _::binary>>), do: {unit_id, address}
+  defp read_at(_unit_id, _pdu), do: nil
 
   defp answer(nil, _pdu, :silent), do: :silent
 

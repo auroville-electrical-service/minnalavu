@@ -21,15 +21,18 @@ defmodule Alavi.Poller.FirmwareTest do
   end
 
   # The test process stands in for the status, so it sees each names read
-  # (`Status.firmware/2`) and each round's end (`Status.round/2`).
-  defp poll!(sim_meters, meters, sink \\ Alavi.TestSink) do
+  # (`Status.firmware/2`) and each round's end (`Status.round/2`). Options:
+  # `sink`, `faults` set before the first round, and `clock`, which replaces
+  # the agent's.
+  defp poll!(sim_meters, meters, opts \\ []) do
     {sim, port} = start_chain!(:tcp, sim_meters)
+    :ok = Simulator.faults(sim, Keyword.get(opts, :faults, []))
     {:ok, clock} = Agent.start_link(fn -> @start end)
 
     opts = [
       config: config!([endpoint(port, "tcp", meters, %{"interval_ms" => 10})]),
-      sink: {sink, self()},
-      clock: fn -> Agent.get(clock, & &1) end,
+      sink: {Keyword.get(opts, :sink, Alavi.TestSink), self()},
+      clock: Keyword.get(opts, :clock, fn -> Agent.get(clock, & &1) end),
       raw_log: raw_log(),
       status: self()
     ]
@@ -165,9 +168,62 @@ defmodule Alavi.Poller.FirmwareTest do
       assert log =~ "firmware name firmware_2 not given, sent as null: {:exception, 2}"
     end
 
+    for code <- [3, 4] do
+      test "a name refused with exception #{code} fails the names read, tried next round" do
+        log =
+          capture_log(fn ->
+            {sim, _clock} =
+              poll!([sim_meter(1, "elite_440")], [meter(1, "elite_440")],
+                faults: [refused_reads: [{{1, @software_440}, unquote(code)}]]
+              )
+
+            assert [{:recorded, _}] = round!()
+            assert [{:recorded, _}] = round!()
+            Simulator.clear_faults(sim)
+            round = until!(&names_read?/1)
+            assert [%FirmwareRead{software: "SIM-SW"}] = sent(round)
+          end)
+
+        assert log =~
+                 "unit 1: firmware names not read, again next round: {:exception, #{unquote(code)}}"
+      end
+    end
+
+    test "a failed names read costs no other meter on the endpoint its readings" do
+      log =
+        capture_log(fn ->
+          {sim, _clock} =
+            poll!(
+              [sim_meter(1, "elite_440"), sim_meter(2, "elite_440")],
+              [meter(1, "elite_440"), meter(2, "elite_440")],
+              faults: [silent_reads: [{1, @software_440}]],
+              clock: &DateTime.utc_now/0
+            )
+
+          assert [{:recorded, first}, {:recorded, second}, {:names_read, read}, {:sent, read}] =
+                   round!()
+
+          assert %FirmwareRead{unit_id: 2} = read
+          assert Enum.all?(first ++ second, &match?(%Reading{}, &1))
+          assert Enum.map(second, & &1.register_key) == Enum.map(first, & &1.register_key)
+          assert Enum.all?(second, &(&1.unit_id == 2))
+
+          # Read before the names: not after their timeouts, 100 ms each.
+          gap = DateTime.diff(hd(second).timestamp, List.last(first).timestamp, :millisecond)
+          assert gap < 100
+
+          assert [{:recorded, _}, {:recorded, _}] = round!()
+          Simulator.clear_faults(sim)
+          round = until!(&names_read?/1)
+          assert [%FirmwareRead{unit_id: 1}] = sent(round)
+        end)
+
+      assert log =~ "unit 1: firmware names not read, again next round: :timeout"
+    end
+
     test "names the sink refused are read and sent again next round" do
       capture_log(fn ->
-        poll!([sim_meter(1, "elite_440")], [meter(1, "elite_440")], Alavi.RefusingSink)
+        poll!([sim_meter(1, "elite_440")], [meter(1, "elite_440")], sink: Alavi.RefusingSink)
         for _ <- 1..2, do: assert([{:recorded, _}, {:names_read, _}, {:sent, _}] = round!())
       end)
     end
