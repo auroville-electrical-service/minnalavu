@@ -45,7 +45,7 @@ SELECT admin.register_endpoint(endpoint_id => 'alert_test_ep', valid_from => now
   interval_ms => 900000);
 SELECT admin.register_meter(serial => 'ALERT-0001', valid_from => now() - interval '2 days',
   endpoint_id => 'alert_test_ep', unit_id => 1, profile => 'elite_440', interval_ms => NULL);
-CREATE FUNCTION public.alert_test_reading(serial text) RETURNS void
+CREATE FUNCTION public.alert_test_reading(serial text, unit integer) RETURNS void
 LANGUAGE plpgsql AS $$
 DECLARE
   id uuid := gen_random_uuid();
@@ -58,10 +58,10 @@ BEGIN
      missed_reads_inserted, missed_reads_duplicate)
   VALUES (id, 'alert_test', now(), now(), 0, 0, 0, NULL, 1000, 0, 0, 0, 1, 0, 0, 0, 0);
   INSERT INTO store.readings VALUES (serial, 'active_energy_import', now(), 1.0, 'Wh', '{0,0}',
-    'elite_440', '10.0.0.1', 502, 1, 'alert_test', id);
+    'elite_440', '10.0.0.1', 502, unit, 'alert_test', id, 'ELITE440-445');
 END
 $$;
-SELECT alert_test_reading('ALERT-0001');
+SELECT alert_test_reading('ALERT-0001', 1);
 SQL
 
 # The job as it runs on the VPS, but reading as the role monitor.
@@ -116,12 +116,12 @@ alert --apply >/dev/null
 alert --apply >/dev/null
 is 'the same problem again sends nothing more' "$(mails)" 1
 
-sql -c "SELECT alert_test_reading('ALERT-STRAY')"
+sql -c "SELECT alert_test_reading('ALERT-STRAY', 3)"
 alert --apply >/dev/null
 is 'a second problem sends one more mail' "$(mails)" 2
 is 'listing both' "$(subject)" 'minnalavu health: 2 open, 1 new, 0 cleared'
 
-sql -c "SELECT alert_test_reading('ALERT-0002')"
+sql -c "SELECT alert_test_reading('ALERT-0002', 2)"
 sql -c "SELECT admin.register_meter(serial => 'ALERT-STRAY', valid_from => now() - interval '1 day',
   endpoint_id => 'alert_test_ep', unit_id => 3, profile => 'elite_440', interval_ms => NULL)"
 alert --apply >/dev/null
@@ -142,7 +142,7 @@ alert --apply >/dev/null
 is 'readable again sends one mail' "$(mails)" 5
 is 'saying it cleared' "$(subject)" 'minnalavu health: 0 open, 0 new, 1 cleared'
 
-sql -c "SELECT alert_test_reading('ALERT-STRAY-2')"
+sql -c "SELECT alert_test_reading('ALERT-STRAY-2', 4)"
 good_smtp=$ALERT_SMTP_URL
 ALERT_SMTP_URL=smtp://mailpit:1
 is 'mail that cannot be sent: the run fails' "$(alert --apply)" 1
@@ -152,7 +152,7 @@ alert --apply >/dev/null
 is 'so the next run sends it' "$(mails)" 6
 
 # Bad config: stopped with status 2 before reading or sending anything.
-sql -c "SELECT alert_test_reading('ALERT-STRAY-3')"
+sql -c "SELECT alert_test_reading('ALERT-STRAY-3', 5)"
 reported=$(<"$ALERT_STATE_FILE")
 for name in ALERT_DB_URL ALERT_SMTP_URL ALERT_SMTP_TLS ALERT_SMTP_USER ALERT_SMTP_PASSWORD \
   ALERT_FROM ALERT_TO ALERT_STATE_FILE; do
