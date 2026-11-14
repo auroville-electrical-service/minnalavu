@@ -205,6 +205,119 @@ defmodule Alavi.PollerTest do
     end
   end
 
+  describe "start_link/1, latency" do
+    @describetag :tmp_dir
+
+    # Pollers feeding a status that knows their endpoints.
+    defp start_with_status!(endpoints, clock, dir) do
+      config = config!(endpoints)
+      status = :"status_#{System.unique_integer([:positive])}"
+
+      start_supervised!(
+        {Alavi.Status,
+         config: config,
+         settings: [],
+         version: "0.1.0",
+         buffer: :no_such_buffer,
+         file: Path.join(dir, "status.json"),
+         clock: &DateTime.utc_now/0,
+         tick_ms: 60_000,
+         name: status},
+        id: status
+      )
+
+      start_supervised!(
+        {Alavi.Pollers,
+         config: config,
+         sink: {Alavi.TestSink, self()},
+         clock: clock,
+         raw_log: raw_log(),
+         status: status}
+      )
+
+      status
+    end
+
+    defp latency(status, unit) do
+      status
+      |> Alavi.Status.read()
+      |> Map.fetch!(:endpoints)
+      |> hd()
+      |> Map.fetch!(:meters)
+      |> Enum.find(&(&1.unit_id == unit))
+      |> Map.fetch!(:latency)
+    end
+
+    test "each answered request is timed per meter; a timeout is counted, not timed", ctx do
+      {sim, port} = start_sim!(:tcp)
+      Simulator.faults(sim, silent_units: [2], delay_ms: 20)
+      meters = [meter(1, "elite_440"), meter(2, "elite_440"), meter(3, "elite_500")]
+      endpoints = [endpoint(port, "tcp", meters, %{"timeout_ms" => 100})]
+      status = start_with_status!(endpoints, &DateTime.utc_now/0, ctx.tmp_dir)
+
+      assert [%Reading{unit_id: 3} | _] = await_unit!(3, &match?([%Reading{} | _], &1))
+      :ok = eventually!(fn -> latency(status, 3) != nil end)
+
+      today = Date.to_iso8601(Date.utc_today())
+      # Its identity, registers and firmware names, each reply 20 ms late.
+      assert %{since: ^today, answered: 9, retries: 0, timeouts: 0} = l1 = latency(status, 1)
+      assert l1.p50 >= 20 and l1.p50 <= l1.p99 and l1.p99 <= l1.max and l1.max < 100
+      assert %{answered: 0, timeouts: 3, p50: nil, max: nil} = latency(status, 2)
+      assert %{answered: 11, timeouts: 0} = latency(status, 3)
+    end
+
+    test "each meter's day is logged when the UTC day ends", ctx do
+      {_sim, port} = start_sim!(:tcp)
+      agent = start_supervised!({Agent, fn -> ~U[2026-11-13 23:59:59Z] end})
+      clock = fn -> Agent.get(agent, & &1) end
+      endpoints = [endpoint(port, "tcp", [meter(1, "elite_440")], %{"interval_ms" => 5})]
+
+      {_, log} =
+        with_log(fn ->
+          start_with_status!(endpoints, clock, ctx.tmp_dir)
+          assert [%Reading{timestamp: ~U[2026-11-13 23:59:59Z]} | _] = recorded!()
+          Agent.update(agent, fn _ -> ~U[2026-11-14 00:00:01Z] end)
+          await_unit!(1, &match?([%Reading{timestamp: ~U[2026-11-14 00:00:01Z]} | _], &1))
+          recorded!()
+        end)
+
+      prefix = "alavi poller 127.0.0.1:#{port} unit 1: latency, day ended, "
+
+      assert [_one] =
+               Regex.scan(
+                 ~r/#{prefix}2026-11-13 UTC: \d+ answered \(0 on a retry\), 0 timed out; p50 \d+ ms/,
+                 log
+               )
+
+      refute log =~ "#{prefix}2026-11-14"
+    end
+  end
+
+  describe "Pollers.log_latency/2" do
+    test "logs every poller's day so far, and passes over one that does not answer" do
+      {_sim, port} = start_sim!(:tcp)
+      {slow_sim, slow} = start_sim!(:tcp)
+      Simulator.faults(slow_sim, delay_ms: 300)
+
+      endpoints = [
+        endpoint(port, "tcp", [meter(1, "elite_440"), meter(3, "elite_500")]),
+        endpoint(slow, "tcp", [meter(2, "elite_440")], %{"timeout_ms" => 1_000})
+      ]
+
+      pollers = start_pollers!(endpoints, fn -> ~U[2026-11-14 10:00:00Z] end)
+      await_unit!(3, &match?([%Reading{} | _], &1))
+
+      {:ok, log} = with_log(fn -> Alavi.Pollers.log_latency(pollers, 100) end)
+
+      for unit <- [1, 3] do
+        assert log =~
+                 ~r/alavi poller 127.0.0.1:#{port} unit #{unit}: latency, before stopping, 2026-11-14 UTC: \d+ answered/
+      end
+
+      refute log =~ "127.0.0.1:#{slow}"
+    end
+  end
+
   describe "Pollers.start_link/1" do
     test "never connects to an endpoint polled by another system" do
       {:ok, listen} = :gen_tcp.listen(0, ip: {127, 0, 0, 1}, active: false)

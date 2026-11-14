@@ -25,6 +25,8 @@ defmodule Alavi.Status.Page do
   """
 
   @states [ok: "OK", degraded: "some units not OK", down: "down", waiting: "no round yet"]
+  @latency_heads ["Unit", "Since", "Answered", "On a retry", "Timed out"] ++
+                   ["p50 ms", "p90 ms", "p99 ms", "Max ms"]
   @meter_states [ok: "OK", partial: "partial", missed: "missed", waiting: "not read yet"]
 
   # contract: test/alavi/status/page_test.exs "render/2"
@@ -230,6 +232,8 @@ defmodule Alavi.Status.Page do
       rounds(e.rounds),
       "<h2>Recent failures</h2>",
       failures(e.failures),
+      "<h2>Request latency</h2>",
+      latency(e.meters),
       "<h2>Meters</h2>",
       Enum.map(e.meters, &meter(e, &1))
     ]
@@ -270,6 +274,28 @@ defmodule Alavi.Status.Page do
       end)
     )
   end
+
+  defp latency(meters) do
+    rows = for %{latency: l} = m <- meters, l != nil, do: latency_row(m.unit_id, l)
+
+    [
+      ~s|<p class="note">Each request's round trip since the collector started, from the |,
+      "UTC day shown, a week at most. A percentile is at most the figure shown; a ",
+      "timeout is counted, never a sample.</p>",
+      case rows do
+        [] -> none("No request yet.")
+        rows -> table(@latency_heads, rows)
+      end
+    ]
+  end
+
+  defp latency_row(unit, l) do
+    [text(unit), text(l.since), text(l.answered), text(l.retries), timeouts(l.timeouts)] ++
+      Enum.map([l.p50, l.p90, l.p99, l.max], &or_none/1)
+  end
+
+  defp timeouts(0), do: text(0)
+  defp timeouts(n), do: warn(n)
 
   defp meter(e, m) do
     state = Health.meter(e, m)
@@ -365,6 +391,7 @@ defmodule Alavi.Status.Page do
   end
 
   defp ok(value), do: [~s|<span class="ok">|, text(value), "</span>"]
+  defp warn(value), do: [~s|<span class="warn">|, text(value), "</span>"]
   defp bad(value), do: [~s|<span class="bad">|, text(value), "</span>"]
   defp code(value), do: ["<code>", text(value), "</code>"]
   defp none(message), do: [~s|<p class="note">|, message, "</p>"]

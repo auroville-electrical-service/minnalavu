@@ -18,6 +18,7 @@ defmodule Alavi.Status.Snapshot do
 
   alias Alavi.{Buffer, Clock, Config, FirmwareRead, MissedRead, Reading, Wire}
   alias Alavi.Config.{Endpoint, Meter}
+  alias Alavi.Poller.Latency
   alias Alavi.Profile.Register
 
   @enforce_keys [
@@ -53,6 +54,22 @@ defmodule Alavi.Status.Snapshot do
         }
 
   @typedoc """
+  Request latency over the poller's last days, from `since`, a UTC date (see
+  `Alavi.Poller.Latency`): answers, those on a retry, timeouts, and
+  percentiles and the maximum in ms, nil while nothing answered.
+  """
+  @type latency :: %{
+          since: String.t(),
+          answered: non_neg_integer(),
+          retries: non_neg_integer(),
+          timeouts: non_neg_integer(),
+          p50: non_neg_integer() | nil,
+          p90: non_neg_integer() | nil,
+          p99: non_neg_integer() | nil,
+          max: non_neg_integer() | nil
+        }
+
+  @typedoc """
   `serial_expected` is the polling config's; `serial` and `product_code` are
   as last read with a reading. `missed_reads` counts since the collector started.
   """
@@ -65,7 +82,8 @@ defmodule Alavi.Status.Snapshot do
           product_code: String.t() | nil,
           registers: [register()],
           missed_reads: non_neg_integer(),
-          firmware: firmware() | nil
+          firmware: firmware() | nil,
+          latency: latency() | nil
         }
 
   @typedoc "`reason` and its `exception_code` and `detail` are as on the wire (batch.v1)."
@@ -169,7 +187,7 @@ defmodule Alavi.Status.Snapshot do
   # contract: test/alavi/status_test.exs "Snapshot.firmware/2"
   @doc "An endpoint or unit not in the config is ignored."
   @spec firmware(t(), FirmwareRead.t()) :: t()
-  def firmware(%__MODULE__{} = snapshot, %FirmwareRead{endpoint: %{host: host, port: port}} = f) do
+  def firmware(%__MODULE__{} = snapshot, %FirmwareRead{} = f) do
     view = %{
       read_at: iso(f.timestamp),
       software: f.software,
@@ -178,10 +196,24 @@ defmodule Alavi.Status.Snapshot do
       modbus_version: f.modbus_version
     }
 
+    on_meters(snapshot, f.endpoint, &firmware_of(&1, f.unit_id, view))
+  end
+
+  # contract: test/alavi/status_test.exs "Snapshot.latency/3"
+  @doc "An endpoint's latency per meter, by unit ID; an endpoint or unit not in the config is ignored."
+  @spec latency(
+          t(),
+          %{host: String.t(), port: :inet.port_number()},
+          %{(1..247) => Latency.summary() | nil}
+        ) :: t()
+  def latency(%__MODULE__{} = snapshot, endpoint, by_unit),
+    do: on_meters(snapshot, endpoint, &latency_of(&1, by_unit))
+
+  defp on_meters(snapshot, %{host: host, port: port}, update) do
     endpoints =
       Enum.map(snapshot.endpoints, fn
         %{host: ^host, port: ^port} = endpoint ->
-          %{endpoint | meters: Enum.map(endpoint.meters, &firmware_of(&1, f.unit_id, view))}
+          %{endpoint | meters: Enum.map(endpoint.meters, update)}
 
         endpoint ->
           endpoint
@@ -253,7 +285,8 @@ defmodule Alavi.Status.Snapshot do
       product_code: nil,
       registers: Enum.map(m.profile.registers, &register/1),
       missed_reads: 0,
-      firmware: nil
+      firmware: nil,
+      latency: nil
     }
   end
 
@@ -314,6 +347,14 @@ defmodule Alavi.Status.Snapshot do
 
   defp firmware_of(%{unit_id: unit} = meter, unit, view), do: %{meter | firmware: view}
   defp firmware_of(meter, _unit, _view), do: meter
+
+  defp latency_of(%{unit_id: unit} = meter, by_unit) do
+    case Map.fetch(by_unit, unit) do
+      {:ok, nil} -> meter
+      {:ok, summary} -> %{meter | latency: %{summary | since: Date.to_iso8601(summary.since)}}
+      :error -> meter
+    end
+  end
 
   defp meter_of(meter, nil), do: meter
   defp meter_of(meter, events), do: Enum.reduce(events, meter, &event/2)

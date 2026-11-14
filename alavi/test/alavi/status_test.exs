@@ -214,6 +214,38 @@ defmodule Alavi.StatusTest do
     end
   end
 
+  describe "Snapshot.latency/3" do
+    @endpoint %{host: "127.0.0.1", port: 5020}
+    @summary %{
+      since: ~D[2026-11-08],
+      answered: 1_440,
+      retries: 2,
+      timeouts: 3,
+      p50: 40,
+      p90: 50,
+      p99: 80,
+      max: 75
+    }
+
+    test "sets each meter's latency, with its first day as a date string" do
+      snapshot = Snapshot.latency(snapshot(), @endpoint, %{1 => @summary, 3 => nil})
+
+      assert meter_view(snapshot, 1).latency == %{@summary | since: "2026-11-08"}
+      assert meter_view(snapshot, 3).latency == nil
+      json = snapshot |> Snapshot.to_json() |> JSON.decode!()
+
+      assert %{"since" => "2026-11-08", "p99" => 80} =
+               hd(hd(json["endpoints"])["meters"])["latency"]
+    end
+
+    test "an endpoint or unit not in the config changes nothing" do
+      assert Snapshot.latency(snapshot(), %{host: "10.9.9.9", port: 502}, %{1 => @summary}) ==
+               snapshot()
+
+      assert Snapshot.latency(snapshot(), @endpoint, %{7 => @summary}) == snapshot()
+    end
+  end
+
   describe "Snapshot.raw_lines/3" do
     test "lines are kept newest first, at most 50" do
       snapshot = Snapshot.raw_lines(snapshot(), ["first", "second"], @now)
@@ -376,12 +408,14 @@ defmodule Alavi.StatusTest do
       Status.raw_lines(status, ["alavi poller 127.0.0.1:5020 unit 1: reply rejected"])
       Status.uplink(status, {:stored, "b-1"}, 0)
       Status.clock(status, %{source: :rtc, last_sync_at: nil})
+      Status.latency(status, %{host: "127.0.0.1", port: 5020}, %{3 => @summary})
       snapshot = Status.read(status)
 
       assert meter_view(snapshot, 1).serial == "SIM-1"
       assert [%{line: "alavi poller " <> _}] = snapshot.raw_lines
       assert %{result: "stored", batch_id: "b-1"} = snapshot.uplink
       assert snapshot.clock.source == "rtc"
+      assert meter_view(snapshot, 3).latency.p99 == 80
     end
 
     test "a read on demand updates its meters, not the rounds", %{tmp_dir: dir} do

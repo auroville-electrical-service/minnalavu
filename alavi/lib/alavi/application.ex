@@ -12,6 +12,14 @@ defmodule Alavi.Application do
     end
   end
 
+  # Before the pollers stop, their latency so far goes to the log, which
+  # outlives them; a poller has a few seconds to finish the step under way.
+  @impl true
+  def prep_stop(state) do
+    if Process.whereis(Alavi.Pollers), do: Alavi.Pollers.log_latency(Alavi.Pollers, 5_000)
+    state
+  end
+
   # contract: test/alavi/application_test.exs "children/1"
   # The status first, so it sees the first rounds; :temporary, so that however
   # it fails it cannot use up this supervisor's restarts and stop the collector.

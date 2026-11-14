@@ -132,10 +132,41 @@ defmodule Alavi.Status.PageTest do
       assert meters =~ ~s|<th>Last round</th><td><span class="bad">missed</span>|
     end
 
+    test "shows each meter's request latency, a meter not asked yet left out" do
+      summary = %{since: ~D[2026-11-08], answered: 1_440, retries: 2, timeouts: 3}
+      endpoint = %{host: StatusFixture.host(1), port: 502}
+      by_unit = %{1 => Map.merge(summary, %{p50: 40, p90: 50, p99: 80, max: 75}), 2 => nil}
+
+      by_unit =
+        Map.put(
+          by_unit,
+          3,
+          %{summary | answered: 0, retries: 0, timeouts: 0} |> Map.merge(no_figures())
+        )
+
+      snapshot = 10 |> StatusFixture.snapshot(5) |> Snapshot.latency(endpoint, by_unit)
+      {:ok, html} = Page.endpoint(snapshot, 1, 5)
+      latency = section(html, "Request latency")
+
+      assert latency =~
+               "<tr><td>1</td><td>2026-11-08</td><td>1440</td><td>2</td>" <>
+                 ~s|<td><span class="warn">3</span></td>| <>
+                 "<td>40</td><td>50</td><td>80</td><td>75</td></tr>"
+
+      assert latency =~ "<tr><td>3</td><td>2026-11-08</td><td>0</td><td>0</td><td>0</td>"
+      assert latency =~ ~s|<td><span class="note">none</span></td></tr>|
+      refute latency =~ "<tr><td>2</td>"
+
+      {:ok, html} = Page.endpoint(StatusFixture.snapshot(10), 1, 5)
+      assert section(html, "Request latency") =~ "No request yet."
+    end
+
     test "is :error for an endpoint the config does not have" do
       snapshot = StatusFixture.snapshot(10)
       assert {:ok, _} = Page.endpoint(snapshot, 2, 5)
       assert Page.endpoint(snapshot, 3, 5) == :error
     end
   end
+
+  defp no_figures, do: %{p50: nil, p90: nil, p99: nil, max: nil}
 end

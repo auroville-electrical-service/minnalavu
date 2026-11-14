@@ -27,6 +27,30 @@ defmodule Alavi.Pollers do
     Supervisor.init(children, strategy: :one_for_one)
   end
 
+  # contract: test/alavi/poller_test.exs "Pollers.log_latency/2"
+  @doc """
+  `Alavi.Poller.log_latency/2` on every poller, together; one that does not
+  answer within `timeout` ms, or is not running, is passed over.
+  """
+  @spec log_latency(Supervisor.supervisor(), timeout()) :: :ok
+  def log_latency(pollers, timeout) do
+    pids =
+      for {_id, pid, _type, _modules} <- Supervisor.which_children(pollers), is_pid(pid), do: pid
+
+    pids
+    |> Task.async_stream(&logged(&1, timeout),
+      timeout: :infinity,
+      max_concurrency: max(length(pids), 1)
+    )
+    |> Stream.run()
+  end
+
+  defp logged(pid, timeout) do
+    Poller.log_latency(pid, timeout)
+  catch
+    :exit, _reason -> :ok
+  end
+
   # contract: test/alavi/read_on_demand_test.exs "Pollers.read_now/3"
   @doc """
   `Alavi.Poller.read_now/3` on the poller of the endpoint at `host` and

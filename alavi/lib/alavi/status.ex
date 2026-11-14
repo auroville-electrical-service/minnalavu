@@ -23,6 +23,7 @@ defmodule Alavi.Status do
   require Logger
 
   alias Alavi.{Clock, Config, FirmwareRead, MissedRead, Reading, Settings}
+  alias Alavi.Poller.Latency
   alias Alavi.Status.Snapshot
 
   @type option ::
@@ -82,6 +83,16 @@ defmodule Alavi.Status do
   def raw_lines(server, lines), do: GenServer.cast(server, {:raw_lines, lines})
 
   # contract: test/alavi/status_test.exs "feeds"
+  @doc "An endpoint's request latency per meter, by unit ID, after each poller job."
+  @spec latency(
+          GenServer.server(),
+          %{host: String.t(), port: :inet.port_number()},
+          %{(1..247) => Latency.summary() | nil}
+        ) :: :ok
+  def latency(server, endpoint, by_unit),
+    do: GenServer.cast(server, {:latency, endpoint, by_unit})
+
+  # contract: test/alavi/status_test.exs "feeds"
   @spec uplink(GenServer.server(), Snapshot.uplink_result(), non_neg_integer()) :: :ok
   def uplink(server, result, next_ms), do: GenServer.cast(server, {:uplink, result, next_ms})
 
@@ -135,6 +146,9 @@ defmodule Alavi.Status do
 
   def handle_cast({:raw_lines, lines}, state),
     do: {:noreply, update(state, &Snapshot.raw_lines(&1, lines, state.clock.()))}
+
+  def handle_cast({:latency, endpoint, by_unit}, state),
+    do: {:noreply, update(state, &Snapshot.latency(&1, endpoint, by_unit))}
 
   def handle_cast({:uplink, result, next_ms}, state),
     do: {:noreply, update(state, &Snapshot.uplink(&1, result, next_ms, state.clock.()))}

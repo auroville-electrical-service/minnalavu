@@ -19,6 +19,11 @@ defmodule Alavi.Poller do
   as a round (`Alavi.Status.on_demand/2`), so that a round's outcomes stay a
   whole chain's, and once they are recorded the uplink is nudged
   (`Alavi.Uplink.nudge/1`).
+
+  Each request's round trip, from send to reply, not the connect, counts in
+  its meter's `Alavi.Poller.Latency`: shown on the status page after each
+  job (`Alavi.Status.latency/3`), and logged a line per meter when a UTC day
+  ends, and on `log_latency/2`.
   """
 
   use GenServer
@@ -28,7 +33,7 @@ defmodule Alavi.Poller do
   alias Alavi.Config.{Endpoint, Meter}
   alias Alavi.{Decode, FirmwareRead, MissedRead, Reading, Sink, Status, Uplink}
   alias Alavi.Modbus.Client
-  alias Alavi.Poller.{Job, Names, Policy, RawLog, Schedule}
+  alias Alavi.Poller.{Job, Latency, Names, Policy, RawLog, Schedule}
   alias Alavi.Profile.{Firmware, Identity, Register}
 
   @typedoc "Wall clock for reading timestamps, UTC."
@@ -70,6 +75,15 @@ defmodule Alavi.Poller do
   @spec serials(GenServer.server()) :: %{(1..247) => String.t()}
   def serials(server), do: GenServer.call(server, :serials, :infinity)
 
+  # contract: test/alavi/poller_test.exs "Pollers.log_latency/2"
+  @doc """
+  Log each meter's latency for the day so far, as when a day ends: for a
+  collector about to stop, whose latency is otherwise lost. The reply waits
+  for the step under way.
+  """
+  @spec log_latency(GenServer.server(), timeout()) :: :ok
+  def log_latency(server, timeout), do: GenServer.call(server, :log_latency, timeout)
+
   @spec child_spec([option()]) :: Supervisor.child_spec()
   def child_spec(opts) do
     %Endpoint{host: host, port: port} = Keyword.fetch!(opts, :endpoint)
@@ -100,6 +114,9 @@ defmodule Alavi.Poller do
   end
 
   def handle_call(:serials, _from, state), do: {:reply, state.serials, state}
+
+  def handle_call(:log_latency, _from, state),
+    do: {:reply, log_days(state, "before stopping"), state}
 
   @impl true
   def handle_info(:step, state), do: {:noreply, wake(state)}
@@ -132,6 +149,8 @@ defmodule Alavi.Poller do
       timer: nil,
       due: Map.new(endpoint.meters, &{&1.unit_id, now}),
       names: Map.new(endpoint.meters, &{&1.unit_id, Names.new()}),
+      latency: Map.new(endpoint.meters, &{&1.unit_id, Latency.new()}),
+      today: nil,
       serials: %{},
       backoff: endpoint.reconnect_backoff_ms.min,
       reconnect_at: now
@@ -179,7 +198,7 @@ defmodule Alavi.Poller do
 
   # The job is `state.job` while its step runs; resumed, it goes back at the head.
   defp run(job, state) do
-    state = step(Job.next(job), %{state | job: job})
+    state = step(Job.next(job), %{dated(state) | job: job})
 
     case Job.next(state.job) do
       :done -> done(state)
@@ -199,12 +218,14 @@ defmodule Alavi.Poller do
 
   defp done(%{job: %Job{kind: :poll_round} = job} = state) do
     Status.round(state.status, Job.events(job))
+    latency(state)
     %{state | due: Schedule.after_round(state.due, job), job: nil}
   end
 
   defp done(%{job: %Job{kind: :read_on_demand, requester: {pid, ref}} = job} = state) do
     events = Job.events(job)
     Status.on_demand(state.status, events)
+    latency(state)
     nudge(state.uplink)
     send(pid, {:alavi_read, ref, events})
     %{state | job: nil}
@@ -445,9 +466,10 @@ defmodule Alavi.Poller do
   defp read_words(state, {unit, table, address, count} = read, n) do
     case connected(state) do
       {:ok, state} ->
-        {result, state} =
-          state.client |> Client.read(unit, table, address, count) |> anomalies(state)
-
+        sent = now()
+        reply = Client.read(state.client, unit, table, address, count)
+        state = timed(state, unit, n, now() - sent, reply)
+        {result, state} = anomalies(reply, state)
         retried(result, state, read, n)
 
       {:error, reason, state} ->
@@ -476,6 +498,48 @@ defmodule Alavi.Poller do
       :skip_register ->
         {{:skip_register, error, n}, state}
     end
+  end
+
+  defp timed(state, unit, n, ms, reply) do
+    record = &Latency.record(&1, state.today, n, ms, outcome(reply))
+    %{state | latency: Map.update!(state.latency, unit, record)}
+  end
+
+  defp outcome({:ok, _words, _client}), do: :ok
+  defp outcome({:error, error, _client}), do: error
+
+  # The day each step counts in, from the wall clock; it only moves forward,
+  # so a clock set back does not log a day twice.
+  defp dated(%{today: nil} = state), do: %{state | today: today(state)}
+
+  defp dated(state) do
+    today = today(state)
+
+    if Date.after?(today, state.today) do
+      log_days(state, "day ended")
+      %{state | today: today}
+    else
+      state
+    end
+  end
+
+  defp today(state), do: DateTime.to_date(state.clock.())
+
+  defp latency(state) do
+    by_unit = Map.new(state.latency, fn {unit, latency} -> {unit, Latency.summary(latency)} end)
+    Status.latency(state.status, endpoint_ref(state.endpoint), by_unit)
+  end
+
+  defp log_days(%{today: nil}, _why), do: :ok
+
+  defp log_days(state, why) do
+    for %Meter{unit_id: unit} <- state.endpoint.meters,
+        line = Latency.line(state.latency[unit], state.today),
+        line != nil do
+      Logger.info("alavi poller #{label(state)} unit #{unit}: latency, #{why}, #{line}")
+    end
+
+    :ok
   end
 
   defp anomalies({tag, value, client}, state) do
