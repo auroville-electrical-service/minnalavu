@@ -19,6 +19,26 @@ defmodule SimulatorTest do
       assert request(socket, 0x1C, 1) == <<0x00, 0x1C, 0, 0, 0, 2, 7, 0x0B>>
       assert <<0x00, 0x1D, 0, 0, 0, 7, 2, 3, 4, _::32>> = request(socket, 0x1D, 2)
     end
+
+    test "a lost write is echoed, and its selector keeps its value; other selectors take theirs" do
+      {sim, port} = start_sim!()
+      Simulator.faults(sim, lost_writes: [{1, 520}])
+      {:ok, socket} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false])
+
+      assert send_pdu(socket, 1, <<6, 520::16, 3::16>>) == <<6, 520::16, 3::16>>
+      assert send_pdu(socket, 2, <<3, 520::16, 1::16>>) == <<3, 2, 0::16>>
+      assert send_pdu(socket, 3, <<6, 700::16, 3::16>>) == <<6, 700::16, 3::16>>
+      assert send_pdu(socket, 4, <<3, 700::16, 1::16>>) == <<3, 2, 3::16>>
+    end
+  end
+
+  describe "select/4" do
+    test "a selector set behind the client's back reads back as set" do
+      {sim, port} = start_sim!()
+      :ok = Simulator.select(sim, 1, 801, 19)
+      {:ok, socket} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false])
+      assert send_pdu(socket, 1, <<3, 801::16, 1::16>>) == <<3, 2, 19::16>>
+    end
   end
 
   describe "offline/1" do
@@ -69,6 +89,14 @@ defmodule SimulatorTest do
       )
 
     {sim, Simulator.port(sim)}
+  end
+
+  # One request to unit 1, and the PDU of its reply.
+  defp send_pdu(socket, tid, pdu) do
+    :ok = :gen_tcp.send(socket, <<tid::16, 0::16, byte_size(pdu) + 1::16, 1, pdu::binary>>)
+    {:ok, <<^tid::16, 0::16, len::16>>} = :gen_tcp.recv(socket, 6, 1_000)
+    {:ok, <<1, reply::binary>>} = :gen_tcp.recv(socket, len, 1_000)
+    reply
   end
 
   # A read of two holding registers at 199, and the whole reply to it.

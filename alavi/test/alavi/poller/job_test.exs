@@ -12,6 +12,17 @@ defmodule Alavi.Poller.JobTest do
 
   defp seen(unit), do: %{serial: "SIM-#{unit}", product_code: "ELITE440-445"}
 
+  describe "restore/2" do
+    test "touches no meter, records nothing, and is ready only from its time" do
+      job = Job.restore(50, :backoff)
+
+      assert %Job{kind: :restore, meters: [], events: [], request_id: nil, not_before: 50} = job
+      refute Job.ready?(job, 49)
+      assert Job.ready?(job, 50)
+      assert Job.ready?(Job.poll_round(meters(), 99), 0)
+    end
+  end
+
   describe "poll_round/2" do
     test "steps through each meter, then the names of each identified meter, in order" do
       [m1, m2] = meters()

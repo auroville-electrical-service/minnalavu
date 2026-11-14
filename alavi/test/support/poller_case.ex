@@ -100,10 +100,19 @@ defmodule Alavi.PollerCase do
       sink: {Alavi.TestSink, self()},
       clock: clock,
       raw_log: raw_log,
-      status: no_status()
+      status: no_status(),
+      selectors_dir: selectors_dir!()
     ]
 
     start_supervised!({Alavi.Pollers, opts})
+  end
+
+  @doc "A directory for a poller's selector records, not yet created, removed when the test exits."
+  @spec selectors_dir!() :: Path.t()
+  def selectors_dir! do
+    dir = Path.join(System.tmp_dir!(), "alavi-selectors-#{System.unique_integer([:positive])}")
+    ExUnit.Callbacks.on_exit(fn -> File.rm_rf!(dir) end)
+    dir
   end
 
   @doc "Start a simulated chain: units 1 and 2 are Elite 440s, 3 an Elite 500."

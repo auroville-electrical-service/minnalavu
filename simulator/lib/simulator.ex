@@ -55,6 +55,16 @@ defmodule Simulator do
           :ok
   def name(sim, unit_id, name, value), do: GenServer.call(sim, {:name, unit_id, name, value})
 
+  # contract: test/simulator_test.exs "select/4"
+  @doc """
+  Set a selector of the meter at `unit_id`, by PDU address, as another client
+  (ConfigView, or a person at the meter) would, behind the back of whoever
+  is connected. See `Simulator.Meter.select/3`.
+  """
+  @spec select(GenServer.server(), 1..247, 0..0xFFFF, 0..0xFFFF) :: :ok
+  def select(sim, unit_id, address, value),
+    do: GenServer.call(sim, {:select, unit_id, address, value})
+
   # contract: test/simulator_test.exs "faults/2"
   @doc "Change faults; fields not given keep their value. See `Simulator.Faults`."
   @spec faults(GenServer.server(), keyword()) :: :ok
@@ -63,6 +73,7 @@ defmodule Simulator do
     changes = Keyword.update(changes, :silent_reads, nil, &MapSet.new/1)
     changes = Keyword.update(changes, :refused_reads, nil, &Map.new/1)
     changes = Keyword.update(changes, :two_byte_replies, nil, &Map.new/1)
+    changes = Keyword.update(changes, :lost_writes, nil, &MapSet.new/1)
     changes = Enum.reject(changes, fn {_k, v} -> is_nil(v) end)
     GenServer.call(sim, {:faults, changes})
   end

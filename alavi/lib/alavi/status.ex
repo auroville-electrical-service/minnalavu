@@ -93,6 +93,16 @@ defmodule Alavi.Status do
     do: GenServer.cast(server, {:latency, endpoint, by_unit})
 
   # contract: test/alavi/status_test.exs "feeds"
+  @doc "An endpoint's selectors: a restore owed, restored, or a session refused."
+  @spec selectors(
+          GenServer.server(),
+          %{host: String.t(), port: :inet.port_number()},
+          Snapshot.selectors_event()
+        ) :: :ok
+  def selectors(server, endpoint, event),
+    do: GenServer.cast(server, {:selectors, endpoint, event})
+
+  # contract: test/alavi/status_test.exs "feeds"
   @spec uplink(GenServer.server(), Snapshot.uplink_result(), non_neg_integer()) :: :ok
   def uplink(server, result, next_ms), do: GenServer.cast(server, {:uplink, result, next_ms})
 
@@ -149,6 +159,9 @@ defmodule Alavi.Status do
 
   def handle_cast({:latency, endpoint, by_unit}, state),
     do: {:noreply, update(state, &Snapshot.latency(&1, endpoint, by_unit))}
+
+  def handle_cast({:selectors, endpoint, event}, state),
+    do: {:noreply, update(state, &Snapshot.selectors(&1, endpoint, event, state.clock.()))}
 
   def handle_cast({:uplink, result, next_ms}, state),
     do: {:noreply, update(state, &Snapshot.uplink(&1, result, next_ms, state.clock.()))}

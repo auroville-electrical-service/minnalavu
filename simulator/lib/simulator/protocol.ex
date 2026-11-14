@@ -91,9 +91,15 @@ defmodule Simulator.Protocol do
         {:reply, exception(fc, @busy)}
 
       true ->
-        meters |> Enum.find(&(&1.unit_id == unit_id)) |> answer(pdu, missing)
+        meters
+        |> Enum.find(&(&1.unit_id == unit_id))
+        |> answer(pdu, missing)
+        |> lost(MapSet.member?(faults.lost_writes, read))
     end
   end
+
+  defp lost({:write, echo, _meter}, true), do: {:reply, echo}
+  defp lost(response, _lost), do: response
 
   # contract: test/simulator/protocol_test.exs "encode_response/4"
   @doc "Frame a response PDU, with the RTU faults (corrupt CRC, leading noise) applied."

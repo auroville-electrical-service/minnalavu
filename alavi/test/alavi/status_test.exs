@@ -246,6 +246,34 @@ defmodule Alavi.StatusTest do
     end
   end
 
+  describe "Snapshot.selectors/4" do
+    test "nil until reported, then the endpoint's last selector state, with why and when" do
+      endpoint = %{host: "127.0.0.1", port: 5020}
+      assert hd(snapshot().endpoints).selectors == nil
+
+      owed =
+        Snapshot.selectors(snapshot(), endpoint, {:owed, "{:read, :history, :timeout}", 3}, @now)
+
+      assert hd(owed.endpoints).selectors == %{
+               state: "owed",
+               detail: "{:read, :history, :timeout}",
+               at: "2026-11-14T10:00:00Z",
+               attempts: 3
+             }
+
+      assert %{state: "restored", detail: nil, attempts: 0} =
+               hd(Snapshot.selectors(owed, endpoint, :restored, @now).endpoints).selectors
+
+      assert %{state: "refused", detail: "moved"} =
+               hd(Snapshot.selectors(owed, endpoint, {:refused, "moved"}, @now).endpoints).selectors
+    end
+
+    test "an endpoint not in the config changes nothing" do
+      assert Snapshot.selectors(snapshot(), %{host: "10.9.9.9", port: 502}, :restored, @now) ==
+               snapshot()
+    end
+  end
+
   describe "Snapshot.raw_lines/3" do
     test "lines are kept newest first, at most 50" do
       snapshot = Snapshot.raw_lines(snapshot(), ["first", "second"], @now)
@@ -315,6 +343,12 @@ defmodule Alavi.StatusTest do
       assert %{"format" => "alavi-status.v1", "version" => "0.1.0"} = json
       [meter | _] = hd(json["endpoints"])["meters"]
       assert hd(meter["registers"])["value"] == "1.250"
+
+      owed = Snapshot.selectors(snapshot, %{host: "127.0.0.1", port: 5020}, :restored, @now)
+      json = owed |> Snapshot.to_json() |> JSON.decode!()
+
+      assert %{"state" => "restored", "at" => "2026-11-14T10:00:00Z"} =
+               hd(json["endpoints"])["selectors"]
     end
   end
 
@@ -409,6 +443,7 @@ defmodule Alavi.StatusTest do
       Status.uplink(status, {:stored, "b-1"}, 0)
       Status.clock(status, %{source: :rtc, last_sync_at: nil})
       Status.latency(status, %{host: "127.0.0.1", port: 5020}, %{3 => @summary})
+      Status.selectors(status, %{host: "127.0.0.1", port: 5020}, {:owed, "found at start", 0})
       snapshot = Status.read(status)
 
       assert meter_view(snapshot, 1).serial == "SIM-1"
@@ -416,6 +451,7 @@ defmodule Alavi.StatusTest do
       assert %{result: "stored", batch_id: "b-1"} = snapshot.uplink
       assert snapshot.clock.source == "rtc"
       assert meter_view(snapshot, 3).latency.p99 == 80
+      assert hd(snapshot.endpoints).selectors.state == "owed"
     end
 
     test "a read on demand updates its meters, not the rounds", %{tmp_dir: dir} do

@@ -11,6 +11,7 @@ defmodule Alavi.Pollers do
           | {:raw_log, RawLog.limits()}
           | {:status, GenServer.server()}
           | {:uplink, GenServer.server() | :none}
+          | {:selectors_dir, Path.t()}
           | {:name, atom()}
 
   # contract: test/alavi/poller_test.exs "Pollers.start_link/1"
@@ -20,7 +21,11 @@ defmodule Alavi.Pollers do
   @impl true
   def init(opts) do
     %Config{endpoints: endpoints} = Keyword.fetch!(opts, :config)
-    shared = for key <- [:sink, :clock, :raw_log, :status], do: {key, Keyword.fetch!(opts, key)}
+
+    shared =
+      for key <- [:sink, :clock, :raw_log, :status, :selectors_dir],
+          do: {key, Keyword.fetch!(opts, key)}
+
     # No uplink to nudge (tests that read the sink) unless one is named.
     shared = [{:uplink, Keyword.get(opts, :uplink, :none)} | shared]
     children = Enum.map(endpoints, &{Poller, [{:endpoint, &1} | shared]})

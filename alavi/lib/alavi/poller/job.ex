@@ -9,6 +9,11 @@ defmodule Alavi.Poller.Job do
   meter steps, and no names: those are read daily (`Alavi.Poller.Names`), and
   the round that follows reads them when due, so a read on demand asked to
   answer in seconds is not lengthened by them.
+
+  A restore (`restore/2`) is one step, putting back the selectors a session
+  saved (`Alavi.Selectors.Session.restore/3`); while it waits to be retried,
+  `not_before` holds it back, and `held` says whether for a connection or
+  for its backoff.
   """
 
   # contract: test/alavi/poller/job_test.exs "poll_round/2"
@@ -26,11 +31,14 @@ defmodule Alavi.Poller.Job do
     :events,
     :down,
     :requester,
-    :request_id
+    :request_id,
+    :not_before,
+    :held
   ]
   defstruct @enforce_keys
 
-  @type kind :: :poll_round | :read_on_demand
+  @type kind :: :poll_round | :read_on_demand | :restore
+  @type held :: :connection | :backoff
   @typedoc "Who asked for a read on demand, and the reference they are told it by."
   @type requester :: {pid(), reference()}
   @type event :: Reading.t() | MissedRead.t()
@@ -50,7 +58,9 @@ defmodule Alavi.Poller.Job do
           events: [[event()]],
           down: term(),
           requester: requester() | nil,
-          request_id: String.t() | nil
+          request_id: String.t() | nil,
+          not_before: integer() | nil,
+          held: held() | nil
         }
 
   @doc "A round over `meters`, started at `started` (monotonic milliseconds)."
@@ -65,9 +75,22 @@ defmodule Alavi.Poller.Job do
       events: [],
       down: nil,
       requester: nil,
-      request_id: nil
+      request_id: nil,
+      not_before: nil,
+      held: nil
     }
   end
+
+  # contract: test/alavi/poller/job_test.exs "restore/2"
+  @doc "A restore of an endpoint's owed selectors, not run before `not_before` (monotonic milliseconds)."
+  @spec restore(integer(), held()) :: t()
+  def restore(not_before, held),
+    do: %{poll_round([], not_before) | kind: :restore, not_before: not_before, held: held}
+
+  @doc "Whether the job may run at `now`."
+  @spec ready?(t(), integer()) :: boolean()
+  def ready?(%__MODULE__{not_before: nil}, _now), do: true
+  def ready?(%__MODULE__{not_before: at}, now), do: at <= now
 
   # contract: test/alavi/poller/job_test.exs "read_on_demand/4"
   @doc """

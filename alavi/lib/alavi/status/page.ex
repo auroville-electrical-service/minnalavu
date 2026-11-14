@@ -24,7 +24,13 @@ defmodule Alavi.Status.Page do
   .ok{color:#060}.note{color:#555}.eps a{margin-right:10px;white-space:nowrap}
   """
 
-  @states [ok: "OK", degraded: "some units not OK", down: "down", waiting: "no round yet"]
+  @states [
+    ok: "OK",
+    degraded: "some units not OK",
+    down: "down",
+    waiting: "no round yet",
+    faulted: "faulted: selector restore owed"
+  ]
   @latency_heads ["Unit", "Since", "Answered", "On a retry", "Timed out"] ++
                    ["p50 ms", "p90 ms", "p99 ms", "Max ms"]
   @meter_states [ok: "OK", partial: "partial", missed: "missed", waiting: "not read yet"]
@@ -153,9 +159,9 @@ defmodule Alavi.Status.Page do
     rows =
       numbered
       |> Enum.map(fn {e, n} -> {e, n, Health.endpoint(e)} end)
-      |> Enum.filter(fn {_e, _n, state} -> state in [:down, :degraded] end)
+      |> Enum.filter(fn {_e, _n, state} -> state in [:faulted, :down, :degraded] end)
       |> Enum.map(fn {e, n, state} ->
-        [endpoint_link(e, n), text(label(state)), text(hd(e.rounds).at), wrong(e)]
+        [endpoint_link(e, n), text(label(state)), last_round(e.rounds), wrong(state, e)]
       end)
 
     [
@@ -167,7 +173,15 @@ defmodule Alavi.Status.Page do
     ]
   end
 
-  defp wrong(e) do
+  defp last_round([]), do: none_text("none yet")
+  defp last_round([last | _]), do: text(last.at)
+
+  defp wrong(:faulted, %{selectors: s} = e) do
+    restore = ["selector restore owed, ", text(s.attempts), " attempts: ", text(s.detail)]
+    if e.rounds == [], do: restore, else: [restore, "; ", wrong(:degraded, e)]
+  end
+
+  defp wrong(_state, e) do
     groups =
       hd(e.rounds).units
       |> Enum.reject(&(&1.outcome == "ok"))
@@ -225,6 +239,7 @@ defmodule Alavi.Status.Page do
       pairs([
         {"State in its last round",
          if(state in [:ok, :waiting], do: text(label(state)), else: bad(label(state)))},
+        {"Selectors", selectors(e.selectors)},
         {"Framing", text(e.framing)},
         {"Polled by another system", text(e.polled_by_other_system)}
       ]),
@@ -238,6 +253,17 @@ defmodule Alavi.Status.Page do
       Enum.map(e.meters, &meter(e, &1))
     ]
   end
+
+  defp selectors(nil), do: none_text("never written")
+  defp selectors(%{state: "restored"} = s), do: [ok("restored"), " at ", text(s.at)]
+
+  defp selectors(%{state: "owed"} = s) do
+    [bad("restore owed"), " at ", text(s.at), ", after ", text(s.attempts), " attempts: "] ++
+      [or_none(s.detail), "; polls go on, no copy starts"]
+  end
+
+  defp selectors(%{state: "refused"} = s),
+    do: [warn("session refused"), " at ", text(s.at), ", nothing written: ", or_none(s.detail)]
 
   defp rounds([]), do: none("No round yet.")
 

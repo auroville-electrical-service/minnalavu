@@ -103,6 +103,22 @@ defmodule Alavi.Status.Snapshot do
 
   @type round :: %{at: time(), units: [outcome()]}
 
+  @typedoc """
+  An endpoint's selectors, nil until a restore or session reports: `owed`, a
+  restore not yet done (the endpoint is faulted), with `attempts` made;
+  `restored`; `refused`, a session not opened, nothing written. `detail`
+  says why.
+  """
+  @type selectors :: %{
+          state: String.t(),
+          detail: String.t() | nil,
+          at: time(),
+          attempts: non_neg_integer()
+        }
+
+  @type selectors_event ::
+          {:owed, String.t(), non_neg_integer()} | :restored | {:refused, String.t()}
+
   @type endpoint :: %{
           host: String.t(),
           port: :inet.port_number(),
@@ -110,7 +126,8 @@ defmodule Alavi.Status.Snapshot do
           polled_by_other_system: boolean(),
           rounds: [round()],
           failures: [failure()],
-          meters: [meter()]
+          meters: [meter()],
+          selectors: selectors() | nil
         }
 
   @typedoc "`result`: `stored`, `quarantined`, `not_sent` (retried later) or `empty`."
@@ -222,6 +239,31 @@ defmodule Alavi.Status.Snapshot do
     %{snapshot | endpoints: endpoints}
   end
 
+  # contract: test/alavi/status_test.exs "Snapshot.selectors/4"
+  @doc "An endpoint not in the config is ignored."
+  @spec selectors(
+          t(),
+          %{host: String.t(), port: :inet.port_number()},
+          selectors_event(),
+          DateTime.t()
+        ) :: t()
+  def selectors(%__MODULE__{} = snapshot, %{host: host, port: port}, event, now) do
+    {state, detail, attempts} = selectors_view(event)
+    view = %{state: state, detail: detail, at: iso(now), attempts: attempts}
+
+    endpoints =
+      Enum.map(snapshot.endpoints, fn
+        %{host: ^host, port: ^port} = endpoint -> %{endpoint | selectors: view}
+        endpoint -> endpoint
+      end)
+
+    %{snapshot | endpoints: endpoints}
+  end
+
+  defp selectors_view({:owed, detail, attempts}), do: {"owed", detail, attempts}
+  defp selectors_view(:restored), do: {"restored", nil, 0}
+  defp selectors_view({:refused, detail}), do: {"refused", detail, 0}
+
   # contract: test/alavi/status_test.exs "Snapshot.raw_lines/3"
   @spec raw_lines(t(), [String.t()], DateTime.t()) :: t()
   def raw_lines(%__MODULE__{} = snapshot, lines, now) do
@@ -271,7 +313,8 @@ defmodule Alavi.Status.Snapshot do
       polled_by_other_system: e.polled_by_other_system,
       rounds: [],
       failures: [],
-      meters: Enum.map(e.meters, &meter/1)
+      meters: Enum.map(e.meters, &meter/1),
+      selectors: nil
     }
   end
 

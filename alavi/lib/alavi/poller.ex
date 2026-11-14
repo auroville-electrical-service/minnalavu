@@ -21,6 +21,14 @@ defmodule Alavi.Poller do
   whole chain's, and once they are recorded the uplink is nudged
   (`Alavi.Uplink.nudge/1`).
 
+  An owed selector restore (`Alavi.Selectors.Session.restore/3`), found on
+  disk when the poller starts, or left by a session, runs before any other
+  job. One that fails is retried after a backoff (the endpoint's reconnect
+  backoff, doubling), at once when the endpoint was unreachable and the
+  connection comes back; meanwhile rounds and reads on demand go on, and
+  the status shows the endpoint faulted (`Alavi.Status.selectors/3`). It
+  records no readings and no missed reads.
+
   Each request's round trip, from send to reply, not the connect, counts in
   its meter's `Alavi.Poller.Latency`: shown on the status page after each
   job (`Alavi.Status.latency/3`), and logged a line per meter when a UTC day
@@ -36,6 +44,7 @@ defmodule Alavi.Poller do
   alias Alavi.Modbus.Client
   alias Alavi.Poller.{Job, Latency, Names, Policy, RawLog, Schedule}
   alias Alavi.Profile.{Firmware, Identity, Register}
+  alias Alavi.Selectors.{Session, Store}
 
   @typedoc "Wall clock for reading timestamps, UTC."
   @type clock :: (-> DateTime.t())
@@ -47,8 +56,10 @@ defmodule Alavi.Poller do
           | {:raw_log, RawLog.limits()}
           | {:status, GenServer.server()}
           | {:uplink, GenServer.server() | :none}
+          | {:selectors_dir, Path.t()}
 
   # contract: test/alavi/poller_test.exs "start_link/1"
+  # contract: test/alavi/restore_test.exs "start_link/1"
   @spec start_link([option()]) :: GenServer.on_start()
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
 
@@ -99,7 +110,7 @@ defmodule Alavi.Poller do
     clock = Keyword.fetch!(opts, :clock)
     raw_log = RawLog.new("#{endpoint.host}:#{endpoint.port}", Keyword.fetch!(opts, :raw_log))
     feeds = {sink, Keyword.fetch!(opts, :status), Keyword.fetch!(opts, :uplink)}
-    start(endpoint, feeds, clock, raw_log)
+    start(endpoint, feeds, clock, {raw_log, Keyword.fetch!(opts, :selectors_dir)})
   end
 
   @impl true
@@ -136,9 +147,9 @@ defmodule Alavi.Poller do
   # behind (`inet:stop_timer/1` flushes it with `after 0`); it means nothing here.
   def handle_info({:timeout, _timer, :inet}, state), do: {:noreply, state}
 
-  defp start(%Endpoint{polled_by_other_system: true}, _feeds, _clock, _raw_log), do: :ignore
+  defp start(%Endpoint{polled_by_other_system: true}, _feeds, _clock, _logs), do: :ignore
 
-  defp start(endpoint, {sink, status, uplink}, clock, raw_log) do
+  defp start(endpoint, {sink, status, uplink}, clock, {raw_log, selectors_dir}) do
     now = now()
 
     state = %{
@@ -151,6 +162,8 @@ defmodule Alavi.Poller do
       client: nil,
       queue: [],
       job: nil,
+      selectors_dir: selectors_dir,
+      restore: nil,
       timer: nil,
       due: Map.new(endpoint.meters, &{&1.unit_id, now}),
       names: Map.new(endpoint.meters, &{&1.unit_id, Names.new()}),
@@ -161,7 +174,27 @@ defmodule Alavi.Poller do
       reconnect_at: now
     }
 
-    {:ok, state, {:continue, :poll}}
+    {:ok, owed_at_start(state, now), {:continue, :poll}}
+  end
+
+  defp owed_at_start(state, now) do
+    case Store.owed(state.selectors_dir, endpoint_ref(state.endpoint)) do
+      :none ->
+        state
+
+      owed ->
+        Logger.warning(
+          "alavi poller #{label(state)}: a selector restore is owed: #{inspect(owed)}"
+        )
+
+        Status.selectors(state.status, endpoint_ref(state.endpoint), {:owed, "found at start", 0})
+        owe_restore(state, now)
+    end
+  end
+
+  defp owe_restore(state, at) do
+    restore = state.restore || %{attempts: 0, backoff: state.endpoint.reconnect_backoff_ms.min}
+    %{state | queue: Schedule.restore(state.queue, at, :backoff), restore: restore}
   end
 
   # Waiting on the timer, wake now and leave the timer stale; with no timer a
@@ -201,6 +234,20 @@ defmodule Alavi.Poller do
     %{state | queue: state.queue ++ [round]}
   end
 
+  defp run(%Job{kind: :restore} = job, state) do
+    state = %{dated(state) | job: job}
+
+    case connected(state) do
+      {:ok, state} ->
+        reply = Session.restore(state.client, state.selectors_dir, endpoint_ref(state.endpoint))
+        {reply, state} = anomalies(reply, state)
+        restored(reply, %{state | job: nil})
+
+      {:error, reason, state} ->
+        restore_failed(%{state | job: nil}, {:unreachable, reason})
+    end
+  end
+
   # The job is `state.job` while its step runs; resumed, it goes back at the head.
   defp run(job, state) do
     state = step(Job.next(job), %{dated(state) | job: job})
@@ -234,6 +281,42 @@ defmodule Alavi.Poller do
     nudge(state.uplink)
     send(pid, {:alavi_read, ref, events})
     %{state | job: nil}
+  end
+
+  defp restored({:ok, outcome, client}, state) do
+    Logger.info("alavi poller #{label(state)}: #{restore_line(outcome)}")
+    Status.selectors(state.status, endpoint_ref(state.endpoint), :restored)
+    %{state | client: client, restore: nil}
+  end
+
+  defp restored({:error, reason, client}, state),
+    do: restore_failed(%{state | client: client}, reason)
+
+  defp restore_line(:restored), do: "selectors restored and read back; nothing owed"
+  defp restore_line(:none), do: "the owed selector restore record is gone; nothing owed"
+
+  defp restore_failed(state, reason) do
+    %{attempts: attempts, backoff: backoff} = state.restore
+    attempts = attempts + 1
+
+    Logger.warning(
+      "alavi poller #{label(state)}: selector restore failed (attempt #{attempts}), " <>
+        "again in #{backoff} ms; polls go on: #{inspect(reason)}"
+    )
+
+    Status.selectors(
+      state.status,
+      endpoint_ref(state.endpoint),
+      {:owed, inspect(reason), attempts}
+    )
+
+    restore = %{
+      attempts: attempts,
+      backoff: Policy.backoff(backoff, state.endpoint.reconnect_backoff_ms)
+    }
+
+    held = if match?({:unreachable, _}, reason), do: :connection, else: :backoff
+    %{state | queue: Schedule.restore(state.queue, now() + backoff, held), restore: restore}
   end
 
   defp nudge(:none), do: :ok
@@ -573,7 +656,7 @@ defmodule Alavi.Poller do
 
     case result do
       {:ok, client} ->
-        {:ok, %{state | client: client}}
+        {:ok, reconnected(%{state | client: client})}
 
       {:error, reason} ->
         Logger.warning(
@@ -583,6 +666,8 @@ defmodule Alavi.Poller do
         {:error, reason, %{state | client: nil, job: Job.down(state.job, reason)}}
     end
   end
+
+  defp reconnected(state), do: %{state | queue: Schedule.reconnected(state.queue, now())}
 
   defp client_opts(%Endpoint{framing: :tcp} = e),
     do: [timeout: e.timeout_ms, max_timeouts: e.max_timeouts]

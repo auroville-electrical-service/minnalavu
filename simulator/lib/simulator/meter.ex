@@ -113,6 +113,12 @@ defmodule Simulator.Meter do
     end
   end
 
+  @doc "Set a selector this meter has, by PDU address, whatever any client asked."
+  @spec select(t(), 0..0xFFFF, 0..0xFFFF) :: t()
+  def select(%__MODULE__{selectors: selectors} = meter, address, value)
+      when is_map_key(selectors, address),
+      do: %{meter | selectors: Map.put(selectors, address, value)}
+
   @doc "Set one register's value."
   @spec put(t(), String.t(), Decimal.t()) :: t()
   def put(%__MODULE__{values: values} = meter, key, value) when is_map_key(values, key),

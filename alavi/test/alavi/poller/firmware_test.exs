@@ -34,7 +34,8 @@ defmodule Alavi.Poller.FirmwareTest do
       sink: {Keyword.get(opts, :sink, Alavi.TestSink), self()},
       clock: Keyword.get(opts, :clock, fn -> Agent.get(clock, & &1) end),
       raw_log: raw_log(),
-      status: self()
+      status: self(),
+      selectors_dir: selectors_dir!()
     ]
 
     start_supervised!({Alavi.Pollers, opts})

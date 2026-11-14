@@ -45,7 +45,7 @@ defmodule Alavi.Status.PageTest do
       counts = section(html, "Endpoints and meters")
 
       assert counts =~
-               ~s|<td>5</td><td>3</td><td><span class="bad">1</span></td><td><span class="bad">1</span></td><td>0</td>|
+               ~s|<td>5</td><td>3</td><td><span class="bad">1</span></td><td><span class="bad">1</span></td><td>0</td><td>0</td></tr>|
 
       assert counts =~
                ~s|<td>25</td><td>19</td><td>0</td><td><span class="bad">6</span></td><td>0</td>|
@@ -55,6 +55,26 @@ defmodule Alavi.Status.PageTest do
       for n <- [2, 4], do: refute(healthy =~ ~s|href="/endpoint/#{n}"|)
       refute html =~ "<h3>Unit"
       refute html =~ "123456.789"
+    end
+
+    test "lists an endpoint with a selector restore owed as faulted, counted as such" do
+      at = ~U[2026-11-14 10:00:00Z]
+      endpoint = %{host: StatusFixture.host(3), port: 502}
+
+      html =
+        25
+        |> StatusFixture.snapshot()
+        |> Snapshot.selectors(endpoint, {:owed, "{:read, :history, :timeout}", 2}, at)
+        |> Page.render(5)
+
+      assert section(html, "Not OK") =~
+               ~s|:502</a></td><td>faulted: selector restore owed</td>|
+
+      assert section(html, "Not OK") =~
+               "selector restore owed, 2 attempts: {:read, :history, :timeout}"
+
+      assert section(html, "Endpoints and meters") =~ ~s|<td><span class="bad">1</span></td></tr>|
+      refute section(html, "Endpoints OK or not polled yet") =~ ~s|href="/endpoint/3"|
     end
 
     test "says so when nothing is wrong" do
@@ -83,6 +103,22 @@ defmodule Alavi.Status.PageTest do
   end
 
   describe "endpoint/3" do
+    test "shows the endpoint's selectors: never written, restore owed, restored, refused" do
+      snapshot = StatusFixture.snapshot(1, 5)
+      endpoint = %{host: StatusFixture.host(1), port: 502}
+      at = ~U[2026-11-14 10:00:00Z]
+      shown = &(Page.endpoint(Snapshot.selectors(snapshot, endpoint, &1, at), 1, 5) |> elem(1))
+
+      {:ok, html} = Page.endpoint(snapshot, 1, 5)
+      assert html =~ ~s|<th>Selectors</th><td><span class="note">never written</span>|
+      assert shown.({:owed, "found at start", 0}) =~ ~s|<span class="bad">restore owed</span>|
+      assert shown.({:owed, "found at start", 0}) =~ "faulted: selector restore owed"
+      assert shown.(:restored) =~ ~s|<th>Selectors</th><td><span class="ok">restored</span>|
+
+      assert shown.({:refused, "{:moved, :history, 3, 0}"}) =~
+               "session refused</span> at 2026-11-14T10:00:00Z, nothing written: {:moved, :history, 3, 0}"
+    end
+
     test "shows the endpoint's rounds, failures and meters with their register values" do
       snapshot = StatusFixture.snapshot(10, 5, missing: [{1, 2}])
       {:ok, html} = Page.endpoint(snapshot, 1, 5)

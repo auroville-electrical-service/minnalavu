@@ -2,8 +2,10 @@ defmodule Alavi.Modbus.ReadOnlyTest do
   @moduledoc """
   The collector writes nothing to a meter but a selector: the only request
   `Alavi.Modbus.PDU` can build is a read, the one exception is
-  `Alavi.Modbus.Selector` (its own tests pin what it can build), and only the
-  client touches a socket a meter could be on.
+  `Alavi.Modbus.Selector` (its own tests pin what it can build), only
+  `Alavi.Selectors.Session` builds one or has it sent (its tests pin that it
+  saves what to put back first), and only the client touches a socket a meter
+  could be on.
   """
   use ExUnit.Case, async: true
   use ExUnitProperties
@@ -20,6 +22,9 @@ defmodule Alavi.Modbus.ReadOnlyTest do
 
   # The one module allowed to build a write request.
   @selector "alavi/modbus/selector.ex"
+  # The one module allowed to ask for one, and to have it sent.
+  @session "alavi/selectors/session.ex"
+  @client "alavi/modbus/client.ex"
   # Modbus write function codes: coil, register, coils, registers, mask, read/write.
   @write_codes [5, 6, 15, 16, 22, 23]
 
@@ -67,6 +72,17 @@ defmodule Alavi.Modbus.ReadOnlyTest do
             do: relative(file)
 
       assert files == [@selector]
+    end
+
+    test "only the selector session asks for a selector write, or has one sent" do
+      callers =
+        for file <- lib_files(),
+            relative(file) != @client,
+            call <- selector_calls(file),
+            uniq: true,
+            do: {relative(file), call}
+
+      assert Enum.sort(callers) == [{@session, :request}, {@session, :write_selector}]
     end
 
     test "no module but the client calls a socket module" do
@@ -214,6 +230,33 @@ defmodule Alavi.Modbus.ReadOnlyTest do
 
   defp write_code?({:"::", _, [code, _size]}), do: write_code?(code)
   defp write_code?(code), do: code in @write_codes
+
+  # Calls of `Selector.request` (by alias, or `apply/3`), and any mention
+  # of `write_selector` at all: a call, a capture, or the bare atom.
+  defp selector_calls(file) do
+    {_, found} =
+      Macro.prewalk(quoted(file), [], fn
+        {:., _, [{:__aliases__, _, parts}, :request]} = node, acc ->
+          {node, if(List.last(parts) == :Selector, do: [:request | acc], else: acc)}
+
+        {:apply, _, [{:__aliases__, _, parts}, :request | _]} = node, acc ->
+          {node, if(List.last(parts) == :Selector, do: [:request | acc], else: acc)}
+
+        {:write_selector, _, _} = node, acc ->
+          {node, [:write_selector | acc]}
+
+        {:., _, [_module, :write_selector]} = node, acc ->
+          {node, [:write_selector | acc]}
+
+        :write_selector = node, acc ->
+          {node, [:write_selector | acc]}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    found
+  end
 
   # Erlang modules called in a file: remote calls and captures
   # (`:gen_tcp.send(...)`, `&:gen_tcp.send/2`) and `apply/3` with a literal module.

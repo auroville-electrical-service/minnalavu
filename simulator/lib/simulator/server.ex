@@ -69,6 +69,9 @@ defmodule Simulator.Server do
   def handle_call({:identify, unit_id, check, value}, _from, state),
     do: {:reply, :ok, change(state, unit_id, &Meter.identify(&1, check, value))}
 
+  def handle_call({:select, unit_id, address, value}, _from, state),
+    do: {:reply, :ok, change(state, unit_id, &Meter.select(&1, address, value))}
+
   def handle_call({:name, unit_id, name, value}, _from, state),
     do: {:reply, :ok, change(state, unit_id, &Meter.name(&1, name, value))}
 

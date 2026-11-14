@@ -77,6 +77,68 @@ defmodule Alavi.Poller.ScheduleTest do
     end
   end
 
+  describe "next/4, with a restore owed" do
+    test "a ready restore runs before every other job, overdue round or read on demand" do
+      [m1, m2, _m3] = ms = meters()
+      round = [m1, m2] |> Job.poll_round(0) |> Job.polled([:read], {m1, seen(1), nil})
+      {:ok, read} = Job.read_on_demand(ms, [3], 5, {self(), make_ref()})
+      restore = Job.restore(5, :backoff)
+
+      for due <- [%{1 => 60_000, 2 => 60_000, 3 => 0}, %{1 => 0, 2 => 0, 3 => 0}],
+          now <- [5, 1_000_000] do
+        assert Schedule.next([round, read, restore], now, due, ms) ==
+                 {:step, restore, [round, read]}
+
+        assert Schedule.next([restore], now, due, ms) == {:step, restore, []}
+      end
+    end
+
+    test "a restore held back lets rounds and reads go on, and is waited for" do
+      [m1, _m2, m3] = ms = meters()
+      {:ok, read} = Job.read_on_demand(ms, [1], 5, {self(), make_ref()})
+      restore = Job.restore(500, :backoff)
+
+      assert Schedule.next([restore, read], 100, %{1 => 900, 2 => 900, 3 => 900}, ms) ==
+               {:step, read, [restore]}
+
+      assert {:start, %Job{meters: [^m1, ^m3]}} =
+               Schedule.next([restore], 100, %{1 => 50, 2 => 900, 3 => 60}, ms)
+
+      assert Schedule.next([restore], 100, %{1 => 900, 2 => 900, 3 => 900}, ms) == {:wait, 400}
+      assert Schedule.next([restore], 100, %{1 => 300, 2 => 900, 3 => 900}, ms) == {:wait, 200}
+
+      assert Schedule.next([restore], 500, %{1 => 300, 2 => 900, 3 => 900}, ms) ==
+               {:step, restore, []}
+    end
+  end
+
+  describe "restore/3" do
+    test "puts one restore at the head of the queue, held until the time given" do
+      [m1 | _] = meters()
+      round = Job.poll_round([m1], 0)
+
+      assert [%Job{kind: :restore, not_before: 40}, ^round] =
+               Schedule.restore([round], 40, :backoff)
+
+      assert [%Job{kind: :restore, not_before: 7, held: :connection}, ^round] =
+               [round] |> Schedule.restore(40, :backoff) |> Schedule.restore(7, :connection)
+    end
+  end
+
+  describe "reconnected/2" do
+    test "a restore held for want of a connection is ready at once; one held by backoff waits" do
+      [m1 | _] = ms = meters()
+      round = Job.poll_round([m1], 0)
+      due = %{1 => 9_000, 2 => 9_000, 3 => 9_000}
+
+      queue = [round] |> Schedule.restore(5_000, :connection) |> Schedule.reconnected(100)
+      assert {:step, %Job{kind: :restore}, [^round]} = Schedule.next(queue, 100, due, ms)
+
+      queue = [round] |> Schedule.restore(5_000, :backoff) |> Schedule.reconnected(100)
+      assert Schedule.next(queue, 100, due, ms) == {:step, round, [hd(queue)]}
+    end
+  end
+
   describe "next/4, with a meter overdue by its interval" do
     defp read(ms, units), do: elem(Job.read_on_demand(ms, units, 0, {self(), make_ref()}), 1)
 

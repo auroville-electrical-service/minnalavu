@@ -23,7 +23,9 @@ defmodule Alavi.Collector do
   options of an `Alavi.Clock.Windows` to start first, or `:none`; the buffer's
   `clock_status` must read it if there is one. `pollers` is the name to
   register the `Alavi.Pollers` under; without it they are unnamed (tests that
-  start several collectors).
+  start several collectors). The pollers keep their selector records
+  (`Alavi.Selectors.Store`) in `selectors` under the buffer's `dir`, the
+  collector's durable state.
   """
   @type option ::
           {:config, Config.t()}
@@ -99,7 +101,8 @@ defmodule Alavi.Collector do
       clock: Keyword.fetch!(opts, :clock),
       raw_log: Keyword.fetch!(opts, :raw_log),
       status: status,
-      uplink: nudge
+      uplink: nudge,
+      selectors_dir: buffer |> Keyword.fetch!(:dir) |> Path.join("selectors")
     ]
 
     pollers = pollers ++ for {:pollers, name} <- opts, do: {:name, name}

@@ -9,7 +9,8 @@ defmodule Alavi.Poller.Schedule do
   # A meter due again while its round is unfinished starts no round: the
   # round under way runs to its end first. A meter overdue by its interval
   # puts poll rounds ahead of reads on demand, so that a stream of reads
-  # cannot stop the rounds that billing is read from.
+  # cannot stop the rounds that billing is read from. An owed restore comes
+  # before everything, once it is ready; until then the rest goes on.
 
   alias Alavi.Config.Meter
   alias Alavi.Poller.Job
@@ -27,8 +28,8 @@ defmodule Alavi.Poller.Schedule do
   # Job kinds, highest priority first, while no meter is overdue by its
   # interval, and once one is. A round not yet started ranks as its kind,
   # below any queued job of the same rank.
-  @ranks [:read_on_demand, :poll_round]
-  @overdue_ranks [:poll_round, :read_on_demand]
+  @ranks [:restore, :read_on_demand, :poll_round]
+  @overdue_ranks [:restore, :poll_round, :read_on_demand]
 
   @reads_max 8
 
@@ -36,10 +37,12 @@ defmodule Alavi.Poller.Schedule do
   def next(queue, now, due, meters) do
     ranks = ranks(meters, due, now)
 
-    case {Enum.filter(meters, &(due[&1.unit_id] <= now)), queue} do
-      {[], []} -> {:wait, (due |> Map.values() |> Enum.min()) - now}
-      {[], queue} -> step(queue, ranks)
-      {due_now, queue} -> chosen(queue, Job.poll_round(due_now, now), ranks)
+    ready? = Enum.any?(queue, &Job.ready?(&1, now))
+
+    case {Enum.filter(meters, &(due[&1.unit_id] <= now)), ready?} do
+      {[], false} -> {:wait, wait(queue, due, now)}
+      {[], true} -> step(queue, now, ranks)
+      {due_now, ready?} -> chosen(queue, ready?, Job.poll_round(due_now, now), now, ranks)
     end
   end
 
@@ -55,6 +58,22 @@ defmodule Alavi.Poller.Schedule do
       else: {:error, :busy}
   end
 
+  # contract: test/alavi/poller/schedule_test.exs "restore/3"
+  @doc "`queue` with one restore, held back until `at`, in place of any it held."
+  @spec restore([Job.t()], integer(), Job.held()) :: [Job.t()]
+  def restore(queue, at, held),
+    do: [Job.restore(at, held) | Enum.reject(queue, &(&1.kind == :restore))]
+
+  # contract: test/alavi/poller/schedule_test.exs "reconnected/2"
+  @doc "`queue` once the endpoint is connected again: a restore held for want of a connection is ready."
+  @spec reconnected([Job.t()], integer()) :: [Job.t()]
+  def reconnected(queue, now) do
+    Enum.map(queue, fn
+      %Job{kind: :restore, held: :connection} = job -> %{job | not_before: now, held: :backoff}
+      job -> job
+    end)
+  end
+
   # contract: test/alavi/poller/schedule_test.exs "after_round/2"
   @doc "When each meter is due once `round` is done: its meters an interval after it started."
   @spec after_round(due(), Job.t()) :: due()
@@ -67,17 +86,25 @@ defmodule Alavi.Poller.Schedule do
       else: @ranks
   end
 
-  defp chosen([], round, _ranks), do: {:start, round}
+  defp wait(queue, due, now) do
+    held = for %Job{not_before: at} <- queue, at != nil, do: at
+    Enum.min(Map.values(due) ++ held) - now
+  end
 
-  defp chosen(queue, round, ranks) do
-    {:step, top, _rest} = step = step(queue, ranks)
+  defp chosen(_queue, false, round, _now, _ranks), do: {:start, round}
+
+  defp chosen(queue, true, round, now, ranks) do
+    {:step, top, _rest} = step = step(queue, now, ranks)
     if rank(round, ranks) < rank(top, ranks), do: {:start, round}, else: step
   end
 
-  # The first queued job of the highest rank, and the queue without it.
-  defp step(queue, ranks) do
+  # The first ready job of the highest rank, and the queue without it.
+  defp step(queue, now, ranks) do
     {_job, index} =
-      queue |> Enum.with_index() |> Enum.min_by(fn {job, _i} -> rank(job, ranks) end)
+      queue
+      |> Enum.with_index()
+      |> Enum.filter(fn {job, _i} -> Job.ready?(job, now) end)
+      |> Enum.min_by(fn {job, _i} -> rank(job, ranks) end)
 
     {before, [job | rest]} = Enum.split(queue, index)
     {:step, job, before ++ rest}

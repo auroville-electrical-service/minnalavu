@@ -215,7 +215,8 @@ defmodule Alavi.ReadOnDemandTest do
            clock: &DateTime.utc_now/0,
            raw_log: raw_log(),
            status: no_status(),
-           uplink: uplink}
+           uplink: uplink,
+           selectors_dir: selectors_dir!()}
         )
 
       :ok = eventually!(fn -> Buffer.backlog(buffer).events >= 2 end)

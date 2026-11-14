@@ -29,6 +29,12 @@ A batch the server rejects for good is moved to `<buffer dir>/quarantine/`
 with the server's reason beside it, and never deleted; see `Alavi.Uplink.Response`
 for which answers count as that.
 
+Selector values to put back are kept in `<buffer dir>/selectors/`
+(`Alavi.Selectors.Store`). A `.restore` file there is a restore owed: the
+endpoint shows as faulted until the collector has put the selectors back and
+read them back. Never delete one by hand unless the meter's selectors have been
+checked and set right some other way.
+
 ## Windows service
 
 From the release root, in an administrator's command prompt:

@@ -3,7 +3,8 @@ defmodule Alavi.Status.Health do
   What is wrong, judged from an `Alavi.Status.Snapshot`'s endpoints by their
   last round only: what the status page summarises. Pure; it changes nothing.
 
-  An endpoint is `:waiting` before its first round, `:down` when every unit
+  An endpoint is `:faulted` while a selector restore is owed on it, whatever
+  its rounds; otherwise `:waiting` before its first round, `:down` when every unit
   missed in its last round, `:degraded` when some unit did not read fully or a
   meter's serial read is not the one expected, and `:ok` otherwise. A meter is
   `:waiting` until a round has an outcome for it, then that outcome.
@@ -11,7 +12,7 @@ defmodule Alavi.Status.Health do
 
   alias Alavi.Status.Snapshot
 
-  @type endpoint_state :: :ok | :degraded | :down | :waiting
+  @type endpoint_state :: :ok | :faulted | :degraded | :down | :waiting
   @type meter_state :: :ok | :partial | :missed | :waiting
 
   @typedoc "How many endpoints and meters are in each state, and meters whose serial is not the one expected."
@@ -21,11 +22,12 @@ defmodule Alavi.Status.Health do
           mismatched: non_neg_integer()
         }
 
-  @endpoint_states [:ok, :degraded, :down, :waiting]
+  @endpoint_states [:ok, :faulted, :degraded, :down, :waiting]
   @meter_states [:ok, :partial, :missed, :waiting]
 
   # contract: test/alavi/status/page_test.exs "render/2"
   @spec endpoint(Snapshot.endpoint()) :: endpoint_state()
+  def endpoint(%{selectors: %{state: "owed"}}), do: :faulted
   def endpoint(%{rounds: []}), do: :waiting
 
   def endpoint(%{rounds: [last | _]} = e) do

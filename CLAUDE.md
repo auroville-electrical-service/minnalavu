@@ -60,8 +60,9 @@ contract or `central/`.
 - **Read-only Modbus, with one named exception.** Function codes 03/04 only,
   except `Alavi.Modbus.Selector`: one selector register per write (which
   stored history, snapshot or load-survey entry a meter shows), only from its
-  allowlist, with its model's function code and a value in range. Never write
-  anything else to a meter.
+  allowlist, with its model's function code and a value in range, sent only
+  through `Alavi.Selectors.Session`, which saves the values to put back first.
+  Never write anything else to a meter.
 - **Never expose Modbus (port 502) to the internet.** Collectors only make outbound connections.
 - **Deployment data never enters git:** it lives in the gitignored `data/` and the database, not in code, fixtures or commit messages.
 - **Collect cumulative energy registers**, the ones billing takes end − start readings from. Never offer integrated instantaneous power as energy.

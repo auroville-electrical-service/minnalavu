@@ -11,6 +11,10 @@ defmodule Simulator.Faults do
     gateway exception code with no function code, as some Modbus TCP
     gateways send, framed under the unit byte mapped to the unit, which need
     not be the unit asked for.
+  - `lost_writes`: a selector write to one of these `{unit_id, address}` is
+    echoed but not applied, so the selector reads back what it held. No meter
+    has been seen doing this; it stands for a write another client undid at
+    once, which is what reading a selector back after writing it is for.
   - `busy`: every request gets exception 06, server device busy.
   - `noise`: bytes sent before each RTU response, like a stray byte at RS-485
     bus turnaround. Modbus TCP responses are unaffected.
@@ -20,6 +24,7 @@ defmodule Simulator.Faults do
             silent_reads: MapSet.new(),
             refused_reads: %{},
             two_byte_replies: %{},
+            lost_writes: MapSet.new(),
             busy: false,
             bad_crc: false,
             delay_ms: 0,
@@ -30,6 +35,7 @@ defmodule Simulator.Faults do
           silent_reads: MapSet.t({1..247, 0..0xFFFF}),
           refused_reads: %{optional({1..247, 0..0xFFFF}) => 1..255},
           two_byte_replies: %{optional(1..247) => 0..255},
+          lost_writes: MapSet.t({1..247, 0..0xFFFF}),
           busy: boolean(),
           bad_crc: boolean(),
           delay_ms: non_neg_integer(),
