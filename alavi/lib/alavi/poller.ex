@@ -9,7 +9,9 @@ defmodule Alavi.Poller do
   A round is an `Alavi.Poller.Job`, run one step per `:step` message, so the
   mailbox is served between steps. Each meter's names are a step of their
   own: a names read is as many reads as a meter's registers, so no step is
-  longer than a meter's.
+  longer than a meter's. `Alavi.Poller.Schedule` chooses, from the queue of
+  jobs, what each message does. One wake-up is outstanding at a time: a
+  `:step` message, or the poll timer while nothing is due.
   """
 
   use GenServer
@@ -19,7 +21,7 @@ defmodule Alavi.Poller do
   alias Alavi.Config.{Endpoint, Meter}
   alias Alavi.{Decode, FirmwareRead, MissedRead, Reading, Sink, Status}
   alias Alavi.Modbus.Client
-  alias Alavi.Poller.{Job, Names, Policy, RawLog}
+  alias Alavi.Poller.{Job, Names, Policy, RawLog, Schedule}
   alias Alavi.Profile.{Firmware, Identity, Register}
 
   @typedoc "Wall clock for reading timestamps, UTC."
@@ -52,15 +54,16 @@ defmodule Alavi.Poller do
   end
 
   @impl true
-  def handle_continue(:poll, state), do: {:noreply, begin_round(state)}
+  def handle_continue(:poll, state), do: {:noreply, wake(state)}
 
   @impl true
-  def handle_info(:poll, %{job: nil} = state), do: {:noreply, begin_round(state)}
+  def handle_info(:step, state), do: {:noreply, wake(state)}
 
-  # The round under way schedules the next poll when it ends.
-  def handle_info(:poll, %{job: %Job{}} = state), do: {:noreply, state}
+  def handle_info({:poll, timer}, %{timer: timer} = state),
+    do: {:noreply, wake(%{state | timer: nil})}
 
-  def handle_info(:step, %{job: %Job{} = job} = state), do: {:noreply, step(Job.next(job), state)}
+  # A timer whose wake-up came another way: nothing to do.
+  def handle_info({:poll, _stale}, state), do: {:noreply, state}
 
   # A connect timeout that races the connect can leave gen_tcp's timer message
   # behind (`inet:stop_timer/1` flushes it with `after 0`); it means nothing here.
@@ -78,7 +81,9 @@ defmodule Alavi.Poller do
       clock: clock,
       raw_log: raw_log,
       client: nil,
+      queue: [],
       job: nil,
+      timer: nil,
       due: Map.new(endpoint.meters, &{&1.unit_id, now}),
       names: Map.new(endpoint.meters, &{&1.unit_id, Names.new()}),
       backoff: endpoint.reconnect_backoff_ms.min,
@@ -88,40 +93,59 @@ defmodule Alavi.Poller do
     {:ok, state, {:continue, :poll}}
   end
 
-  defp begin_round(state) do
-    started = now()
-    state = log_raw(state, &RawLog.flush(&1, started))
-    due = Enum.filter(state.endpoint.meters, &(state.due[&1.unit_id] <= started))
-    continued(%{state | job: Job.poll_round(due, started)})
+  defp wake(state), do: state |> act() |> rearm()
+
+  defp act(state) do
+    case decide(state) do
+      {:step, job, rest} -> run(job, %{state | queue: rest})
+      {:start, round} -> begin_round(round, state)
+      {:wait, _ms} -> state
+    end
   end
 
-  defp step({:meter, meter}, state) do
-    {events, identified, state} = poll_meter(meter, state)
-    continued(%{state | job: Job.polled(state.job, events, identified)})
-  end
+  defp rearm(state) do
+    case decide(state) do
+      {:wait, ms} ->
+        timer = make_ref()
+        Process.send_after(self(), {:poll, timer}, ms)
+        %{state | timer: timer}
 
-  defp step({:names, identified}, state) do
-    state = names(identified, state)
-    continued(%{state | job: Job.named(state.job)})
-  end
-
-  defp continued(%{job: job} = state) do
-    case Job.next(job) do
-      :done ->
-        end_round(state)
-
-      _step ->
+      _work ->
         send(self(), :step)
         state
     end
   end
 
-  defp end_round(%{job: %Job{meters: due, started: started} = job} = state) do
+  defp decide(state), do: Schedule.next(state.queue, now(), state.due, state.endpoint.meters)
+
+  defp begin_round(%Job{started: started} = round, state) do
+    state = log_raw(state, &RawLog.flush(&1, started))
+    %{state | queue: state.queue ++ [round]}
+  end
+
+  # The job is `state.job` while its step runs; resumed, it goes back at the head.
+  defp run(job, state) do
+    state = step(Job.next(job), %{state | job: job})
+
+    case Job.next(state.job) do
+      :done -> end_round(state)
+      _step -> %{state | queue: [state.job | state.queue], job: nil}
+    end
+  end
+
+  defp step({:meter, meter}, state) do
+    {events, identified, state} = poll_meter(meter, state)
+    %{state | job: Job.polled(state.job, events, identified)}
+  end
+
+  defp step({:names, identified}, state) do
+    state = names(identified, state)
+    %{state | job: Job.named(state.job)}
+  end
+
+  defp end_round(%{job: %Job{} = job} = state) do
     Status.round(state.status, Job.events(job))
-    due_at = Map.merge(state.due, Map.new(due, &{&1.unit_id, started + &1.interval_ms}))
-    next = due_at |> Map.values() |> Enum.min()
-    Process.send_after(self(), :poll, max(next - now(), 0))
-    %{state | due: due_at, job: nil}
+    %{state | due: Schedule.after_round(state.due, job), job: nil}
   end
 
   # The meter, with what it reported, when identified, for its names step.
