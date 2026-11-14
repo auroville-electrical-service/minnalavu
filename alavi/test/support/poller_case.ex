@@ -163,6 +163,17 @@ defmodule Alavi.PollerCase do
     port
   end
 
+  @doc """
+  What a connect to a refusing port reports in these tests. Windows retries a
+  refused connect for about 2 s before reporting it, longer than the tests'
+  connect timeouts, so there the connect times out first.
+  """
+  @spec refused() :: :econnrefused | :timeout
+  def refused, do: refused(:os.type())
+
+  defp refused({:win32, _}), do: :timeout
+  defp refused(_os), do: :econnrefused
+
   @doc "A port with nothing listening on it (for now)."
   @spec free_port() :: :inet.port_number()
   def free_port do

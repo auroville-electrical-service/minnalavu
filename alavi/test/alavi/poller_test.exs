@@ -141,7 +141,8 @@ defmodule Alavi.PollerTest do
       start_pollers!([endpoint(port, "tcp", meters, %{"interval_ms" => 10})])
 
       assert [first | rest] = recorded!()
-      assert %MissedRead{reason: {:unreachable, {:socket, :econnrefused}}, attempts: 1} = first
+      refused = refused()
+      assert %MissedRead{reason: {:unreachable, {:socket, ^refused}}, attempts: 1} = first
       assert Enum.all?(rest, &match?(%MissedRead{attempts: 0}, &1))
 
       sim = start_sim!(:tcp, port: port) |> elem(0)

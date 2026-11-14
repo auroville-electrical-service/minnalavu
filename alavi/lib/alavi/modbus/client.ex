@@ -77,6 +77,9 @@ defmodule Alavi.Modbus.Client do
            max_timeouts: max_timeouts
          }}
 
+      # Windows retries a refused connect (about 2 s to a loopback port) before
+      # reporting it, so with a shorter timeout a refusing endpoint gives
+      # :timeout there, where Linux and macOS give :econnrefused.
       {:error, reason} ->
         {:error, {:socket, reason}}
     end

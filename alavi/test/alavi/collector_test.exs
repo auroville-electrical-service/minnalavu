@@ -173,7 +173,7 @@ defmodule Alavi.CollectorTest do
       end
 
       assert refused != [] and
-               Enum.all?(refused, &(&1.kind == :missed and &1.wire["detail"] == "econnrefused"))
+               Enum.all?(refused, &(&1.kind == :missed and &1.wire["detail"] == "#{refused()}"))
     end
   end
 

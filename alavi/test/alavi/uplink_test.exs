@@ -1,7 +1,7 @@
 defmodule Alavi.UplinkTest do
   use ExUnit.Case, async: true
 
-  import Alavi.PollerCase, only: [start_status!: 1, eventually!: 1]
+  import Alavi.PollerCase, only: [start_status!: 1, eventually!: 1, refused: 0]
   import ExUnit.CaptureLog
 
   alias Alavi.{Buffer, Clock, MissedRead, Reading, Status, TestServer, Uplink}
@@ -144,11 +144,11 @@ defmodule Alavi.UplinkTest do
 
       log =
         capture_log(fn ->
-          uplink!(ctx.buffer, port)
+          uplink!(ctx.buffer, port, timeout_ms: 50)
           Process.sleep(150)
         end)
 
-      assert log =~ "not sent" and log =~ "econnrefused"
+      assert log =~ "not sent" and log =~ "#{refused()}"
       assert %{batches: 1, events: 3, quarantined: 0} = Buffer.backlog(ctx.buffer)
     end
 
