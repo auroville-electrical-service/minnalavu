@@ -5,6 +5,11 @@ defmodule Alavi.Poller do
   recorded, the firmware names of each meter whose identity was read, when
   `Alavi.Poller.Names` says they are due, unless the meter stopped answering
   during its register reads or the endpoint went down in the round.
+
+  A round is an `Alavi.Poller.Job`, run one step per `:step` message, so the
+  mailbox is served between steps. Each meter's names are a step of their
+  own: a names read is as many reads as a meter's registers, so no step is
+  longer than a meter's.
   """
 
   use GenServer
@@ -14,7 +19,7 @@ defmodule Alavi.Poller do
   alias Alavi.Config.{Endpoint, Meter}
   alias Alavi.{Decode, FirmwareRead, MissedRead, Reading, Sink, Status}
   alias Alavi.Modbus.Client
-  alias Alavi.Poller.{Names, Policy, RawLog}
+  alias Alavi.Poller.{Job, Names, Policy, RawLog}
   alias Alavi.Profile.{Firmware, Identity, Register}
 
   @typedoc "Wall clock for reading timestamps, UTC."
@@ -47,10 +52,15 @@ defmodule Alavi.Poller do
   end
 
   @impl true
-  def handle_continue(:poll, state), do: {:noreply, poll_round(state)}
+  def handle_continue(:poll, state), do: {:noreply, begin_round(state)}
 
   @impl true
-  def handle_info(:poll, state), do: {:noreply, poll_round(state)}
+  def handle_info(:poll, %{job: nil} = state), do: {:noreply, begin_round(state)}
+
+  # The round under way schedules the next poll when it ends.
+  def handle_info(:poll, %{job: %Job{}} = state), do: {:noreply, state}
+
+  def handle_info(:step, %{job: %Job{} = job} = state), do: {:noreply, step(Job.next(job), state)}
 
   # A connect timeout that races the connect can leave gen_tcp's timer message
   # behind (`inet:stop_timer/1` flushes it with `after 0`); it means nothing here.
@@ -68,7 +78,7 @@ defmodule Alavi.Poller do
       clock: clock,
       raw_log: raw_log,
       client: nil,
-      down: nil,
+      job: nil,
       due: Map.new(endpoint.meters, &{&1.unit_id, now}),
       names: Map.new(endpoint.meters, &{&1.unit_id, Names.new()}),
       backoff: endpoint.reconnect_backoff_ms.min,
@@ -78,35 +88,54 @@ defmodule Alavi.Poller do
     {:ok, state, {:continue, :poll}}
   end
 
-  defp poll_round(state) do
+  defp begin_round(state) do
     started = now()
     state = log_raw(state, &RawLog.flush(&1, started))
     due = Enum.filter(state.endpoint.meters, &(state.due[&1.unit_id] <= started))
+    continued(%{state | job: Job.poll_round(due, started)})
+  end
 
-    {events, {state, identified}} =
-      Enum.flat_map_reduce(due, {%{state | down: nil}, []}, &poll_meter/2)
+  defp step({:meter, meter}, state) do
+    {events, identified, state} = poll_meter(meter, state)
+    continued(%{state | job: Job.polled(state.job, events, identified)})
+  end
 
-    state = identified |> Enum.reverse() |> Enum.reduce(state, &names/2)
-    Status.round(state.status, events)
+  defp step({:names, identified}, state) do
+    state = names(identified, state)
+    continued(%{state | job: Job.named(state.job)})
+  end
+
+  defp continued(%{job: job} = state) do
+    case Job.next(job) do
+      :done ->
+        end_round(state)
+
+      _step ->
+        send(self(), :step)
+        state
+    end
+  end
+
+  defp end_round(%{job: %Job{meters: due, started: started} = job} = state) do
+    Status.round(state.status, Job.events(job))
     due_at = Map.merge(state.due, Map.new(due, &{&1.unit_id, started + &1.interval_ms}))
     next = due_at |> Map.values() |> Enum.min()
     Process.send_after(self(), :poll, max(next - now(), 0))
-    %{state | due: due_at}
+    %{state | due: due_at, job: nil}
   end
 
-  # Each meter identified, with what it reported, for the names read at the
-  # end of the round.
-  defp poll_meter(meter, {state, identified}) do
+  # The meter, with what it reported, when identified, for its names step.
+  defp poll_meter(meter, state) do
     case identify(meter, state) do
       {{:ok, seen}, state} ->
         {events, skip, state} = read_registers(meter, seen, state)
         recorded(events, state)
-        {events, {state, [{meter, seen, skip} | identified]}}
+        {events, {meter, seen, skip}, state}
 
       {{:missed, reason, n, serial}, state} ->
         events = missed_all(state, meter, serial, reason, n)
         recorded(events, state)
-        {events, {state, identified}}
+        {events, nil, state}
     end
   end
 
@@ -135,7 +164,7 @@ defmodule Alavi.Poller do
     %{state | names: Map.put(state.names, unit, names)}
   end
 
-  defp read_names(meter, _seen, names, %{down: down} = state) when down != nil do
+  defp read_names(meter, _seen, names, %{job: %Job{down: down}} = state) when down != nil do
     not_read(state, meter, {:unreachable, down})
     {names, state}
   end
@@ -226,7 +255,7 @@ defmodule Alavi.Poller do
   end
 
   # Read every round, so each reading carries what the meter reported in its own round.
-  defp identify(_meter, %{down: down} = state) when down != nil,
+  defp identify(_meter, %{job: %Job{down: down}} = state) when down != nil,
     do: {{:missed, {:unreachable, down}, 0, nil}, state}
 
   defp identify(meter, state) do
@@ -386,7 +415,7 @@ defmodule Alavi.Poller do
           "alavi: cannot connect to #{endpoint.host}:#{endpoint.port}: #{inspect(reason)}"
         )
 
-        {:error, reason, %{state | client: nil, down: reason}}
+        {:error, reason, %{state | client: nil, job: Job.down(state.job, reason)}}
     end
   end
 
