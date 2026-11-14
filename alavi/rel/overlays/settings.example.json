@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "polling_config": "C:\\alavi\\polling.json",
   "profiles_dir": "C:\\alavi\\profiles",
   "buffer": {
@@ -28,5 +28,8 @@
   },
   "clock": {
     "refresh_ms": 300000
+  },
+  "status": {
+    "port": 8502
   }
 }

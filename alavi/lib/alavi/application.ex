@@ -12,10 +12,25 @@ defmodule Alavi.Application do
     end
   end
 
-  defp children(:disabled), do: {:ok, []}
+  # contract: test/alavi/application_test.exs "children/1"
+  # The status first, so it sees the first rounds; :temporary, so that however
+  # it fails it cannot use up this supervisor's restarts and stop the collector.
+  @doc false
+  @spec children(:disabled | Alavi.Settings.t()) ::
+          {:ok, [Supervisor.child_spec() | {module(), term()}]} | {:error, String.t()}
+  def children(:disabled), do: {:ok, []}
 
-  defp children(%Alavi.Settings{} = settings) do
-    with {:ok, opts} <- Alavi.Collector.load(settings, :os.type()),
-         do: {:ok, [{Alavi.Collector, opts}]}
+  def children(%Alavi.Settings{} = settings) do
+    with {:ok, opts} <- Alavi.Collector.load(settings, :os.type()) do
+      status = Alavi.Status.Supervisor.options(settings, opts[:config], version())
+
+      {:ok,
+       [
+         Supervisor.child_spec({Alavi.Status.Supervisor, status}, restart: :temporary),
+         {Alavi.Collector, opts}
+       ]}
+    end
   end
+
+  defp version, do: :alavi |> Application.spec(:vsn) |> to_string()
 end

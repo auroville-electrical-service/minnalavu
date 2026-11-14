@@ -1,12 +1,13 @@
 defmodule Alavi.Collector do
   @moduledoc """
   The running collector: on Windows the clock's status, then the buffer, then
-  one poller per endpoint writing into it, then the uplink.
+  one poller per endpoint writing into it, then the uplink. Each of them casts
+  what it did to `status` (an `Alavi.Status`, started elsewhere).
   """
 
   use Supervisor
 
-  alias Alavi.{Buffer, Clock, Config, Poller, Pollers, Profile, Settings, Uplink}
+  alias Alavi.{Buffer, Clock, Config, Poller, Pollers, Profile, Settings, Status, Uplink}
   alias Alavi.Poller.RawLog
   alias Alavi.Uplink.Target
 
@@ -23,6 +24,7 @@ defmodule Alavi.Collector do
           | {:uplink, [Uplink.option()] | :none}
           | {:raw_log, RawLog.limits()}
           | {:clock_status, [Clock.Windows.option()] | :none}
+          | {:status, GenServer.server()}
           | {:name, atom()}
 
   # contract: test/alavi/collector_test.exs "start_link/1"
@@ -52,7 +54,8 @@ defmodule Alavi.Collector do
          clock: &DateTime.utc_now/0,
          uplink: uplink,
          raw_log: settings.raw_bytes_log,
-         clock_status: watch
+         clock_status: watch,
+         status: Status
        ]}
     end
   end
@@ -61,24 +64,26 @@ defmodule Alavi.Collector do
   def init(opts) do
     buffer = Keyword.fetch!(opts, :buffer)
     sink = {Buffer, Keyword.fetch!(buffer, :name)}
+    status = Keyword.fetch!(opts, :status)
 
     pollers = [
       config: Keyword.fetch!(opts, :config),
       sink: sink,
       clock: Keyword.fetch!(opts, :clock),
-      raw_log: Keyword.fetch!(opts, :raw_log)
+      raw_log: Keyword.fetch!(opts, :raw_log),
+      status: status
     ]
 
     uplink =
       case Keyword.fetch!(opts, :uplink) do
         :none -> []
-        uplink -> [{Uplink, Keyword.put(uplink, :buffer, Keyword.fetch!(buffer, :name))}]
+        uplink -> [{Uplink, uplink ++ [buffer: Keyword.fetch!(buffer, :name), status: status]}]
       end
 
     watch =
       case Keyword.fetch!(opts, :clock_status) do
         :none -> []
-        watch -> [{Clock.Windows, watch}]
+        watch -> [{Clock.Windows, Keyword.put(watch, :status, status)}]
       end
 
     Supervisor.init(watch ++ [{Buffer, buffer}, {Pollers, pollers}] ++ uplink,

@@ -60,10 +60,41 @@ failure, or output not recognised is `unsynced`, logged once as a warning with
 the raw output. Only English output is recognised: the labels change with the
 display language. Elsewhere the status is always `unsynced`.
 
-## No listening ports
+## Status
 
-A collector only connects outwards, so its release runs with Erlang
-distribution off (`rel/env.sh.eex`, `rel/env.bat.eex`) and starts no epmd.
+What the collector is doing is kept in memory and written, every few seconds
+when it has changed, to `status.json` in `log.dir`, beside the log: per
+endpoint its last rounds and failures, per meter the serial and product code
+read and its register values as read, the raw-bytes lines, the buffer's
+backlog, the uplink's last and next attempt, the clock, the release version and
+the settings (never the token). It is replaced whole (a temporary file renamed
+over it), and the recent history in it is lost on restart: the log and the
+buffer are the record. Settings `schema_version` 1 files are refused: version 2
+added `status`.
+
+The same is shown as a page, on the collector's own PC only: open
+`http://127.0.0.1:8502/` (or `http://localhost:8502/`; the port is
+`status.port` in the settings) in a browser there. It refreshes itself every
+few seconds; `/status.json` is the same data as the file. It shows the clock,
+uplink, buffer backlog, version and start time, then per endpoint its framing,
+last rounds per unit ID and recent failures, per meter the serial expected and
+read (a mismatch is marked), the product code, the register values as read and
+the missed reads, then the raw-bytes lines and the settings.
+
+What it does not do: it never acts. There is no control on it: no settings
+editing, no "poll now", no register read; any method but GET (and HEAD) is
+refused. It listens on 127.0.0.1 only, set in the code: no setting makes it
+reachable from the network, and a request whose `Host` is not
+`127.0.0.1:<port>` or `localhost:<port>` is refused, so another web page the
+browser opens cannot read it. It never shows the token. It shows register
+values as read, never consumption or cost, and keeps nothing beyond the recent
+history in memory. If `status.port` is already in use, the error is logged and
+the collector runs on without the page; `status.json` is still written.
+
+## No other listening ports
+
+A collector only connects outwards; its one listener is the status page, on
+127.0.0.1 (above). Its release runs with Erlang distribution off (`rel/env.sh.eex`, `rel/env.bat.eex`) and starts no epmd.
 The Windows service is the exception: erlsrv always runs a named node, so
 `rel/vm.args.eex` adds `-dist_listen false -start_epmd false`, which keep any
 node from listening or starting epmd.

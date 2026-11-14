@@ -1,9 +1,10 @@
 defmodule Alavi.UplinkTest do
   use ExUnit.Case, async: true
 
+  import Alavi.PollerCase, only: [start_status!: 1, eventually!: 1]
   import ExUnit.CaptureLog
 
-  alias Alavi.{Buffer, Clock, MissedRead, Reading, TestServer, Uplink}
+  alias Alavi.{Buffer, Clock, MissedRead, Reading, Status, TestServer, Uplink}
   alias Alavi.Uplink.Target
 
   @moduletag :tmp_dir
@@ -38,7 +39,8 @@ defmodule Alavi.UplinkTest do
       clock: fn -> ~U[2026-11-01 00:05:00Z] end,
       idle_ms: 20,
       backoff_ms: %{min: 10, max: 40},
-      timeout_ms: 2_000
+      timeout_ms: 2_000,
+      status: Alavi.NoStatus
     ]
 
     start_supervised!({Uplink, Keyword.merge(base, opts)})
@@ -218,6 +220,25 @@ defmodule Alavi.UplinkTest do
       ids = for _ <- 1..5, do: request!().json["batch_id"]
       assert [_] = Enum.uniq(ids)
       assert %{quarantined: 0} = await_backlog!(ctx.buffer, &(&1.batches == 0))
+    end
+
+    test "each attempt, its result and the next attempt reach the status", ctx do
+      record!(ctx.buffer, 1)
+      status = start_status!(ctx.tmp_dir)
+      server = server!([TestServer.status(503), TestServer.stored()])
+
+      uplink!(ctx.buffer, TestServer.port(server),
+        status: status,
+        backoff_ms: %{min: 300, max: 300}
+      )
+
+      :ok = eventually!(fn -> match?(%{result: "not_sent"}, Status.read(status).uplink) end)
+      assert Status.read(status).uplink.detail =~ "HTTP 503"
+
+      :ok =
+        eventually!(fn ->
+          match?(%{result: "empty", batch_id: nil}, Status.read(status).uplink)
+        end)
     end
 
     test "an empty buffer is looked at again after idle_ms", ctx do

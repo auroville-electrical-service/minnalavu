@@ -91,10 +91,50 @@ defmodule Alavi.SettingsTest do
     end
 
     test "a document that is not an object, or of another version, is rejected" do
-      assert {:error, "expected a JSON object with schema_version 1"} = Settings.parse([])
+      assert {:error, "expected a JSON object with schema_version 2"} = Settings.parse([])
 
-      assert {:error, "unsupported settings schema_version 2"} =
-               Settings.parse(%{example() | "schema_version" => 2})
+      assert {:error, "unsupported settings schema_version 3"} =
+               Settings.parse(%{example() | "schema_version" => 3})
+    end
+
+    test "a version-1 file is refused with what version 2 added" do
+      {_, v1} = pop_in(%{example() | "schema_version" => 1}, ["status"])
+      assert {:error, message} = Settings.parse(v1)
+      assert message =~ "schema_version 1"
+      assert message =~ ~s("status": {"port")
+      assert message =~ "set schema_version to 2"
+    end
+
+    test "the status port is a TCP port" do
+      for bad <- [0, 65_536, "8502"] do
+        assert {:error, "status.port must be an integer in 1..65535"} =
+                 Settings.parse(put_in(example(), ["status", "port"], bad))
+      end
+
+      assert {:ok, %Settings{status: %{port: 8502}}} = Settings.parse(example())
+    end
+  end
+
+  describe "shown/1" do
+    test "every setting by its dotted key, except the token" do
+      {:ok, settings} = Settings.parse(example())
+      shown = Settings.shown(settings)
+
+      assert {"status.port", 8502} in shown
+      assert {"buffer.dir", "C:\\alavi\\buffer"} in shown
+      refute Enum.any?(shown, fn {key, _value} -> key == "server.token" end)
+      refute Enum.any?(shown, fn {_key, value} -> value == settings.server.token end)
+    end
+
+    # Fails when a setting is added: name it in `shown/1`'s list, or here if it
+    # must never reach the status page.
+    test "every setting is either shown or named as never shown" do
+      {:ok, settings} = Settings.parse(example())
+      shown = settings |> Settings.shown() |> Enum.map(&elem(&1, 0))
+      never_shown = ["server.token"]
+      all = example() |> leaves() |> Enum.map(&Enum.join(&1, "."))
+
+      assert Enum.sort(shown ++ never_shown) == Enum.sort(all)
     end
   end
 end

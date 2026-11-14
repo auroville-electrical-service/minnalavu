@@ -4,7 +4,7 @@ defmodule Alavi.Poller do
   require Logger
 
   alias Alavi.Config.{Endpoint, Meter}
-  alias Alavi.{Decode, MissedRead, Reading, Sink}
+  alias Alavi.{Decode, MissedRead, Reading, Sink, Status}
   alias Alavi.Modbus.Client
   alias Alavi.Poller.{Policy, RawLog}
   alias Alavi.Profile.{Identity, Register}
@@ -17,6 +17,7 @@ defmodule Alavi.Poller do
           | {:sink, Sink.t()}
           | {:clock, clock()}
           | {:raw_log, RawLog.limits()}
+          | {:status, GenServer.server()}
 
   # contract: test/alavi/poller_test.exs "start_link/1"
   @spec start_link([option()]) :: GenServer.on_start()
@@ -34,7 +35,7 @@ defmodule Alavi.Poller do
     sink = Keyword.fetch!(opts, :sink)
     clock = Keyword.fetch!(opts, :clock)
     raw_log = RawLog.new("#{endpoint.host}:#{endpoint.port}", Keyword.fetch!(opts, :raw_log))
-    start(endpoint, sink, clock, raw_log)
+    start(endpoint, {sink, Keyword.fetch!(opts, :status)}, clock, raw_log)
   end
 
   @impl true
@@ -43,14 +44,15 @@ defmodule Alavi.Poller do
   @impl true
   def handle_info(:poll, state), do: {:noreply, poll_round(state)}
 
-  defp start(%Endpoint{polled_by_other_system: true}, _sink, _clock, _raw_log), do: :ignore
+  defp start(%Endpoint{polled_by_other_system: true}, _feeds, _clock, _raw_log), do: :ignore
 
-  defp start(endpoint, sink, clock, raw_log) do
+  defp start(endpoint, {sink, status}, clock, raw_log) do
     now = now()
 
     state = %{
       endpoint: endpoint,
       sink: sink,
+      status: status,
       clock: clock,
       raw_log: raw_log,
       client: nil,
@@ -67,7 +69,8 @@ defmodule Alavi.Poller do
     started = now()
     state = log_raw(state, &RawLog.flush(&1, started))
     due = Enum.filter(state.endpoint.meters, &(state.due[&1.unit_id] <= started))
-    state = Enum.reduce(due, %{state | down: nil}, &poll_meter/2)
+    {events, state} = Enum.flat_map_reduce(due, %{state | down: nil}, &poll_meter/2)
+    Status.round(state.status, events)
     due_at = Map.merge(state.due, Map.new(due, &{&1.unit_id, started + &1.interval_ms}))
     next = due_at |> Map.values() |> Enum.min()
     Process.send_after(self(), :poll, max(next - now(), 0))
@@ -86,7 +89,7 @@ defmodule Alavi.Poller do
 
     # A refusal is the sink's to report (see `Alavi.Sink`); the round goes on.
     _kept_or_refused = Sink.record(state.sink, events)
-    state
+    {events, state}
   end
 
   defp read_registers(meter, seen, state) do
@@ -242,6 +245,7 @@ defmodule Alavi.Poller do
   defp log_raw(state, step) do
     {lines, raw_log} = step.(state.raw_log)
     Enum.each(lines, &Logger.warning/1)
+    Status.raw_lines(state.status, lines)
     %{state | raw_log: raw_log}
   end
 

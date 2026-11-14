@@ -9,6 +9,7 @@ defmodule Alavi.Pollers do
           | {:sink, Sink.t()}
           | {:clock, Poller.clock()}
           | {:raw_log, RawLog.limits()}
+          | {:status, GenServer.server()}
           | {:name, atom()}
 
   # contract: test/alavi/poller_test.exs "Pollers.start_link/1"
@@ -18,7 +19,7 @@ defmodule Alavi.Pollers do
   @impl true
   def init(opts) do
     %Config{endpoints: endpoints} = Keyword.fetch!(opts, :config)
-    shared = for key <- [:sink, :clock, :raw_log], do: {key, Keyword.fetch!(opts, key)}
+    shared = for key <- [:sink, :clock, :raw_log, :status], do: {key, Keyword.fetch!(opts, key)}
     children = Enum.map(endpoints, &{Poller, [{:endpoint, &1} | shared]})
     Supervisor.init(children, strategy: :one_for_one)
   end

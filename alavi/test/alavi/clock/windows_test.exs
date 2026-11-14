@@ -1,6 +1,7 @@
 defmodule Alavi.Clock.WindowsTest do
   use ExUnit.Case, async: true
 
+  import Alavi.PollerCase, only: [start_status!: 1, eventually!: 1]
   import ExUnit.CaptureLog
 
   alias Alavi.Clock.Windows
@@ -23,8 +24,10 @@ defmodule Alavi.Clock.WindowsTest do
     {query, fn -> Agent.get(agent, &elem(&1, 1)) end}
   end
 
-  defp start!(query, refresh_ms) do
-    start_supervised!({Windows, query: query, clock: fn -> @now end, refresh_ms: refresh_ms})
+  defp start!(query, refresh_ms, status \\ Alavi.NoStatus) do
+    start_supervised!(
+      {Windows, query: query, clock: fn -> @now end, refresh_ms: refresh_ms, status: status}
+    )
   end
 
   defp await_status!(pid, expected, tries \\ 100) do
@@ -51,6 +54,20 @@ defmodule Alavi.Clock.WindowsTest do
 
       :ok = await_status!(pid, %{source: :rtc, last_sync_at: nil})
       assert runs.() >= 2
+    end
+
+    @tag :tmp_dir
+    test "each answer reaches the status", %{tmp_dir: dir} do
+      status = start_status!(dir)
+      start!(fn -> {:ok, @ntp} end, 60_000, status)
+
+      :ok =
+        eventually!(fn ->
+          Alavi.Status.read(status).clock == %{
+            source: "ntp",
+            last_sync_at: "2026-11-11T09:59:00Z"
+          }
+        end)
     end
 
     test "unsynced until the first answer" do

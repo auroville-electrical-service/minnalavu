@@ -150,7 +150,8 @@ defmodule Alavi.PollerTest do
         config: config!(endpoints),
         sink: {Alavi.RefusingSink, self()},
         clock: &DateTime.utc_now/0,
-        raw_log: raw_log()
+        raw_log: raw_log(),
+        status: no_status()
       ]
 
       sup = start_supervised!({Alavi.Pollers, opts})

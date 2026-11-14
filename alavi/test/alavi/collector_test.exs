@@ -12,7 +12,7 @@ defmodule Alavi.CollectorTest do
   @contract Path.expand("../../../contract", __DIR__)
   @linux {:unix, :linux}
 
-  defp start_collector!(dir, endpoints, uplink \\ :none) do
+  defp start_collector!(dir, endpoints, uplink \\ :none, status \\ no_status()) do
     name = :"buffer_#{System.unique_integer([:positive])}"
 
     buffer = [
@@ -29,7 +29,8 @@ defmodule Alavi.CollectorTest do
       clock: fn -> ~U[2026-11-01 00:00:00Z] end,
       uplink: uplink,
       raw_log: raw_log(),
-      clock_status: :none
+      clock_status: :none,
+      status: status
     ]
 
     {start_supervised!({Collector, opts}, id: :collector), name}
@@ -93,6 +94,44 @@ defmodule Alavi.CollectorTest do
     end
   end
 
+  describe "start_link/1, fed to a status" do
+    test "the pollers feed the status, and its crash leaves the collector be", ctx do
+      {_sim, port} = start_sim!(:tcp)
+      endpoints = [endpoint(port, "tcp", [meter(1, "elite_440")])]
+      name = :"status_#{System.unique_integer([:positive])}"
+
+      status = [
+        config: config!(endpoints),
+        settings: [],
+        version: "0.1.0",
+        buffer: :no_such_buffer,
+        file: Path.join(ctx.tmp_dir, "status.json"),
+        clock: &DateTime.utc_now/0,
+        tick_ms: 60_000,
+        name: name
+      ]
+
+      status_pid = start_supervised!({Alavi.Status, status}, id: :status)
+      {collector, _buffer} = start_collector!(ctx.tmp_dir, endpoints, :none, name)
+      :ok = await_serial!(name, "SIM-1")
+
+      before = children(collector)
+      Process.exit(status_pid, :kill)
+      Process.sleep(50)
+      assert children(collector) == before
+    end
+  end
+
+  defp await_serial!(status, serial, tries \\ 100) do
+    [meter] = hd(Alavi.Status.read(status).endpoints).meters
+
+    cond do
+      meter.serial == serial -> :ok
+      tries > 0 -> Process.sleep(20) && await_serial!(status, serial, tries - 1)
+      true -> flunk("the status never showed serial #{serial}")
+    end
+  end
+
   defp children(collector),
     do: Map.new(Supervisor.which_children(collector), fn {id, pid, _, _} -> {id, pid} end)
 
@@ -125,7 +164,7 @@ defmodule Alavi.CollectorTest do
       File.write!(path, JSON.encode!(config))
 
       json = %{
-        "schema_version" => 1,
+        "schema_version" => 2,
         "polling_config" => path,
         "profiles_dir" => Simulator.Profile.dir(),
         "buffer" => %{
@@ -145,7 +184,8 @@ defmodule Alavi.CollectorTest do
           "max_files" => 2
         },
         "raw_bytes_log" => %{"max_frame_bytes" => 64, "max_lines" => 10, "window_ms" => 60_000},
-        "clock" => %{"refresh_ms" => 300_000}
+        "clock" => %{"refresh_ms" => 300_000},
+        "status" => %{"port" => 8502}
       }
 
       {:ok, settings} = Settings.parse(json)

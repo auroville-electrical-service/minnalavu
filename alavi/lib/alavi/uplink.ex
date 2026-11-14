@@ -8,7 +8,7 @@ defmodule Alavi.Uplink do
 
   require Logger
 
-  alias Alavi.{Buffer, Wire}
+  alias Alavi.{Buffer, Status, Wire}
   alias Alavi.Buffer.Batch
   alias Alavi.Uplink.{HTTP, Response, Target}
 
@@ -22,6 +22,7 @@ defmodule Alavi.Uplink do
           | {:idle_ms, pos_integer()}
           | {:backoff_ms, backoff()}
           | {:timeout_ms, pos_integer()}
+          | {:status, GenServer.server()}
           | {:name, GenServer.name()}
 
   # contract: test/alavi/uplink_test.exs "start_link/1"
@@ -38,6 +39,7 @@ defmodule Alavi.Uplink do
       clock: Keyword.fetch!(opts, :clock),
       idle_ms: Keyword.fetch!(opts, :idle_ms),
       timeout_ms: Keyword.fetch!(opts, :timeout_ms),
+      status: Keyword.fetch!(opts, :status),
       backoff: backoff,
       wait: backoff.min
     }
@@ -52,10 +54,15 @@ defmodule Alavi.Uplink do
   def handle_info(:send, state), do: {:noreply, attempt(state)}
 
   defp attempt(state) do
-    case Buffer.take(state.buffer) do
-      {:ok, batch} -> batch |> send_batch(state) |> settle(batch, state)
-      :empty -> later(state, state.idle_ms)
-    end
+    {result, wait, state} =
+      case Buffer.take(state.buffer) do
+        {:ok, batch} -> batch |> send_batch(state) |> settle(batch, state)
+        :empty -> {:empty, state.idle_ms, state}
+      end
+
+    Process.send_after(self(), :send, wait)
+    Status.uplink(state.status, result, wait)
+    state
   end
 
   defp send_batch(%Batch{} = batch, state) do
@@ -67,45 +74,36 @@ defmodule Alavi.Uplink do
     case Buffer.ack(state.buffer, batch.id) do
       :ok ->
         Logger.info("alavi uplink: batch #{batch.id} stored: #{summary(answer)}")
-        now(state)
+        now({:stored, batch.id}, state)
 
       {:error, reason} ->
-        Logger.error("alavi uplink: batch #{batch.id} stored but not deleted: #{inspect(reason)}")
-        retry(state)
+        why = "stored but not deleted: #{inspect(reason)}"
+        Logger.error("alavi uplink: batch #{batch.id} #{why}")
+        retry({:not_sent, batch.id, why}, state)
     end
   end
 
   defp settle({:quarantine, why}, batch, state) do
     case Buffer.quarantine(state.buffer, batch.id, why) do
       :ok ->
-        now(state)
+        now({:quarantined, batch.id, why}, state)
 
       {:error, reason} ->
-        Logger.error(
-          "alavi uplink: batch #{batch.id} rejected (#{why}) and could not be set aside: #{inspect(reason)}"
-        )
-
-        retry(state)
+        why = "rejected (#{why}) and could not be set aside: #{inspect(reason)}"
+        Logger.error("alavi uplink: batch #{batch.id} #{why}")
+        retry({:not_sent, batch.id, why}, state)
     end
   end
 
   defp settle({:retry, why}, batch, state) do
     Logger.warning("alavi uplink: batch #{batch.id} not sent, again in #{state.wait} ms: #{why}")
-    retry(state)
+    retry({:not_sent, batch.id, why}, state)
   end
 
-  defp now(state) do
-    send(self(), :send)
-    %{state | wait: state.backoff.min}
-  end
+  defp now(result, state), do: {result, 0, %{state | wait: state.backoff.min}}
 
-  defp retry(state),
-    do: %{later(state, state.wait) | wait: min(state.wait * 2, state.backoff.max)}
-
-  defp later(state, ms) do
-    Process.send_after(self(), :send, ms)
-    state
-  end
+  defp retry(result, state),
+    do: {result, state.wait, %{state | wait: min(state.wait * 2, state.backoff.max)}}
 
   defp summary(%{"readings" => readings, "missed_reads" => missed}),
     do: "readings #{inspect(readings)}, missed reads #{inspect(missed)}"

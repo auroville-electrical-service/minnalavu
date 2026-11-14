@@ -67,7 +67,8 @@ defmodule Alavi.EndToEndTest do
       clock: &DateTime.utc_now/0,
       uplink: uplink,
       raw_log: raw_log(),
-      clock_status: :none
+      clock_status: :none,
+      status: no_status()
     ]
 
     start_supervised!({Collector, opts})

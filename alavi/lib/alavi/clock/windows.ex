@@ -8,7 +8,7 @@ defmodule Alavi.Clock.Windows do
 
   require Logger
 
-  alias Alavi.Clock
+  alias Alavi.{Clock, Status}
   alias Alavi.Clock.W32tm
 
   @type query :: (-> {:ok, String.t()} | {:error, String.t()})
@@ -17,6 +17,7 @@ defmodule Alavi.Clock.Windows do
           {:query, query()}
           | {:clock, (-> DateTime.t())}
           | {:refresh_ms, pos_integer()}
+          | {:status, GenServer.server()}
           | {:name, GenServer.name()}
 
   @spec start_link([option()]) :: GenServer.on_start()
@@ -43,6 +44,7 @@ defmodule Alavi.Clock.Windows do
       query: Keyword.fetch!(opts, :query),
       clock: Keyword.fetch!(opts, :clock),
       refresh_ms: Keyword.fetch!(opts, :refresh_ms),
+      feed: Keyword.fetch!(opts, :status),
       status: Clock.unsynced(),
       task: nil,
       failing: false
@@ -62,13 +64,18 @@ defmodule Alavi.Clock.Windows do
 
   def handle_info({ref, result}, %{task: %Task{ref: ref}} = state) do
     Process.demonitor(ref, [:flush])
-    {:noreply, answered(%{state | task: nil}, result)}
+    {:noreply, fed(answered(%{state | task: nil}, result))}
   end
 
   defp refresh(state) do
-    state = abandon(state)
+    state = state |> abandon() |> fed()
     Process.send_after(self(), :refresh, state.refresh_ms)
     %{state | task: Task.async(state.query)}
+  end
+
+  defp fed(state) do
+    Status.clock(state.feed, state.status)
+    state
   end
 
   defp abandon(%{task: nil} = state), do: state

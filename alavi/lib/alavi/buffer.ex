@@ -57,8 +57,9 @@ defmodule Alavi.Buffer do
     do: GenServer.call(buffer, {:quarantine, id, reason}, :infinity)
 
   # contract: test/alavi/buffer_test.exs "backlog/1"
-  @spec backlog(GenServer.server()) :: backlog()
-  def backlog(buffer), do: GenServer.call(buffer, :backlog)
+  @doc "Exits if the buffer does not answer within `timeout` ms."
+  @spec backlog(GenServer.server(), timeout()) :: backlog()
+  def backlog(buffer, timeout \\ 5_000), do: GenServer.call(buffer, :backlog, timeout)
 
   @impl GenServer
   def init(opts) do

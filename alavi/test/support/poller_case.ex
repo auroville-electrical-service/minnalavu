@@ -2,7 +2,7 @@ defmodule Alavi.PollerCase do
   @moduledoc "Helpers for tests that poll a simulated endpoint: configs, simulators, sink messages."
 
   import ExUnit.Assertions
-  import ExUnit.Callbacks, only: [start_supervised!: 1]
+  import ExUnit.Callbacks, only: [start_supervised!: 1, start_supervised!: 2]
 
   alias Alavi.{Config, Profile}
   alias Simulator.Meter
@@ -49,6 +49,45 @@ defmodule Alavi.PollerCase do
     config
   end
 
+  @doc "A status server that is never started: what is cast to it is dropped."
+  @spec no_status() :: atom()
+  def no_status, do: Alavi.NoStatus
+
+  @doc "Start an `Alavi.Status` for one unpolled endpoint, writing into `dir`; returns its name."
+  @spec start_status!(Path.t()) :: atom()
+  def start_status!(dir) do
+    name = :"status_#{System.unique_integer([:positive])}"
+
+    opts = [
+      config: config!([endpoint(5020, "tcp", [meter(1, "elite_440")])]),
+      settings: [],
+      version: "0.1.0",
+      buffer: :no_such_buffer,
+      file: Path.join(dir, "status.json"),
+      clock: &DateTime.utc_now/0,
+      tick_ms: 60_000,
+      name: name
+    ]
+
+    start_supervised!({Alavi.Status, opts}, id: name)
+    name
+  end
+
+  @doc "Poll `check` until it holds, or fail."
+  @spec eventually!((-> boolean()), non_neg_integer()) :: :ok
+  def eventually!(check, tries \\ 100) do
+    cond do
+      check.() -> :ok
+      tries > 0 -> retry(check, tries)
+      true -> flunk("never happened")
+    end
+  end
+
+  defp retry(check, tries) do
+    Process.sleep(10)
+    eventually!(check, tries - 1)
+  end
+
   @doc "Raw-bytes log caps for tests: loose enough that nothing is suppressed."
   @spec raw_log() :: Alavi.Poller.RawLog.limits()
   def raw_log, do: %{max_frame_bytes: 256, max_lines: 1000, window_ms: 60_000}
@@ -60,7 +99,8 @@ defmodule Alavi.PollerCase do
       config: config!(endpoints),
       sink: {Alavi.TestSink, self()},
       clock: clock,
-      raw_log: raw_log
+      raw_log: raw_log,
+      status: no_status()
     ]
 
     start_supervised!({Alavi.Pollers, opts})
