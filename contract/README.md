@@ -55,5 +55,12 @@ when the serial, product code or names differ from the last it sent for that
 endpoint and unit, and always the first after it starts. A batch with nothing
 changed has none. Readings do not carry firmware.
 
+A reading or missed read taken for a request carries its `request_id`: one
+of the jobs the server's answer to an upload listed (`central/README.md`).
+A read the collector made of its own accord carries none; `null` is refused.
+A batch with no readings and no missed reads is a heartbeat: a collector
+with nothing to send sends one, so its answer lists the pending jobs and
+health sees an idle collector, not a silent one.
+
 Values are decimal strings, never JSON numbers, so no float ever carries
 energy or money.

@@ -53,6 +53,11 @@
     { "name": "a detail longer than 200 characters", "path": ["missed_reads", 1, "detail"], "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" },
     { "name": "missed raw words as a string", "path": ["missed_reads", 0, "raw_words"], "value": "0" },
     { "name": "a missed read with a value", "path": ["missed_reads", 0, "value"], "value": "1.0" },
+    { "name": "a null request id", "path": ["readings", 0, "request_id"], "value": null },
+    { "name": "a request id that is not a UUID", "path": ["readings", 0, "request_id"], "value": "request-1" },
+    { "name": "a request id as a number", "path": ["missed_reads", 0, "request_id"], "value": 1 },
+    { "name": "a null missed-read request id", "path": ["missed_reads", 0, "request_id"], "value": null },
+    { "name": "a request id on a firmware read", "path": ["firmware_reads"], "value": [{ "endpoint": { "host": "10.0.0.21", "port": 502 }, "unit_id": 1, "meter_serial": "SIM-445-0001", "product_code": "ELITE440-445", "timestamp": "2026-11-01T00:00:00Z", "software": "SIM-SW44", "firmware_1": "SIM-F1", "firmware_2": "SIM-F2", "modbus_version": "0B03", "request_id": "7d2c1f0e-4b3a-4c5d-8e6f-1a2b3c4d5e6f" }] },
     { "name": "firmware reads that are not a list", "path": ["firmware_reads"], "value": {} },
     { "name": "a firmware read missing a name", "path": ["firmware_reads"], "value": [{ "endpoint": { "host": "10.0.0.21", "port": 502 }, "unit_id": 1, "meter_serial": "SIM-445-0001", "product_code": "ELITE440-445", "timestamp": "2026-11-01T00:00:00Z", "software": "SIM-SW44", "firmware_1": "SIM-F1", "modbus_version": "0B03" }] },
     { "name": "a firmware read with no serial read", "path": ["firmware_reads"], "value": [{ "endpoint": { "host": "10.0.0.21", "port": 502 }, "unit_id": 1, "meter_serial": null, "product_code": "ELITE440-445", "timestamp": "2026-11-01T00:00:00Z", "software": "SIM-SW44", "firmware_1": "SIM-F1", "firmware_2": "SIM-F2", "modbus_version": "0B03" }] },
@@ -66,6 +71,7 @@
     { "name": "a name longer than 250 characters", "path": ["firmware_reads"], "value": [{ "endpoint": { "host": "10.0.0.21", "port": 502 }, "unit_id": 1, "meter_serial": "SIM-445-0001", "product_code": "ELITE440-445", "timestamp": "2026-11-01T00:00:00Z", "software": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "firmware_1": "SIM-F1", "firmware_2": "SIM-F2", "modbus_version": "0B03" }] }
   ],
   "valid": [
+    { "name": "a reading and a missed read taken for a request", "changes": [{ "path": ["readings", 0, "request_id"], "value": "7d2c1f0e-4b3a-4c5d-8e6f-1a2b3c4d5e6f" }, { "path": ["missed_reads", 0, "request_id"], "value": "7D2C1F0E-4B3A-4C5D-8E6F-1A2B3C4D5E6F" }] },
     { "name": "no readings and no missed reads", "changes": [{ "path": ["readings"], "value": [] }, { "path": ["missed_reads"], "value": [] }] },
     { "name": "a clock never synced", "changes": [{ "path": ["clock"], "value": { "source": "unsynced", "last_sync_at": null } }] },
     { "name": "an empty backlog", "changes": [{ "path": ["backlog", "oldest"], "value": null }] },

@@ -39,6 +39,8 @@ The directory is not named `minnalavu/`, since that is the repo itself.
 - `admin`: operator functions, run as the database owner.
 - `registry`: the device registry (below).
 - `health`: views of collection health, the only thing the role `monitor` may read.
+- `jobs`: requests for reads on demand, the only thing the role
+  `minkanakku_staff` may touch (below).
 
 Roles: PostgREST logs in as `authenticator` (no privileges of its own) and
 switches to the role the request's token names. Each collector has a role,
@@ -186,13 +188,64 @@ minutes:
 `flock -n` skips a run while the last one is still going, so two runs never
 send the same mail.
 
+## Reads on demand and the role minkanakku_staff
+
+`minkanakku`'s staff side asks a collector to read meters now; the collector
+learns of it from its next upload's answer (a doorbell on a message broker
+will wake it sooner), runs it, and tags what it reads with the request's id.
+
+- `jobs.requests` (with `jobs.request_meters`): one row per request, the
+  collector, the kind (only `read_on_demand`), the meters by serial, an opaque
+  `requester` reference `minkanakku` resolves (1 to 200 characters, no control
+  characters; nothing about the person), `requested_at` and `expires_at`, an
+  hour later.
+- `jobs.request_readings` and `jobs.request_missed_reads` link a request to the
+  readings and missed reads that came for it, by their keys. Raw readings carry
+  no request: the link is a row of its own, so a stored reading is never
+  touched, and a resend links nothing twice. Readings carrying an id that is
+  not one of the sending collector's requests are stored as any other and
+  linked to nothing.
+- `jobs.request_status`: each request with its meters, how many readings and
+  missed reads have come for it, when the first came (`answered_at`), and its
+  `state` as of `now()`: `answered` once any reading or missed read has come
+  (even after expiry); else `expired` once `expires_at` has passed; else
+  `pending`. A request that is never answered stays `expired`, as a record.
+- Nothing in `jobs` is ever updated or deleted (triggers refuse it, even for
+  the owner).
+
+The role `minkanakku_staff` may call one function and read one view, and
+nothing else (`test/grants.sql`); no other role may call the function. It
+cannot log in; a login is a member of it, as for `monitor`.
+
+    SELECT jobs.request_job(collector_id => 'pilot_01', kind => 'read_on_demand',
+      meters => ARRAY['…'], requester => '…');          -- returns the request id
+
+It inserts the request and touches nothing else. Each meter must be in
+service now, on an endpoint in service now with that collector, which no
+other system polls; anything else is refused with SQLSTATE 22023, naming what
+is wrong.
+
+When ingest commits a batch that links readings or missed reads to a
+request, it sends `NOTIFY request_answered` with the payload
+`{"request_id": …, "batch_id": …, "readings": n, "missed_reads": n}` (what this
+batch newly linked); a resend that links nothing new sends nothing. Any role
+may `LISTEN`, and any role with a connection may `NOTIFY` on that channel, so a
+notice says only "look again": read `jobs.request_status`.
+
 ## Answers from `POST /rpc/ingest`
 
 - 200: stored, or already stored (a resend). The body names the `batch_id` and
   counts readings `received`, `inserted`, `duplicate` and `conflicting`,
   missed reads `received`, `inserted` and `duplicate`, and firmware reads
   `received`, `inserted`, `duplicate` and `conflicting` (a conflicting one is
-  counted, not kept).
+  counted, not kept). `jobs`, when the collector has pending requests, lists
+  them oldest first, each with its `request_id`, `kind`, `meters` (serials),
+  `requested_at` and `expires_at`; a request is listed until a reading or
+  missed read for it arrives or it expires, so a collector runs each id once.
+  `unknown_requests`, when the batch carried request ids that are not the
+  collector's requests, lists them. Both are left out when empty. A batch with
+  no readings and no missed reads is a heartbeat: it is stored as an upload,
+  and its answer lists the jobs as any other.
 - 422 (`PT422`): the batch does not match the schema; the message names the field.
 - 409 (`PT409`): the batch id was already sent by another collector.
 - 400 (`PGRST102`): the body is not JSON.

@@ -1,6 +1,7 @@
 -- What the roles PostgREST uses may do: call api.ingest, and nothing else;
--- and what monitor may do: read the health views, and nothing else.
--- Above all, no such role may read, change or delete raw readings.
+-- what monitor may do: read the health views, and nothing else; and what
+-- minkanakku_staff may do: request a job and read the requests, and nothing
+-- else. Above all, no such role may read, change or delete raw readings.
 
 \ir lib/assert.sql
 \set basic `cat ../contract/fixtures/batch.v1.basic.json`
@@ -307,6 +308,151 @@ FROM unnest(ARRAY[
   $q$INSERT INTO registry.health_thresholds (collector_silent_after, meter_silent_intervals, backlog_near_capacity, lookback) VALUES ('1 hour', 4, 0.8, '1 day')$q$,
   $q$DELETE FROM store.readings$q$,
   'CREATE TABLE health.x (i int)',
+  'CREATE TEMP TABLE x (i int)'
+]) q;
+
+-- The role minkanakku_staff, and any login that is a member of it: it may
+-- call jobs.request_job and read jobs.request_status, and nothing else. No
+-- other role (the portal's, whatever it is named) may call jobs.request_job.
+CREATE ROLE sqltest_staff_login IN ROLE minkanakku_staff;
+CREATE ROLE sqltest_portal;
+
+CREATE TEMP VIEW staff_roles AS
+  SELECT r.rolname AS role FROM pg_roles r
+  WHERE pg_has_role(r.oid, 'minkanakku_staff', 'USAGE') AND NOT r.rolsuper;
+
+SELECT pg_temp.ok(
+  (SELECT 'sqltest_staff_login' IN (SELECT role FROM staff_roles)),
+  'a login that is a member of minkanakku_staff is among the roles checked');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(r.rolname, ', ' ORDER BY r.rolname)
+   FROM pg_roles r
+   WHERE NOT r.rolsuper
+     AND has_function_privilege(r.oid, 'jobs.request_job(text, text, text[], text)', 'EXECUTE')),
+  (SELECT string_agg(role, ', ' ORDER BY role) FROM staff_roles),
+  'no role but minkanakku_staff and its members may call jobs.request_job');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s may execute %s', r.role, f.oid::regprocedure), '; '
+                     ORDER BY r.role, f.oid::regprocedure::text)
+   FROM staff_roles r
+   CROSS JOIN pg_proc f
+   JOIN pg_namespace n ON n.oid = f.pronamespace
+   WHERE n.nspname IN ('store', 'api', 'admin', 'registry', 'health', 'jobs')
+     AND has_function_privilege(r.role, f.oid, 'EXECUTE')),
+  (SELECT string_agg(format('%s may execute jobs.request_job(text,text,text[],text)', role), '; '
+                     ORDER BY role)
+   FROM staff_roles),
+  'the only function minkanakku_staff may execute is jobs.request_job');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s has %s on %s.%s', r.role, p, c.nspname, c.relname), '; '
+                     ORDER BY r.role, c.nspname, c.relname, p)
+   FROM staff_roles r
+   CROSS JOIN user_relations c
+   CROSS JOIN unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'REFERENCES', 'DELETE', 'TRUNCATE',
+                           'TRIGGER']) p
+   WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f')
+     AND CASE WHEN p IN ('SELECT', 'INSERT', 'UPDATE', 'REFERENCES')
+              THEN has_any_column_privilege(r.role, c.oid, p)
+              ELSE has_table_privilege(r.role, c.oid, p) END),
+  (SELECT string_agg(format('%s has SELECT on jobs.request_status', role), '; ' ORDER BY role)
+   FROM staff_roles),
+  'minkanakku_staff may select from jobs.request_status and do nothing else to any table or view, chunks included');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s has %s on %s.%s', r.role, p, c.nspname, c.relname), '; ')
+   FROM staff_roles r
+   CROSS JOIN user_relations c
+   CROSS JOIN unnest(ARRAY['USAGE', 'SELECT', 'UPDATE']) p
+   WHERE c.relkind = 'S' AND has_sequence_privilege(r.role, c.oid, p)),
+  NULL,
+  'minkanakku_staff may use no sequence');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s has %s on schema %s', r.role, p, s.nspname), '; '
+                     ORDER BY r.role, s.nspname, p)
+   FROM staff_roles r
+   CROSS JOIN user_schemas s
+   CROSS JOIN unnest(ARRAY['USAGE', 'CREATE']) p
+   WHERE has_schema_privilege(r.role, s.oid, p)),
+  (SELECT string_agg(format('%s has USAGE on schema jobs', role), '; ' ORDER BY role)
+   FROM staff_roles),
+  'minkanakku_staff may use only the jobs schema, and create nothing in it');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s has %s', r.role, p), '; ')
+   FROM staff_roles r
+   CROSS JOIN unnest(ARRAY['CREATE', 'TEMPORARY']) p
+   WHERE has_database_privilege(r.role, current_database(), p)),
+  NULL,
+  'minkanakku_staff may not create schemas or temporary tables');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(m.roleid::regrole::text, '; ')
+   FROM pg_auth_members m WHERE m.member = 'minkanakku_staff'::regrole),
+  NULL,
+  'minkanakku_staff is a member of no other role');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(r.rolname, '; ')
+   FROM pg_roles r
+   WHERE r.rolname IN (SELECT role FROM staff_roles)
+     AND (r.rolsuper OR r.rolcreaterole OR r.rolcreatedb OR r.rolbypassrls OR r.rolreplication
+          OR (r.rolname = 'minkanakku_staff' AND r.rolcanlogin))),
+  NULL,
+  'minkanakku_staff cannot log in, and neither it nor its members hold a special attribute');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s may execute %s', r.role, f.oid::regprocedure), '; ')
+   FROM (SELECT role FROM postgrest_roles UNION SELECT role FROM monitor_roles) r
+   CROSS JOIN pg_proc f
+   WHERE f.pronamespace = 'jobs'::regnamespace
+     AND has_function_privilege(r.role, f.oid, 'EXECUTE')),
+  NULL,
+  'no PostgREST role and no monitor may execute any function in jobs');
+
+-- The same, by trying. A call that gets past the privilege check is refused
+-- for its arguments (22023), not for lack of privilege (42501).
+SELECT pg_temp.is(pg_temp.sqlstate_as(r, q), '22023', r || ' may call: ' || q)
+FROM unnest(ARRAY['minkanakku_staff', 'sqltest_staff_login']) r
+CROSS JOIN unnest(ARRAY[
+  $q$SELECT jobs.request_job('sqltest_none', 'read_on_demand', ARRAY['S'], 'staff:1')$q$
+]) q;
+
+SELECT pg_temp.is(pg_temp.sqlstate_as('minkanakku_staff', q), '00000',
+                  'minkanakku_staff may: ' || q)
+FROM unnest(ARRAY['SELECT * FROM jobs.request_status']) q;
+
+SELECT pg_temp.is(pg_temp.sqlstate_as(r, q), '42501', r || ' is refused: ' || q)
+FROM unnest(ARRAY['sqltest_portal', 'monitor', 'collector_sqltest_grants', 'authenticator']) r
+CROSS JOIN unnest(ARRAY[
+  $q$SELECT jobs.request_job('sqltest_grants', 'read_on_demand', ARRAY['S'], 'staff:1')$q$,
+  'SELECT * FROM jobs.request_status',
+  'SELECT * FROM jobs.requests'
+]) q;
+
+SELECT pg_temp.is(pg_temp.sqlstate_as('minkanakku_staff', q), '42501',
+                  'minkanakku_staff is refused: ' || q)
+FROM unnest(ARRAY[
+  'SELECT * FROM jobs.requests',
+  'SELECT * FROM jobs.request_readings',
+  $q$INSERT INTO jobs.requests (collector_id, kind, requester, expires_at) VALUES ('sqltest_grants', 'read_on_demand', 'x', now() + interval '1 hour')$q$,
+  $q$INSERT INTO jobs.request_meters VALUES (gen_random_uuid(), 'S')$q$,
+  $q$UPDATE jobs.requests SET requester = 'x'$q$,
+  $q$DELETE FROM jobs.requests$q$,
+  $q$SELECT jobs.pending('sqltest_grants')$q$,
+  $q$SELECT jobs.link_batch('{}', 'sqltest_grants', gen_random_uuid())$q$,
+  'SELECT * FROM store.readings',
+  'SELECT * FROM store.batches',
+  'SELECT * FROM registry.meter_history',
+  'SELECT * FROM health.problems',
+  $q$INSERT INTO store.readings VALUES ('S', 'r', now(), 1, 'Wh', '{1}', 'p', 'h', 1, 1, 'c', gen_random_uuid())$q$,
+  $q$SELECT api.ingest('{}')$q$,
+  $q$SELECT admin.create_collector('sqltest_intruder')$q$,
+  $q$SELECT admin.register_meter('S', now(), 'e', 1, 'elite_440', NULL)$q$,
+  'CREATE TABLE jobs.x (i int)',
   'CREATE TEMP TABLE x (i int)'
 ]) q;
 

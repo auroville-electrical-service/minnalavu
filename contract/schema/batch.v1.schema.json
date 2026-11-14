@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://minnalavu.invalid/contract/batch.v1.schema.json",
   "title": "Collector reading batch, version 1 (draft until the first collector ships)",
-  "description": "The collector is identified by the token the batch is sent with, never by anything in the batch.",
+  "description": "The collector is identified by the token the batch is sent with, never by anything in the batch. A batch with no readings and no missed reads is a heartbeat: a collector with nothing to send sends one, and the answer lists its pending jobs as every answer does.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "batch_id", "sent_at", "clock", "backlog", "readings", "missed_reads"],
@@ -91,6 +91,11 @@
     },
     "unit_id": { "type": "integer", "minimum": 1, "maximum": 247 },
     "word": { "type": "integer", "minimum": 0, "maximum": 65535 },
+    "request_id": {
+      "description": "The request this was read for, as the server's answer listed it among the collector's jobs. Absent for a read the collector made of its own accord.",
+      "type": "string",
+      "format": "uuid"
+    },
     "reading": {
       "type": "object",
       "additionalProperties": false,
@@ -133,7 +138,8 @@
           "type": "string",
           "pattern": "^-?[0-9]+(\\.[0-9]+)?$"
         },
-        "unit": { "enum": ["Wh", "kWh", "varh", "kvarh"] }
+        "unit": { "enum": ["Wh", "kWh", "varh", "kvarh"] },
+        "request_id": { "$ref": "#/$defs/request_id" }
       }
     },
     "missed_read": {
@@ -205,7 +211,8 @@
           "type": ["array", "null"],
           "maxItems": 125,
           "items": { "$ref": "#/$defs/word" }
-        }
+        },
+        "request_id": { "$ref": "#/$defs/request_id" }
       }
     },
     "name": {
