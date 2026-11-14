@@ -50,14 +50,18 @@ From the release root, in an administrator's command prompt:
    `erlsrv` below.
 4. `erlsrv start alavi_alavi`.
 
-`erlsrv list alavi_alavi` should show `OnFail: restart` and the release root
-as `WorkDir:`: the release's `bin\alavi.bat` installs the service with
-`-onfail restart -workdir` (`mix.exs`), so erlsrv restarts a node that stops
-on its own, and a node that halts writes its `erl_crash.dump` in the release
-root. A node that stops again within 10 seconds of being restarted, as one
-does with an invalid settings file, is left stopped rather than restarted in a
-loop: fix the cause (the log, or step 2) and start it again. To install a new release, `erlsrv remove alavi_alavi`,
-then the steps above from the new release root.
+`erlsrv list alavi_alavi` should show `OnFail: restart`, the release root as
+`WorkDir:` and `alavi_alavi` as `InternalServiceName:`: the release's
+`bin\alavi.bat` installs the service with `-onfail restart -workdir
+-internalservicename` (`mix.exs`), so erlsrv restarts a node that stops on its
+own, a node that halts writes its `erl_crash.dump` in the release root, and the
+service starts at boot (under a generated internal name it does not). A service
+installed without these must be removed (`erlsrv remove alavi_alavi`) and
+installed again from step 3. A node that stops again within 10 seconds of
+being restarted, as one does with an invalid settings file, is left stopped
+rather than restarted in a loop: fix the cause (the log, or step 2) and start
+it again. To install a new release, `erlsrv remove alavi_alavi`, then the
+steps above from the new release root.
 
 ## Logs
 

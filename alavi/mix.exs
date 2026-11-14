@@ -41,7 +41,7 @@ defmodule Alavi.MixProject do
   end
 
   # Mix's bin\alavi.bat installs the Windows service with erlsrv's defaults,
-  # and has no option for either:
+  # and has no option for any of them:
   # - -onfail ignore, so a node that stops stays down. `restart`, not
   #   `restart_always`: a node that stops again within 10 s of a restart (a bad
   #   settings file stops it in under a second) is left stopped, not restarted
@@ -49,10 +49,18 @@ defmodule Alavi.MixProject do
   # - no working directory, so the node runs in the system directory and an
   #   erl_crash.dump, which can hold the token, lands there. In the release
   #   root it lands beside settings.json, under the ACL the README sets.
+  # - a generated internal (SCM) name, under which a start at boot cannot find
+  #   erlsrv's registry keys, which are under the service name: the service
+  #   then does not start at boot. The internal name is set only on add.
   defp service_options(release) do
     bat = Path.join([release.path, "bin", "#{release.name}.bat"])
     add = ~s|"!ERLSRV!" add "!RELEASE_NAME!_!RELEASE_NAME!" ^\n|
-    options = ~s|  -onfail restart -workdir "!RELEASE_ROOT!" ^\n|
+
+    options = """
+      -onfail restart ^
+      -workdir "!RELEASE_ROOT!" ^
+      -internalservicename "!RELEASE_NAME!_!RELEASE_NAME!" ^
+    """
 
     case String.split(File.read!(bat), add) do
       [head, tail] ->
@@ -61,7 +69,7 @@ defmodule Alavi.MixProject do
 
       _ ->
         Mix.raise(
-          "#{bat}: no single erlsrv add line to put -onfail and -workdir on; has Mix's template changed?"
+          "#{bat}: no single erlsrv add line to put the service options on; has Mix's template changed?"
         )
     end
   end
