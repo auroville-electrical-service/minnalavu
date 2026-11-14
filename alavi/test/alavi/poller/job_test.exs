@@ -58,4 +58,28 @@ defmodule Alavi.Poller.JobTest do
       assert Job.next(job) == {:meter, m2}
     end
   end
+
+  describe "read_on_demand/4" do
+    test "steps through the meters named, in chain order, with no names steps" do
+      [m1, m2] = meters()
+      requester = {self(), make_ref()}
+
+      assert {:ok, job} = Job.read_on_demand([m1, m2], [2, 1, 2], 7, requester)
+      assert %Job{kind: :read_on_demand, meters: [^m1, ^m2], started: 7} = job
+      assert job.requester == requester
+      assert Job.next(job) == {:meter, m1}
+
+      job = job |> Job.polled([:a], {m1, seen(1), nil}) |> Job.polled([:b], {m2, seen(2), nil})
+      assert Job.next(job) == :done
+      assert Job.events(job) == [:a, :b]
+    end
+
+    test "no units, or units not on the endpoint, are refused" do
+      requester = {self(), make_ref()}
+      assert Job.read_on_demand(meters(), [], 0, requester) == {:error, :no_units}
+
+      assert Job.read_on_demand(meters(), [2, 5, 5, 0], 0, requester) ==
+               {:error, {:unknown_units, [5, 0]}}
+    end
+  end
 end

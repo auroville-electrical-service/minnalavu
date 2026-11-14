@@ -64,6 +64,17 @@ defmodule Alavi.Poller.ScheduleTest do
 
       assert Schedule.next([a, b, c], 5, %{1 => 9, 2 => 9, 3 => 9}, ms) == {:step, a, [b, c]}
     end
+
+    test "a read on demand runs before a round under way, and before a round due" do
+      [m1, m2, m3] = ms = meters()
+      round = [m1, m2] |> Job.poll_round(0) |> Job.polled([:read], {m1, seen(1), nil})
+      {:ok, read} = Job.read_on_demand(ms, [3], 5, {self(), make_ref()})
+      due = %{1 => 60_000, 2 => 60_000, 3 => 0}
+
+      assert Schedule.next([round, read], 5, due, ms) == {:step, read, [round]}
+      assert Schedule.next([read], 5, due, ms) == {:step, read, []}
+      assert {:start, %Job{kind: :poll_round, meters: [^m3]}} = Schedule.next([], 5, due, ms)
+    end
   end
 
   describe "after_round/2" do

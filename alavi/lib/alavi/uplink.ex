@@ -1,7 +1,9 @@
 defmodule Alavi.Uplink do
   @moduledoc """
   Sends the buffer's batches to the server, oldest first, and acknowledges each
-  only once the server has stored it.
+  only once the server has stored it. One attempt is pending at a time; a
+  nudge brings it forward only while the buffer was last found empty, never
+  past a backoff.
   """
 
   use GenServer
@@ -41,7 +43,9 @@ defmodule Alavi.Uplink do
       timeout_ms: Keyword.fetch!(opts, :timeout_ms),
       status: Keyword.fetch!(opts, :status),
       backoff: backoff,
-      wait: backoff.min
+      wait: backoff.min,
+      timer: nil,
+      idle: false
     }
 
     {:ok, state, {:continue, :send}}
@@ -50,8 +54,20 @@ defmodule Alavi.Uplink do
   @impl true
   def handle_continue(:send, state), do: {:noreply, attempt(state)}
 
+  # contract: test/alavi/uplink_test.exs "nudge/1"
+  @doc "Something new is in the buffer: send it now if the uplink is idle."
+  @spec nudge(GenServer.server()) :: :ok
+  def nudge(server), do: GenServer.cast(server, :nudge)
+
   @impl true
-  def handle_info(:send, state), do: {:noreply, attempt(state)}
+  def handle_cast(:nudge, %{idle: true} = state), do: {:noreply, attempt(state)}
+  def handle_cast(:nudge, state), do: {:noreply, state}
+
+  @impl true
+  def handle_info({:send, timer}, %{timer: timer} = state), do: {:noreply, attempt(state)}
+
+  # The attempt it was for came sooner, by a nudge.
+  def handle_info({:send, _stale}, state), do: {:noreply, state}
 
   defp attempt(state) do
     {result, wait, state} =
@@ -60,9 +76,10 @@ defmodule Alavi.Uplink do
         :empty -> {:empty, state.idle_ms, state}
       end
 
-    Process.send_after(self(), :send, wait)
+    timer = make_ref()
+    Process.send_after(self(), {:send, timer}, wait)
     Status.uplink(state.status, result, wait)
-    state
+    %{state | timer: timer, idle: result == :empty}
   end
 
   defp send_batch(%Batch{} = batch, state) do

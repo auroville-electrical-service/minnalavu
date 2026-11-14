@@ -65,6 +65,12 @@ defmodule Alavi.Status do
   def round(server, events), do: GenServer.cast(server, {:round, events})
 
   # contract: test/alavi/status_test.exs "feeds"
+  @doc "A read on demand's events, all from one endpoint: its meters' values, not a round."
+  @spec on_demand(GenServer.server(), [Reading.t() | MissedRead.t()]) :: :ok
+  def on_demand(_server, []), do: :ok
+  def on_demand(server, events), do: GenServer.cast(server, {:on_demand, events})
+
+  # contract: test/alavi/status_test.exs "feeds"
   @doc "A meter's names, each time the poller reads them."
   @spec firmware(GenServer.server(), FirmwareRead.t()) :: :ok
   def firmware(server, %FirmwareRead{} = read), do: GenServer.cast(server, {:firmware, read})
@@ -120,6 +126,9 @@ defmodule Alavi.Status do
   @impl true
   def handle_cast({:round, events}, state),
     do: {:noreply, update(state, &Snapshot.round(&1, events))}
+
+  def handle_cast({:on_demand, events}, state),
+    do: {:noreply, update(state, &Snapshot.on_demand(&1, events))}
 
   def handle_cast({:firmware, read}, state),
     do: {:noreply, update(state, &Snapshot.firmware(&1, read))}

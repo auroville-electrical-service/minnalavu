@@ -250,4 +250,35 @@ defmodule Alavi.UplinkTest do
       assert request!().json["readings"] != []
     end
   end
+
+  describe "nudge/1" do
+    test "an idle uplink sends what was recorded at once, not after its idle wait", ctx do
+      server = server!([TestServer.stored()])
+      uplink = uplink!(ctx.buffer, TestServer.port(server), idle_ms: 60_000)
+      :ok = eventually!(fn -> Buffer.backlog(ctx.buffer).batches == 0 end)
+      refute_receive {:request, _}, 100
+
+      record!(ctx.buffer, 1)
+      Uplink.nudge(uplink)
+      assert %{json: %{"readings" => [_, _]}} = request!()
+      await_backlog!(ctx.buffer, &(&1.batches == 0))
+
+      # The idle wait it replaced sends nothing more.
+      Uplink.nudge(uplink)
+      refute_receive {:request, _}, 200
+    end
+
+    test "an uplink backing off after a failed send waits out its backoff", ctx do
+      record!(ctx.buffer, 1)
+      server = server!([TestServer.status(503)])
+
+      uplink =
+        uplink!(ctx.buffer, TestServer.port(server), backoff_ms: %{min: 60_000, max: 60_000})
+
+      assert %{json: %{"readings" => [_, _]}} = request!()
+
+      Uplink.nudge(uplink)
+      refute_receive {:request, _}, 200
+    end
+  end
 end

@@ -144,10 +144,22 @@ defmodule Alavi.Status.Snapshot do
   # contract: test/alavi/status_test.exs "Snapshot.round/2"
   @doc "One poller round's events, all from one endpoint; an endpoint not in the config is ignored."
   @spec round(t(), [Reading.t() | MissedRead.t(), ...]) :: t()
-  def round(%__MODULE__{} = snapshot, [%{endpoint: %{host: host, port: port}} | _] = events) do
+  def round(%__MODULE__{} = snapshot, [_ | _] = events),
+    do: on_endpoint(snapshot, events, &round_of/2)
+
+  # contract: test/alavi/status_test.exs "Snapshot.on_demand/2"
+  @doc """
+  A read on demand's events, all from one endpoint: its meters' values and
+  failures, as a round's, but no round, which stays a whole chain's.
+  """
+  @spec on_demand(t(), [Reading.t() | MissedRead.t(), ...]) :: t()
+  def on_demand(%__MODULE__{} = snapshot, [_ | _] = events),
+    do: on_endpoint(snapshot, events, &read_of/2)
+
+  defp on_endpoint(snapshot, [%{endpoint: %{host: host, port: port}} | _] = events, update) do
     endpoints =
       Enum.map(snapshot.endpoints, fn
-        %{host: ^host, port: ^port} = endpoint -> round_of(endpoint, events)
+        %{host: ^host, port: ^port} = endpoint -> update.(endpoint, events)
         endpoint -> endpoint
       end)
 
@@ -256,15 +268,23 @@ defmodule Alavi.Status.Snapshot do
     }
 
   defp round_of(endpoint, events) do
-    by_unit = Enum.group_by(events, & &1.unit_id)
-    outcomes = by_unit |> Enum.sort() |> Enum.map(fn {unit, evs} -> outcome(unit, evs) end)
+    outcomes =
+      events
+      |> Enum.group_by(& &1.unit_id)
+      |> Enum.sort()
+      |> Enum.map(fn {unit, evs} -> outcome(unit, evs) end)
+
     round = %{at: events |> List.last() |> Map.fetch!(:timestamp) |> iso(), units: outcomes}
+    %{read_of(endpoint, events) | rounds: Enum.take([round | endpoint.rounds], @rounds)}
+  end
+
+  defp read_of(endpoint, events) do
+    by_unit = Enum.group_by(events, & &1.unit_id)
     missed = events |> Enum.filter(&match?(%MissedRead{}, &1)) |> Enum.reverse()
 
     %{
       endpoint
-      | rounds: Enum.take([round | endpoint.rounds], @rounds),
-        failures: Enum.take(Enum.map(missed, &failure/1) ++ endpoint.failures, @failures),
+      | failures: Enum.take(Enum.map(missed, &failure/1) ++ endpoint.failures, @failures),
         meters: Enum.map(endpoint.meters, &meter_of(&1, Map.get(by_unit, &1.unit_id)))
     }
   end

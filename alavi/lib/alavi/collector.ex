@@ -13,7 +13,8 @@ defmodule Alavi.Collector do
 
   @typedoc """
   `uplink` is the uplink's options but `buffer` (the collector supplies it), or
-  `:none` for no uplink (tests that inspect the buffer). `clock_status` is the
+  `:none` for no uplink (tests that inspect the buffer); the pollers nudge it
+  after a read on demand only if it has a `name`. `clock_status` is the
   options of an `Alavi.Clock.Windows` to start first, or `:none`; the buffer's
   `clock_status` must read it if there is one.
   """
@@ -66,19 +67,24 @@ defmodule Alavi.Collector do
     sink = {Buffer, Keyword.fetch!(buffer, :name)}
     status = Keyword.fetch!(opts, :status)
 
+    {uplink, nudge} =
+      case Keyword.fetch!(opts, :uplink) do
+        :none ->
+          {[], :none}
+
+        uplink ->
+          {[{Uplink, uplink ++ [buffer: Keyword.fetch!(buffer, :name), status: status]}],
+           Keyword.get(uplink, :name, :none)}
+      end
+
     pollers = [
       config: Keyword.fetch!(opts, :config),
       sink: sink,
       clock: Keyword.fetch!(opts, :clock),
       raw_log: Keyword.fetch!(opts, :raw_log),
-      status: status
+      status: status,
+      uplink: nudge
     ]
-
-    uplink =
-      case Keyword.fetch!(opts, :uplink) do
-        :none -> []
-        uplink -> [{Uplink, uplink ++ [buffer: Keyword.fetch!(buffer, :name), status: status]}]
-      end
 
     watch =
       case Keyword.fetch!(opts, :clock_status) do
@@ -114,7 +120,8 @@ defmodule Alavi.Collector do
          clock: &DateTime.utc_now/0,
          idle_ms: uplink.idle_ms,
          timeout_ms: uplink.timeout_ms,
-         backoff_ms: uplink.backoff_ms
+         backoff_ms: uplink.backoff_ms,
+         name: Uplink
        ]}
     end
   end

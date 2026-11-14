@@ -153,6 +153,30 @@ defmodule Alavi.StatusTest do
     end
   end
 
+  describe "Snapshot.on_demand/2" do
+    test "sets the meters' values and failures as a round does, but adds no round" do
+      snapshot =
+        Snapshot.on_demand(snapshot(), [
+          reading(1, "active_energy_import", "42.000"),
+          missed(1, "active_energy_export", :timeout)
+        ])
+
+      [endpoint] = snapshot.endpoints
+      assert endpoint.rounds == []
+      assert [%{unit_id: 1, register_key: "active_energy_export"}] = endpoint.failures
+
+      meter = meter_view(snapshot, 1)
+      assert %{serial: "SIM-1", missed_reads: 1} = meter
+      assert hd(meter.registers).value == "42.000"
+    end
+
+    test "leaves the last round as it was" do
+      round = Snapshot.round(snapshot(), [missed(3, "active_energy_import", :timeout)])
+      after_read = Snapshot.on_demand(round, [reading(1, "active_energy_import", "1")])
+      assert hd(after_read.endpoints).rounds == hd(round.endpoints).rounds
+    end
+  end
+
   describe "Snapshot.firmware/2" do
     defp names(unit, endpoint \\ %{host: "127.0.0.1", port: 5020}) do
       %FirmwareRead{
@@ -358,6 +382,17 @@ defmodule Alavi.StatusTest do
       assert [%{line: "alavi poller " <> _}] = snapshot.raw_lines
       assert %{result: "stored", batch_id: "b-1"} = snapshot.uplink
       assert snapshot.clock.source == "rtc"
+    end
+
+    test "a read on demand updates its meters, not the rounds", %{tmp_dir: dir} do
+      {_pid, status} = start_status!(dir, :no_such_buffer, 60_000)
+
+      Status.on_demand(status, [reading(3, "active_energy_import", "5")])
+      snapshot = Status.read(status)
+
+      assert meter_view(snapshot, 3).serial == "SIM-3"
+      assert hd(snapshot.endpoints).rounds == []
+      assert :ok = Status.on_demand(status, [])
     end
 
     test "a cast to a status that is not running is dropped" do

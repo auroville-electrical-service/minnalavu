@@ -24,7 +24,7 @@ defmodule Alavi.Poller.Schedule do
 
   # Job kinds, highest priority first. A round not yet started ranks as its
   # kind, below any queued job of the same rank.
-  @ranks [:poll_round]
+  @ranks [:read_on_demand, :poll_round]
 
   @spec next([Job.t()], integer(), due(), [Meter.t(), ...]) :: decision()
   def next(queue, now, due, meters) do

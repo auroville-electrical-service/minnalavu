@@ -12,6 +12,13 @@ defmodule Alavi.Poller do
   longer than a meter's. `Alavi.Poller.Schedule` chooses, from the queue of
   jobs, what each message does. One wake-up is outstanding at a time: a
   `:step` message, or the poll timer while nothing is due.
+
+  A read on demand (`read_now/2`) is a job of its own, run before the rest of
+  a round under way, which then resumes where it stopped; it leaves when each
+  meter is next due as it was. Its events go to the status page as reads, not
+  as a round (`Alavi.Status.on_demand/2`), so that a round's outcomes stay a
+  whole chain's, and once they are recorded the uplink is nudged
+  (`Alavi.Uplink.nudge/1`).
   """
 
   use GenServer
@@ -19,7 +26,7 @@ defmodule Alavi.Poller do
   require Logger
 
   alias Alavi.Config.{Endpoint, Meter}
-  alias Alavi.{Decode, FirmwareRead, MissedRead, Reading, Sink, Status}
+  alias Alavi.{Decode, FirmwareRead, MissedRead, Reading, Sink, Status, Uplink}
   alias Alavi.Modbus.Client
   alias Alavi.Poller.{Job, Names, Policy, RawLog, Schedule}
   alias Alavi.Profile.{Firmware, Identity, Register}
@@ -33,10 +40,22 @@ defmodule Alavi.Poller do
           | {:clock, clock()}
           | {:raw_log, RawLog.limits()}
           | {:status, GenServer.server()}
+          | {:uplink, GenServer.server() | :none}
 
   # contract: test/alavi/poller_test.exs "start_link/1"
   @spec start_link([option()]) :: GenServer.on_start()
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
+
+  # contract: test/alavi/read_on_demand_test.exs "read_now/2"
+  @doc """
+  Queue a read on demand of the meters with these unit IDs. It runs next,
+  once the step under way ends, and the caller is then sent
+  `{:alavi_read, ref, events}`: the readings and missed reads it recorded,
+  in the order read. The reply waits for that step.
+  """
+  @spec read_now(GenServer.server(), [1..247]) ::
+          {:ok, reference()} | {:error, :no_units | {:unknown_units, [term()]}}
+  def read_now(server, units), do: GenServer.call(server, {:read_now, units}, :infinity)
 
   @spec child_spec([option()]) :: Supervisor.child_spec()
   def child_spec(opts) do
@@ -50,11 +69,22 @@ defmodule Alavi.Poller do
     sink = Keyword.fetch!(opts, :sink)
     clock = Keyword.fetch!(opts, :clock)
     raw_log = RawLog.new("#{endpoint.host}:#{endpoint.port}", Keyword.fetch!(opts, :raw_log))
-    start(endpoint, {sink, Keyword.fetch!(opts, :status)}, clock, raw_log)
+    feeds = {sink, Keyword.fetch!(opts, :status), Keyword.fetch!(opts, :uplink)}
+    start(endpoint, feeds, clock, raw_log)
   end
 
   @impl true
   def handle_continue(:poll, state), do: {:noreply, wake(state)}
+
+  @impl true
+  def handle_call({:read_now, units}, {pid, _tag}, state) do
+    ref = make_ref()
+
+    case Job.read_on_demand(state.endpoint.meters, units, now(), {pid, ref}) do
+      {:ok, job} -> queued(%{state | queue: state.queue ++ [job]}, ref)
+      {:error, _reason} = error -> {:reply, error, state}
+    end
+  end
 
   @impl true
   def handle_info(:step, state), do: {:noreply, wake(state)}
@@ -71,13 +101,14 @@ defmodule Alavi.Poller do
 
   defp start(%Endpoint{polled_by_other_system: true}, _feeds, _clock, _raw_log), do: :ignore
 
-  defp start(endpoint, {sink, status}, clock, raw_log) do
+  defp start(endpoint, {sink, status, uplink}, clock, raw_log) do
     now = now()
 
     state = %{
       endpoint: endpoint,
       sink: sink,
       status: status,
+      uplink: uplink,
       clock: clock,
       raw_log: raw_log,
       client: nil,
@@ -92,6 +123,11 @@ defmodule Alavi.Poller do
 
     {:ok, state, {:continue, :poll}}
   end
+
+  # Waiting on the timer, wake now and leave the timer stale; with no timer a
+  # `:step` is already on its way, and a second would break the one wake-up.
+  defp queued(%{timer: nil} = state, ref), do: {:reply, {:ok, ref}, state}
+  defp queued(state, ref), do: {:reply, {:ok, ref}, %{state | timer: nil}, {:continue, :poll}}
 
   defp wake(state), do: state |> act() |> rearm()
 
@@ -128,7 +164,7 @@ defmodule Alavi.Poller do
     state = step(Job.next(job), %{state | job: job})
 
     case Job.next(state.job) do
-      :done -> end_round(state)
+      :done -> done(state)
       _step -> %{state | queue: [state.job | state.queue], job: nil}
     end
   end
@@ -143,10 +179,21 @@ defmodule Alavi.Poller do
     %{state | job: Job.named(state.job)}
   end
 
-  defp end_round(%{job: %Job{} = job} = state) do
+  defp done(%{job: %Job{kind: :poll_round} = job} = state) do
     Status.round(state.status, Job.events(job))
     %{state | due: Schedule.after_round(state.due, job), job: nil}
   end
+
+  defp done(%{job: %Job{kind: :read_on_demand, requester: {pid, ref}} = job} = state) do
+    events = Job.events(job)
+    Status.on_demand(state.status, events)
+    nudge(state.uplink)
+    send(pid, {:alavi_read, ref, events})
+    %{state | job: nil}
+  end
+
+  defp nudge(:none), do: :ok
+  defp nudge(uplink), do: Uplink.nudge(uplink)
 
   # The meter, with what it reported, when identified, for its names step.
   defp poll_meter(meter, state) do
