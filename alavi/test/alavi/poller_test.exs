@@ -136,23 +136,20 @@ defmodule Alavi.PollerTest do
     end
 
     test "an unreachable endpoint is missed, and polling resumes once it is back" do
-      port = free_port()
+      {sim, port} = start_sim!(:tcp)
+      :ok = Simulator.offline(sim)
       meters = [meter(1, "elite_440")]
       start_pollers!([endpoint(port, "tcp", meters, %{"interval_ms" => 10})])
 
       assert [first | rest] = recorded!()
-      refused = refused()
-      assert %MissedRead{reason: {:unreachable, {:socket, ^refused}}, attempts: 1} = first
+      assert %MissedRead{reason: {:unreachable, {:socket, :timeout}}, attempts: 1} = first
       assert Enum.all?(rest, &match?(%MissedRead{attempts: 0}, &1))
 
-      sim = start_sim!(:tcp, port: port) |> elem(0)
+      :ok = Simulator.online(sim)
       await_unit!(1, &match?([%Reading{} | _], &1))
 
       :ok = GenServer.stop(sim)
       await_unit!(1, &match?([%MissedRead{} | _], &1))
-
-      start_sim!(:tcp, port: port)
-      await_unit!(1, &match?([%Reading{} | _], &1))
     end
 
     test "a meter's own interval overrides its endpoint's" do

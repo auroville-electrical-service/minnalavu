@@ -35,8 +35,7 @@ defmodule Alavi.Status.WebTest do
     ]
 
     start_supervised!({Status, opts})
-    port = free_port()
-    start_supervised!({Web, port: port, status: name, root: dir})
+    port = {Web, port: 0, status: name, root: dir} |> start_supervised!() |> web_port()
     :ok = eventually!(fn -> Status.read(name).buffer != nil end)
     {name, port}
   end
@@ -252,8 +251,8 @@ defmodule Alavi.Status.WebTest do
     end
 
     test "a status that is not running gets 503, and the server goes on", %{tmp_dir: dir} do
-      port = free_port()
-      pid = start_supervised!({Web, port: port, status: :no_such_status, root: dir})
+      pid = start_supervised!({Web, port: 0, status: :no_such_status, root: dir})
+      port = web_port(pid)
       assert {503, _, _} = request(port, "GET", "/")
       assert Process.alive?(pid)
     end

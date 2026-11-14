@@ -374,8 +374,6 @@ defmodule Alavi.StatusTest do
 
   describe "Supervisor.start_link/1" do
     test "starts the status and its page, which restart on their own", %{tmp_dir: dir} do
-      port = free_port()
-
       opts = [
         status: [
           config: config(),
@@ -387,7 +385,7 @@ defmodule Alavi.StatusTest do
           tick_ms: 60_000,
           name: :"status_#{System.unique_integer([:positive])}"
         ],
-        port: port
+        port: 0
       ]
 
       sup = start_supervised!({Status.Supervisor, opts})
@@ -407,6 +405,7 @@ defmodule Alavi.StatusTest do
       assert {Status.Web, ^web, _, _} =
                List.keyfind(Supervisor.which_children(sup), Status.Web, 0)
 
+      port = web_port(web)
       {:ok, conn} = :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false])
       :ok = :gen_tcp.send(conn, "GET / HTTP/1.1\r\nHost: localhost:#{port}\r\n\r\n")
       assert {:ok, "HTTP/1.1 200 OK" <> _} = :gen_tcp.recv(conn, 0, 5_000)
@@ -414,7 +413,7 @@ defmodule Alavi.StatusTest do
 
     test "a status that cannot start is logged, and ignored", %{tmp_dir: dir} do
       Process.flag(:trap_exit, true)
-      opts = [status: [file: Path.join(dir, "status.json"), name: :no_status], port: free_port()]
+      opts = [status: [file: Path.join(dir, "status.json"), name: :no_status], port: 0]
 
       log = capture_log(fn -> assert :ignore = Status.Supervisor.start_link(opts) end)
       assert log =~ "collecting goes on without it"

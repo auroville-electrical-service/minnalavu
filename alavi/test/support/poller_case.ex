@@ -174,12 +174,12 @@ defmodule Alavi.PollerCase do
   defp refused({:win32, _}), do: :timeout
   defp refused(_os), do: :econnrefused
 
-  @doc "A port with nothing listening on it (for now)."
-  @spec free_port() :: :inet.port_number()
-  def free_port do
-    {:ok, listen} = :gen_tcp.listen(0, ip: {127, 0, 0, 1})
-    {:ok, port} = :inet.port(listen)
-    :ok = :gen_tcp.close(listen)
+  @doc "The port of a status page started on port 0, read from its httpd's child id."
+  @spec web_port(pid()) :: :inet.port_number()
+  def web_port(web) do
+    [{{:httpd_instance_sup, _address, port, _profile}, _, _, _}] =
+      Supervisor.which_children(web)
+
     port
   end
 end
