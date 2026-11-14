@@ -267,6 +267,38 @@
       "rest": ""
     },
     {
+      "why": "a gateway's two-byte reply, the code 0B with no function code, under another unit, is unexpected",
+      "framing": "tcp",
+      "expected": {
+        "transaction_id": 7,
+        "unit_id": 1,
+        "table": "holding",
+        "count": 2
+      },
+      "buffer": "000700000002020b",
+      "skipped": [],
+      "result": {
+        "error": "unexpected_response"
+      },
+      "rest": "000700000002020b"
+    },
+    {
+      "why": "a gateway's two-byte reply under the unit asked for is malformed",
+      "framing": "tcp",
+      "expected": {
+        "transaction_id": 7,
+        "unit_id": 1,
+        "table": "holding",
+        "count": 2
+      },
+      "buffer": "000700000002010b",
+      "skipped": [],
+      "result": {
+        "error": "malformed_response"
+      },
+      "rest": ""
+    },
+    {
       "why": "a whole reply",
       "framing": "rtu_over_tcp",
       "expected": {
