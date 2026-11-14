@@ -29,12 +29,28 @@ defmodule Alavi.Profile do
     end
   end
 
+  # Lists the directory rather than globbing it: `Path.wildcard` reads `\` as an
+  # escape, so a Windows path written with backslashes would match nothing.
   @spec load_dir(Path.t()) :: {:ok, %{String.t() => t()}} | {:error, String.t()}
   def load_dir(dir) do
-    dir
-    |> Path.join("*.json")
-    |> Path.wildcard()
-    |> Enum.reduce_while({:ok, %{}}, fn path, {:ok, acc} ->
+    with {:ok, names} <- list(dir) do
+      names
+      |> Enum.filter(&String.ends_with?(&1, ".json"))
+      |> Enum.sort()
+      |> Enum.map(&Path.join(dir, &1))
+      |> load_all()
+    end
+  end
+
+  defp list(dir) do
+    case File.ls(dir) do
+      {:ok, names} -> {:ok, names}
+      {:error, reason} -> {:error, "#{dir}: #{:file.format_error(reason)}"}
+    end
+  end
+
+  defp load_all(paths) do
+    Enum.reduce_while(paths, {:ok, %{}}, fn path, {:ok, acc} ->
       case load(path) do
         {:ok, %{name: name}} when is_map_key(acc, name) ->
           {:halt, {:error, "#{path}: profile #{name} is defined in another file too"}}

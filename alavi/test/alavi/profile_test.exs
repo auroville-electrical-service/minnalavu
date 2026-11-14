@@ -5,6 +5,27 @@ defmodule Alavi.ProfileTest do
 
   @contract Path.expand("../../../contract", __DIR__)
 
+  describe "load_dir/1" do
+    @describetag :tmp_dir
+
+    test "loads every .json file, from a path holding characters a glob would read as pattern",
+         %{tmp_dir: tmp} do
+      dir = Path.join(tmp, ~S"profiles \ [1] {a}")
+      File.mkdir_p!(dir)
+      File.cp!(Path.join(@contract, "profiles/elite_440.json"), Path.join(dir, "elite_440.json"))
+      File.write!(Path.join(dir, "README.txt"), "not a profile")
+
+      assert {:ok, profiles} = Profile.load_dir(dir)
+      assert Map.keys(profiles) == ["elite_440"]
+    end
+
+    test "a directory that cannot be read is an error, not an empty set", %{tmp_dir: tmp} do
+      dir = Path.join(tmp, "missing")
+      assert {:error, message} = Profile.load_dir(dir)
+      assert message =~ dir
+    end
+  end
+
   describe "parse/1" do
     test "every contract profile parses, and every entry names a source or is marked placeholder" do
       for path <- Path.wildcard(Path.join(@contract, "profiles/*.json")) do
