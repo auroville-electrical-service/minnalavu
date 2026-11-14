@@ -1,0 +1,175 @@
+defmodule Alavi.Poller.FirmwareTest do
+  use ExUnit.Case, async: true
+
+  import Alavi.PollerCase
+  import ExUnit.CaptureLog
+
+  alias Alavi.{FirmwareRead, MissedRead, Reading}
+  alias Simulator.Meter
+
+  @import "active_energy_import"
+  @start ~U[2026-11-01 00:00:00Z]
+  @day_s 86_400
+  # The Elite 440's software name, as its profile places it.
+  @software_440 4
+
+  defp sim_meter(unit_id, profile, names \\ %{}) do
+    meter =
+      Meter.new(unit_id, Simulator.Profile.load!(profile), %{@import => Decimal.new("5.000")})
+
+    Enum.reduce(names, meter, fn {name, value}, m -> Meter.name(m, name, value) end)
+  end
+
+  # The test process stands in for the status, so it sees each names read
+  # (`Status.firmware/2`) and each round's end (`Status.round/2`).
+  defp poll!(sim_meters, meters, sink \\ Alavi.TestSink) do
+    {sim, port} = start_chain!(:tcp, sim_meters)
+    {:ok, clock} = Agent.start_link(fn -> @start end)
+
+    opts = [
+      config: config!([endpoint(port, "tcp", meters, %{"interval_ms" => 10})]),
+      sink: {sink, self()},
+      clock: fn -> Agent.get(clock, & &1) end,
+      raw_log: raw_log(),
+      status: self()
+    ]
+
+    start_supervised!({Alavi.Pollers, opts})
+    {sim, clock}
+  end
+
+  # The sink's and the status's messages for the next round, in the order sent.
+  defp round! do
+    receive do
+      {:"$gen_cast", {:round, _events}} -> []
+      {:"$gen_cast", {:raw_lines, _lines}} -> round!()
+      {:"$gen_cast", {:firmware, read}} -> [{:names_read, read} | round!()]
+      {:firmware, read} -> [{:sent, read} | round!()]
+      {:recorded, events} -> [{:recorded, events} | round!()]
+    after
+      2_000 -> flunk("no round ended")
+    end
+  end
+
+  defp names_read?(round), do: Enum.any?(round, &match?({:names_read, _}, &1))
+  defp sent(round), do: for({:sent, read} <- round, do: read)
+
+  defp advance(clock, seconds), do: Agent.update(clock, &DateTime.add(&1, seconds))
+
+  defp until!(check, tries \\ 20) do
+    round = round!()
+
+    cond do
+      check.(round) -> round
+      tries > 1 -> until!(check, tries - 1)
+      true -> flunk("no round matched")
+    end
+  end
+
+  describe "start_link/1" do
+    test "the first round reads the names after the readings, and sends them" do
+      poll!([sim_meter(1, "elite_440")], [meter(1, "elite_440")])
+
+      assert [{:recorded, readings}, {:names_read, read}, {:sent, read}] = round!()
+      assert Enum.all?(readings, &match?(%Reading{}, &1))
+
+      assert %FirmwareRead{
+               unit_id: 1,
+               meter_serial: "SIM-1",
+               product_code: "ELITE440-445",
+               timestamp: @start,
+               software: "SIM-SW",
+               firmware_1: "SIM-F1",
+               firmware_2: "SIM-F2",
+               modbus_version: "0100"
+             } = read
+    end
+
+    test "the names are not read again within a day, then read, and sent only if changed" do
+      {sim, clock} = poll!([sim_meter(1, "elite_440")], [meter(1, "elite_440")])
+      assert names_read?(round!())
+
+      # Read now, the changed name would be sent.
+      :ok = Simulator.name(sim, 1, :software, "SIM-SW2")
+      advance(clock, @day_s - 1)
+      for _ <- 1..3, do: refute(names_read?(round!()))
+
+      advance(clock, 1)
+      round = until!(&names_read?/1)
+      assert [%FirmwareRead{software: "SIM-SW2"}] = sent(round)
+
+      advance(clock, @day_s)
+      round = until!(&names_read?/1)
+      assert sent(round) == []
+    end
+
+    test "a new serial reads the names in its round, and sends them under it" do
+      capture_log(fn ->
+        {sim, _clock} = poll!([sim_meter(1, "elite_440")], [meter(1, "elite_440")])
+        assert names_read?(round!())
+        refute names_read?(round!())
+
+        :ok = Simulator.identify(sim, 1, :serial, "SWAP-1")
+        round = until!(&names_read?/1)
+        assert [{:recorded, [%Reading{meter_serial: "SWAP-1"} | _]} | _] = round
+        assert [%FirmwareRead{meter_serial: "SWAP-1", software: "SIM-SW"}] = sent(round)
+      end)
+    end
+
+    test "a failed names read leaves the readings as they were, and is tried next round" do
+      {sim, _clock} = poll!([sim_meter(1, "elite_440")], [meter(1, "elite_440")])
+      assert [{:recorded, expected} | _] = round!()
+      Simulator.faults(sim, silent_reads: [{1, @software_440}])
+
+      log =
+        capture_log(fn ->
+          :ok = Simulator.identify(sim, 1, :serial, "SWAP-1")
+
+          [{:recorded, readings}] =
+            until!(&match?([{:recorded, [%{meter_serial: "SWAP-1"} | _]}], &1))
+
+          assert Enum.all?(readings, &match?(%Reading{}, &1))
+          refute Enum.any?(readings, &match?(%MissedRead{}, &1))
+
+          assert Enum.map(readings, &{&1.register_key, &1.value}) ==
+                   Enum.map(expected, &{&1.register_key, &1.value})
+
+          assert [{:recorded, [%Reading{} | _]}] = round!()
+          Simulator.clear_faults(sim)
+          until!(&match?([{:recorded, _}, {:names_read, _}, {:sent, _}], &1))
+        end)
+
+      failed = "unit 1: firmware names not read, again next round: :timeout"
+      assert length(String.split(log, failed)) >= 3
+    end
+
+    test "a name the meter refuses or leaves blank is sent as null" do
+      log =
+        capture_log(fn ->
+          poll!(
+            [sim_meter(3, "elite_500", firmware_2: :absent, software: "")],
+            [meter(3, "elite_500")]
+          )
+
+          assert [{:recorded, _}, {:names_read, read}, {:sent, read}] = round!()
+
+          assert %FirmwareRead{
+                   software: nil,
+                   firmware_1: "SIM-F1",
+                   firmware_2: nil,
+                   modbus_version: "0100"
+                 } = read
+        end)
+
+      assert log =~ "firmware name software not given, sent as null: {:decode, :empty}"
+      assert log =~ "firmware name firmware_2 not given, sent as null: {:exception, 2}"
+    end
+
+    test "names the sink refused are read and sent again next round" do
+      capture_log(fn ->
+        poll!([sim_meter(1, "elite_440")], [meter(1, "elite_440")], Alavi.RefusingSink)
+        for _ <- 1..2, do: assert([{:recorded, _}, {:names_read, _}, {:sent, _}] = round!())
+      end)
+    end
+  end
+end

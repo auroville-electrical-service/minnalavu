@@ -22,7 +22,7 @@ defmodule Alavi.Status do
 
   require Logger
 
-  alias Alavi.{Clock, Config, MissedRead, Reading, Settings}
+  alias Alavi.{Clock, Config, FirmwareRead, MissedRead, Reading, Settings}
   alias Alavi.Status.Snapshot
 
   @type option ::
@@ -63,6 +63,11 @@ defmodule Alavi.Status do
   @spec round(GenServer.server(), [Reading.t() | MissedRead.t()]) :: :ok
   def round(_server, []), do: :ok
   def round(server, events), do: GenServer.cast(server, {:round, events})
+
+  # contract: test/alavi/status_test.exs "feeds"
+  @doc "A meter's names, each time the poller reads them."
+  @spec firmware(GenServer.server(), FirmwareRead.t()) :: :ok
+  def firmware(server, %FirmwareRead{} = read), do: GenServer.cast(server, {:firmware, read})
 
   # contract: test/alavi/status_test.exs "feeds"
   @doc "Raw-bytes lines as the poller logged them."
@@ -115,6 +120,9 @@ defmodule Alavi.Status do
   @impl true
   def handle_cast({:round, events}, state),
     do: {:noreply, update(state, &Snapshot.round(&1, events))}
+
+  def handle_cast({:firmware, read}, state),
+    do: {:noreply, update(state, &Snapshot.firmware(&1, read))}
 
   def handle_cast({:raw_lines, lines}, state),
     do: {:noreply, update(state, &Snapshot.raw_lines(&1, lines, state.clock.()))}

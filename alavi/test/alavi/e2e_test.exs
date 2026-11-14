@@ -105,8 +105,9 @@ defmodule Alavi.EndToEndTest do
       sql!("SELECT count(*) FROM store.#{table} WHERE collector_id = '#{id}'")
     end
 
-    await!("6 readings and 2 missed reads stored", fn ->
-      count.("readings") >= 6 and count.("missed_reads") >= 2
+    await!("6 readings, 2 missed reads and 2 firmware reads stored", fn ->
+      count.("readings") >= 6 and count.("missed_reads") >= 2 and
+        count.("firmware_reads") >= 2
     end)
 
     await!("the buffer emptied", fn -> Buffer.backlog(Buffer).events == 0 end)
@@ -147,6 +148,31 @@ defmodule Alavi.EndToEndTest do
                  "meter_serial" => nil,
                  "reason" => "exception",
                  "exception_code" => 11
+               },
+               &1
+             )
+           )
+
+    names =
+      rows!("""
+      SELECT meter_serial, product_code, unit_id, software, firmware_1, firmware_2, modbus_version
+      FROM store.firmware_reads WHERE collector_id = '#{id}' ORDER BY unit_id
+      """)
+
+    # Unit 9 gave no serial, so it has no names record; the others' names as the meters report.
+    assert [
+             %{"unit_id" => 1, "meter_serial" => "SIM-1", "product_code" => "ELITE440-445"},
+             %{"unit_id" => 3, "meter_serial" => ^read_serial, "product_code" => "E500C-5102"}
+           ] = names
+
+    assert Enum.all?(
+             names,
+             &match?(
+               %{
+                 "software" => "SIM-SW",
+                 "firmware_1" => "SIM-F1",
+                 "firmware_2" => "SIM-F2",
+                 "modbus_version" => "0100"
                },
                &1
              )

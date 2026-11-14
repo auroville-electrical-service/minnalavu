@@ -4,7 +4,7 @@ defmodule Alavi.StatusTest do
   import Alavi.PollerCase
   import ExUnit.CaptureLog
 
-  alias Alavi.{Buffer, Clock, MissedRead, Reading, Status}
+  alias Alavi.{Buffer, Clock, FirmwareRead, MissedRead, Reading, Status}
   alias Alavi.Status.Snapshot
 
   @moduletag :tmp_dir
@@ -150,6 +150,43 @@ defmodule Alavi.StatusTest do
       }
 
       assert Snapshot.round(snapshot(), [event]) == snapshot()
+    end
+  end
+
+  describe "Snapshot.firmware/2" do
+    defp names(unit, endpoint \\ %{host: "127.0.0.1", port: 5020}) do
+      %FirmwareRead{
+        endpoint: endpoint,
+        unit_id: unit,
+        meter_serial: "SIM-#{unit}",
+        product_code: "ELITE440-445",
+        timestamp: @at,
+        software: "SIM-SW",
+        firmware_1: "SIM-F1",
+        firmware_2: nil,
+        modbus_version: "0100"
+      }
+    end
+
+    test "sets the meter's names as last read, and only that meter's" do
+      snapshot = Snapshot.firmware(snapshot(), names(3))
+
+      assert meter_view(snapshot, 3).firmware == %{
+               read_at: "2026-11-14T09:59:00.123Z",
+               software: "SIM-SW",
+               firmware_1: "SIM-F1",
+               firmware_2: nil,
+               modbus_version: "0100"
+             }
+
+      assert meter_view(snapshot, 1).firmware == nil
+    end
+
+    test "names from an endpoint or unit not in the config change nothing" do
+      assert Snapshot.firmware(snapshot(), names(1, %{host: "10.9.9.9", port: 502})) ==
+               snapshot()
+
+      assert Snapshot.firmware(snapshot(), names(7)) == snapshot()
     end
   end
 

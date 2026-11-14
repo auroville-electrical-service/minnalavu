@@ -4,7 +4,7 @@ defmodule Alavi.Status.WebTest do
   import Alavi.PollerCase
   import ExUnit.CaptureLog
 
-  alias Alavi.{Reading, Settings, Status}
+  alias Alavi.{FirmwareRead, Reading, Settings, Status}
   alias Alavi.Status.{Snapshot, Web}
 
   @moduletag :tmp_dir
@@ -129,6 +129,29 @@ defmodule Alavi.Status.WebTest do
       assert body =~ "1234.500"
       assert [_one] = Regex.scan(~r/MISMATCH/, body)
       refute body =~ ~r/<(form|button|input|script)/i
+    end
+
+    test "shows each meter's names as last read, escaped, and those not given", %{tmp_dir: dir} do
+      {status, port} = start!(dir)
+
+      Status.firmware(status, %FirmwareRead{
+        endpoint: %{host: "127.0.0.1", port: 5020},
+        unit_id: 1,
+        meter_serial: "SIM-1",
+        product_code: "ELITE440-445",
+        timestamp: @now,
+        software: @hostile,
+        firmware_1: "SIM-F1",
+        firmware_2: nil,
+        modbus_version: "0100"
+      })
+
+      :ok = eventually!(fn -> hd(hd(Status.read(status).endpoints).meters).firmware != nil end)
+      {200, _headers, body} = request(port, "GET", "/")
+
+      refute body =~ "<script"
+      assert body =~ "&lt;script&gt;alert(1)&lt;/script&gt; / SIM-F1 / "
+      assert body =~ ~s|<span class="note">not given</span> / 0100 at 2026-11-14T10:00:00Z|
     end
 
     test "answers with headers that keep it from being cached, sniffed or framed", %{tmp_dir: dir} do

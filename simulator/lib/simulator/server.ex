@@ -55,25 +55,14 @@ defmodule Simulator.Server do
     {:reply, {response, state.faults}, state}
   end
 
-  def handle_call({:put, unit_id, key, value}, _from, state) do
-    meters =
-      Enum.map(state.meters, fn
-        %Meter{unit_id: ^unit_id} = meter -> Meter.put(meter, key, value)
-        meter -> meter
-      end)
+  def handle_call({:put, unit_id, key, value}, _from, state),
+    do: {:reply, :ok, change(state, unit_id, &Meter.put(&1, key, value))}
 
-    {:reply, :ok, %{state | meters: meters}}
-  end
+  def handle_call({:identify, unit_id, check, value}, _from, state),
+    do: {:reply, :ok, change(state, unit_id, &Meter.identify(&1, check, value))}
 
-  def handle_call({:identify, unit_id, check, value}, _from, state) do
-    meters =
-      Enum.map(state.meters, fn
-        %Meter{unit_id: ^unit_id} = meter -> Meter.identify(meter, check, value)
-        meter -> meter
-      end)
-
-    {:reply, :ok, %{state | meters: meters}}
-  end
+  def handle_call({:name, unit_id, name, value}, _from, state),
+    do: {:reply, :ok, change(state, unit_id, &Meter.name(&1, name, value))}
 
   def handle_call({:faults, changes}, _from, state),
     do: {:reply, :ok, %{state | faults: struct!(state.faults, changes)}}
@@ -87,6 +76,16 @@ defmodule Simulator.Server do
 
   @impl true
   def terminate(_reason, state), do: :gen_tcp.close(state.listen)
+
+  defp change(state, unit_id, change) do
+    meters =
+      Enum.map(state.meters, fn
+        %Meter{unit_id: ^unit_id} = meter -> change.(meter)
+        meter -> meter
+      end)
+
+    %{state | meters: meters}
+  end
 
   defp accept(listen, server) do
     case :gen_tcp.accept(listen) do

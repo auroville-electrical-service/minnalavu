@@ -1,6 +1,6 @@
 defmodule Alavi.Buffer.Codec do
   @moduledoc false
-  # The on-disk format of a buffer segment, version 2. Pure: binaries in and out.
+  # The on-disk format of a buffer segment, version 3. Pure: binaries in and out.
   #
   #     segment = magic, header frame, record frame*
   #     magic   = "ALAVIBUF", format version (1 byte)
@@ -9,10 +9,15 @@ defmodule Alavi.Buffer.Codec do
   # The header payload is `{id, clock}`; each record payload is the events of
   # one `Alavi.Buffer.record/2` call. Payloads are plain tuples, not structs, so
   # a later release still decodes them.
+  #
+  # Version 3 adds firmware reads to version 2's events and still reads
+  # version 2, so an upgrade sends what was buffered; a release that knows only
+  # version 2 sets a version 3 segment aside rather than crash on it.
 
-  alias Alavi.{Clock, MissedRead, Reading, Sink}
+  alias Alavi.{Clock, FirmwareRead, MissedRead, Reading, Sink}
 
-  @magic <<"ALAVIBUF", 2>>
+  @magic <<"ALAVIBUF", 3>>
+  @readable [2, 3]
 
   @typedoc "`size` is the length of the longest valid prefix."
   @type parsed :: %{
@@ -31,7 +36,7 @@ defmodule Alavi.Buffer.Codec do
 
   # contract: test/alavi/buffer_test.exs "start_link/1"
   @spec parse(binary()) :: {:ok, parsed()} | :error
-  def parse(<<@magic, rest::binary>> = segment) do
+  def parse(<<"ALAVIBUF", version, rest::binary>> = segment) when version in @readable do
     with {:ok, {id, clock}, rest} <- next_frame(rest) do
       {records, tail} = frames(rest, [])
 
@@ -93,6 +98,11 @@ defmodule Alavi.Buffer.Codec do
      m.register_key, iso(m.timestamp), m.reason, m.attempts, m.raw_words}
   end
 
+  defp encode_event(%FirmwareRead{} = f) do
+    {:firmware, f.endpoint.host, f.endpoint.port, f.unit_id, f.meter_serial, f.product_code,
+     iso(f.timestamp), f.software, f.firmware_1, f.firmware_2, f.modbus_version}
+  end
+
   defp decode_event(
          {:reading, host, port, unit_id, serial, product_code, profile, key, ts, words,
           {sign, coef, exp}, unit}
@@ -124,6 +134,23 @@ defmodule Alavi.Buffer.Codec do
       reason: reason,
       attempts: attempts,
       raw_words: words
+    }
+  end
+
+  defp decode_event(
+         {:firmware, host, port, unit_id, serial, product_code, ts, software, firmware_1,
+          firmware_2, modbus_version}
+       ) do
+    %FirmwareRead{
+      endpoint: %{host: host, port: port},
+      unit_id: unit_id,
+      meter_serial: serial,
+      product_code: product_code,
+      timestamp: datetime(ts),
+      software: software,
+      firmware_1: firmware_1,
+      firmware_2: firmware_2,
+      modbus_version: modbus_version
     }
   end
 

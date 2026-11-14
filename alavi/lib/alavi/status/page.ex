@@ -153,6 +153,7 @@ defmodule Alavi.Status.Page do
         {"Serial expected", or_none(m.serial_expected, "not configured")},
         {"Serial read", serial(m.serial_expected, m.serial)},
         {"Product code read", or_none(m.product_code, "not read yet")},
+        {"Firmware read", firmware(m.firmware)},
         {"Missed reads since start", missed(m.missed_reads)}
       ]),
       registers(m.registers)
@@ -163,6 +164,13 @@ defmodule Alavi.Status.Page do
   defp serial(expected, expected), do: ok(expected)
   defp serial(nil, read), do: text(read)
   defp serial(_expected, read), do: [bad(read), ~s| <span class="bad">MISMATCH</span>|]
+
+  defp firmware(nil), do: none_text("not read yet")
+
+  defp firmware(f) do
+    names = [f.software, f.firmware_1, f.firmware_2, f.modbus_version]
+    [Enum.map_intersperse(names, " / ", &or_none(&1, "not given")), " at ", text(f.read_at)]
+  end
 
   defp missed(0), do: text(0)
   defp missed(n), do: bad(n)

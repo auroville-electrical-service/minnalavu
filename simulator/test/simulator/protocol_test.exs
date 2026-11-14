@@ -27,6 +27,15 @@ defmodule Simulator.ProtocolTest do
                Protocol.respond(meters, %Faults{}, 1, <<6, 11_149::16, 1::16>>)
     end
 
+    test "a silent read goes unanswered, and the unit's other reads are answered",
+         %{meters: meters} do
+      faults = %Faults{silent_reads: MapSet.new([{1, 11_149}])}
+      assert :silent = Protocol.respond(meters, faults, 1, <<3, 11_149::16, 2::16>>)
+
+      assert {:reply, <<3, 2, _::16>>} =
+               Protocol.respond(meters, faults, 1, <<3, 11_150::16, 1::16>>)
+    end
+
     test "no meter at a unit id stays silent", %{meters: meters} do
       assert :silent = Protocol.respond(meters, %Faults{}, 2, <<3, 11_149::16, 2::16>>)
     end

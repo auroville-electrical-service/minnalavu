@@ -3,9 +3,11 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import Ajv2020 from "ajv/dist/2020";
 import addFormats from "ajv-formats";
+import { z } from "zod";
 import {
   type Batch,
   batchJson,
+  type FirmwareRead,
   findRegister,
   type IdentifiedMeter,
   type Meter,
@@ -18,6 +20,16 @@ import { contract, loadProfiles } from "./contract";
 const read = (path: string): unknown => JSON.parse(readFileSync(join(contract, path), "utf8"));
 const ajv = new Ajv2020({ allErrors: true, strict: true });
 addFormats(ajv);
+// ajv-formats takes a leap second and an offset without a colon; JSON Schema's date-time is RFC
+// 3339's, held as the server's `store.check_datetime` holds it: T and Z in either case, an offset
+// required, no leap second, and a day that exists.
+const rfc3339 =
+  /^(\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])[Tt]([01]\d|2[0-3]):[0-5]\d:[0-5]\d(\.\d+)?([Zz]|[+-]([01]\d|2[0-3]):[0-5]\d)$/;
+const dayExists = (y: number, m: number, d: number) => new Date(Date.UTC(y, m - 1, d)).getUTCDate() === d;
+ajv.addFormat("date-time", (s: string) => {
+  const m = rfc3339.exec(s);
+  return m !== null && dayExists(Number(m[1]), Number(m[2]), Number(m[3]));
+});
 const schema = read("schema/batch.v1.schema.json");
 if (typeof schema !== "object" || schema === null) throw new Error("the batch schema is not an object");
 const validate = ajv.compile(schema);
@@ -160,6 +172,83 @@ describe("batchJson", () => {
     expect(Array.from(cut)).toHaveLength(200);
     expect(cut.endsWith("😀")).toBe(true);
     expect(cut.isWellFormed()).toBe(true);
+  });
+});
+
+const names: FirmwareRead = {
+  meter: identified(1, "SIM-445-0001", "elite_440", "ELITE440-445"),
+  at: at("5"),
+  names: { software: "SIM-SW44", firmware_1: null, firmware_2: "SIM-F2", modbus_version: "0B03" },
+};
+
+describe("batchJson firmware reads", () => {
+  test("go in firmware_reads, in the schema's shape, with a name not given as null", () => {
+    const batch = batchJson({ ...basic, firmwareReads: [names] });
+    expect(validate(batch) ? [] : validate.errors).toEqual([]);
+    expect(batch.firmware_reads).toEqual([
+      {
+        endpoint: { host: "10.0.0.21", port: 502 },
+        unit_id: 1,
+        meter_serial: "SIM-445-0001",
+        product_code: "ELITE440-445",
+        timestamp: "2026-11-01T00:00:05Z",
+        software: "SIM-SW44",
+        firmware_1: null,
+        firmware_2: "SIM-F2",
+        modbus_version: "0B03",
+      },
+    ]);
+  });
+
+  test("are left out of a batch that has none", () => {
+    expect(batchJson({ ...basic, firmwareReads: [] })).not.toHaveProperty("firmware_reads");
+    expect(batchJson(basic)).not.toHaveProperty("firmware_reads");
+  });
+});
+
+// The cases are shared with alavi and the server's SQL tests, so every side holds batches to the
+// same rules.
+const pathStep = z.union([z.string(), z.int()]);
+const change = z.union([
+  z.strictObject({ path: z.array(pathStep), delete: z.literal(true) }),
+  z.strictObject({ path: z.array(pathStep), value: z.unknown() }),
+]);
+const cases = z
+  .object({
+    cases: z.array(change.and(z.object({ name: z.string() }))),
+    valid: z.array(z.object({ name: z.string(), changes: z.array(change) })),
+  })
+  .parse(read("fixtures/batch.v1.cases.json"));
+
+type Change = z.infer<typeof change>;
+
+// The batch with one change made at `path`: a value set, or a field removed.
+const changed = (json: unknown, path: readonly (string | number)[], edit: Change): unknown => {
+  const [step, ...rest] = path;
+  if (step === undefined) throw new Error("an empty change path");
+  if (Array.isArray(json) && typeof step === "number") {
+    return json.map((item, i) => (i === step ? changed(item, rest, edit) : item));
+  }
+  if (typeof json !== "object" || json === null || Array.isArray(json)) throw new Error(`no ${step} to change`);
+  const fields = Object.entries(json);
+  const key = String(step);
+  if (rest.length > 0) return { ...json, [key]: changed(fields.find(([k]) => k === key)?.[1], rest, edit) };
+  if ("delete" in edit) return Object.fromEntries(fields.filter(([k]) => k !== key));
+  return { ...json, [key]: edit.value };
+};
+
+const apply = (json: unknown, edit: Change) => changed(json, edit.path, edit);
+
+describe("batch.v1 cases", () => {
+  const fixture = read("fixtures/batch.v1.basic.json");
+
+  test.each(cases.cases.map((c) => [c.name, c] as const))("rejects %s", (_, c) => {
+    expect(validate(apply(fixture, c))).toBe(false);
+  });
+
+  test.each(cases.valid.map((c) => [c.name, c] as const))("accepts %s", (_, c) => {
+    const batch = c.changes.reduce(apply, fixture);
+    expect(validate(batch) ? [] : validate.errors).toEqual([]);
   });
 });
 

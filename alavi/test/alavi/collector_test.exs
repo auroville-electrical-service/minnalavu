@@ -3,7 +3,7 @@ defmodule Alavi.CollectorTest do
 
   import Alavi.PollerCase
 
-  alias Alavi.{Buffer, Clock, Collector, MissedRead, Reading, Settings, Wire}
+  alias Alavi.{Buffer, Clock, Collector, FirmwareRead, MissedRead, Reading, Settings, Wire}
   alias Alavi.Buffer.Batch
   alias Alavi.Uplink.Target
 
@@ -51,14 +51,18 @@ defmodule Alavi.CollectorTest do
       endpoints = [endpoint(port, "tcp", meters)]
 
       {_collector, buffer} = start_collector!(ctx.tmp_dir, endpoints)
-      :ok = await_events!(buffer, 8)
+      :ok = await_events!(buffer, 10)
       {:ok, %Batch{events: events} = batch} = Buffer.take(buffer)
 
       assert Enum.map(events, & &1.unit_id) |> Enum.dedup() == [1, 9, 3]
-      {readings, missed} = Enum.split_with(events, &match?(%Reading{}, &1))
+
+      %{Reading => readings, MissedRead => missed, FirmwareRead => names} =
+        Enum.group_by(events, & &1.__struct__)
+
       assert length(readings) == 6
       assert Enum.all?(missed, &match?(%MissedRead{unit_id: 9}, &1))
       assert hd(readings).value == Decimal.new("123456.000")
+      assert [%{unit_id: 1, software: "SIM-SW"}, %{unit_id: 3, software: "SIM-SW"}] = names
 
       :ok = stop_supervised(:collector)
       {_collector, buffer} = start_collector!(ctx.tmp_dir, endpoints)

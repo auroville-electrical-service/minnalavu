@@ -1,14 +1,16 @@
 defmodule Alavi.Sink do
   @moduledoc """
   Where the poller hands over what it read: `{module, arg}`, called as
-  `module.record(arg, events)` once per meter per round. A sink must not return
+  `module.record(arg, events)` once per meter per round with its readings and
+  missed reads, and once more with a meter's `Alavi.FirmwareRead` when its
+  names differ from the last the sink kept. A sink must not return
   `:ok` before the events are kept, and it runs in the poller's process, so it
   delays the endpoint's next read.
   """
 
-  alias Alavi.{MissedRead, Reading}
+  alias Alavi.{FirmwareRead, MissedRead, Reading}
 
-  @type event :: Reading.t() | MissedRead.t()
+  @type event :: Reading.t() | MissedRead.t() | FirmwareRead.t()
   @type t :: {module(), term()}
 
   @callback record(arg :: term(), [event(), ...]) :: :ok | {:error, term()}

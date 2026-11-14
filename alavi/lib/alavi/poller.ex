@@ -4,10 +4,10 @@ defmodule Alavi.Poller do
   require Logger
 
   alias Alavi.Config.{Endpoint, Meter}
-  alias Alavi.{Decode, MissedRead, Reading, Sink, Status}
+  alias Alavi.{Decode, FirmwareRead, MissedRead, Reading, Sink, Status}
   alias Alavi.Modbus.Client
-  alias Alavi.Poller.{Policy, RawLog}
-  alias Alavi.Profile.{Identity, Register}
+  alias Alavi.Poller.{Names, Policy, RawLog}
+  alias Alavi.Profile.{Firmware, Identity, Register}
 
   @typedoc "Wall clock for reading timestamps, UTC."
   @type clock :: (-> DateTime.t())
@@ -58,6 +58,7 @@ defmodule Alavi.Poller do
       client: nil,
       down: nil,
       due: Map.new(endpoint.meters, &{&1.unit_id, now}),
+      names: Map.new(endpoint.meters, &{&1.unit_id, Names.new()}),
       backoff: endpoint.reconnect_backoff_ms.min,
       reconnect_at: now
     }
@@ -78,26 +79,106 @@ defmodule Alavi.Poller do
   end
 
   defp poll_meter(meter, state) do
-    {events, state} =
-      case identify(meter, state) do
-        {{:ok, seen}, state} ->
-          read_registers(meter, seen, state)
+    case identify(meter, state) do
+      {{:ok, seen}, state} ->
+        {events, skip, state} = read_registers(meter, seen, state)
+        recorded(events, state)
+        {events, names(meter, seen, skip, state)}
 
-        {{:missed, reason, n, serial}, state} ->
-          {missed_all(state, meter, serial, reason, n), state}
-      end
-
-    # A refusal is the sink's to report (see `Alavi.Sink`); the round goes on.
-    _kept_or_refused = Sink.record(state.sink, events)
-    {events, state}
+      {{:missed, reason, n, serial}, state} ->
+        events = missed_all(state, meter, serial, reason, n)
+        recorded(events, state)
+        {events, state}
+    end
   end
+
+  # A refusal is the sink's to report (see `Alavi.Sink`); the round goes on.
+  defp recorded(events, state), do: Sink.record(state.sink, events)
 
   defp read_registers(meter, seen, state) do
-    {events, {state, _skip}} =
+    {events, {state, skip}} =
       Enum.map_reduce(meter.profile.registers, {state, nil}, &register(&1, &2, meter, seen))
 
-    {events, state}
+    {events, skip, state}
   end
+
+  # After the meter's readings are recorded, so they never wait on the names.
+  defp names(%Meter{profile: %{firmware: nil}}, _seen, _skip, state), do: state
+
+  defp names(%Meter{unit_id: unit} = meter, seen, skip, state) do
+    names = Names.observe(state.names[unit], {seen.serial, seen.product_code}, state.clock.())
+
+    {names, state} =
+      if names.due and skip == nil,
+        do: read_names(meter, seen, names, state),
+        else: {names, state}
+
+    %{state | names: Map.put(state.names, unit, names)}
+  end
+
+  defp read_names(meter, seen, names, state) do
+    case name_words(meter, state) do
+      {{:ok, results}, state} ->
+        read = firmware_read(state, meter, seen, results)
+        Status.firmware(state.status, read)
+        {sent(Names.read(names, read.timestamp), read, state), state}
+
+      {{:error, reason}, state} ->
+        warn(state, meter, "firmware names not read, again next round: #{inspect(reason)}")
+        {names, state}
+    end
+  end
+
+  defp name_words(%Meter{unit_id: unit, profile: %{firmware: firmware}}, state) do
+    firmware
+    |> Firmware.reads()
+    |> Enum.reduce_while({{:ok, %{}}, state}, fn {name, table, address, count},
+                                                 {{:ok, acc}, state} ->
+      case read_words(state, {unit, table, address, count}, 1) do
+        {{:ok, words, _n}, state} -> {:cont, {{:ok, Map.put(acc, name, {:ok, words})}, state}}
+        {{:skip_register, error, _n}, state} -> {:cont, {{:ok, Map.put(acc, name, error)}, state}}
+        {{:skip_meter, reason, _n}, state} -> {:halt, {{:error, reason}, state}}
+      end
+    end)
+  end
+
+  defp firmware_read(state, meter, seen, results) do
+    names = Map.new(results, fn {name, result} -> {name, name(state, meter, name, result)} end)
+
+    struct!(
+      FirmwareRead,
+      Map.merge(names, %{
+        endpoint: endpoint_ref(state.endpoint),
+        unit_id: meter.unit_id,
+        meter_serial: seen.serial,
+        product_code: seen.product_code,
+        timestamp: state.clock.()
+      })
+    )
+  end
+
+  defp name(state, meter, name, {:ok, words}) do
+    case Firmware.decode(Map.fetch!(meter.profile.firmware, name), words) do
+      {:ok, text} -> text
+      {:error, why} -> name(state, meter, name, {:decode, why})
+    end
+  end
+
+  defp name(state, meter, name, why) do
+    warn(state, meter, "firmware name #{name} not given, sent as null: #{inspect(why)}")
+    nil
+  end
+
+  defp sent(names, read, state) do
+    cond do
+      not Names.changed?(names, read) -> names
+      recorded([read], state) == :ok -> Names.sent(names, read)
+      true -> Names.refused(names)
+    end
+  end
+
+  defp warn(state, meter, message),
+    do: Logger.warning("alavi poller #{label(state)} unit #{meter.unit_id}: #{message}")
 
   # The attempts were made once, for the meter: they count on its first register.
   defp missed_all(state, meter, serial, reason, n) do

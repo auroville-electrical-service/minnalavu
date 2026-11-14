@@ -1,12 +1,104 @@
 defmodule Alavi.WireTest do
   use ExUnit.Case, async: true
 
-  alias Alavi.{MissedRead, Reading}
+  alias Alavi.Buffer.Batch
+  alias Alavi.{Clock, FirmwareRead, MissedRead, Reading, Wire}
 
   doctest Alavi.Clock
   doctest Alavi.Wire
 
   @endpoint %{host: "10.0.0.21", port: 502}
+  @contract Path.expand("../../../contract", __DIR__)
+
+  defp names do
+    %FirmwareRead{
+      endpoint: @endpoint,
+      unit_id: 9,
+      meter_serial: "SIM-9",
+      product_code: "ELITE440-445",
+      timestamp: ~U[2026-11-01 00:00:00Z],
+      software: "SIM-SW",
+      firmware_1: nil,
+      firmware_2: "SIM-F2",
+      modbus_version: "0B03"
+    }
+  end
+
+  defp reading do
+    %Reading{
+      endpoint: @endpoint,
+      unit_id: 9,
+      meter_serial: "SIM-9",
+      product_code: "ELITE440-445",
+      profile: "elite_440",
+      register_key: "active_energy_import",
+      timestamp: ~U[2026-11-01 00:00:00Z],
+      raw_words: [0x4700, 0],
+      value: Decimal.new("1234.500"),
+      unit: "Wh"
+    }
+  end
+
+  defp backlog do
+    %{
+      events: 2,
+      bytes: 100,
+      batches: 1,
+      oldest: ~U[2026-11-01 00:00:00Z],
+      max_bytes: 1_000,
+      refused: 0,
+      discarded_files: 0,
+      quarantined: 0
+    }
+  end
+
+  defp wire(events) do
+    batch = %Batch{
+      id: "0b6f8d2e-5c1a-4e7b-9a3d-2f4c6e8a0b1c",
+      clock: Clock.unsynced(),
+      events: events
+    }
+
+    Wire.batch(batch, ~U[2026-11-01 00:05:00Z], backlog())
+  end
+
+  defp valid?(wire) do
+    schema =
+      @contract |> Path.join("schema/batch.v1.schema.json") |> File.read!() |> JSON.decode!()
+
+    match?({:ok, _}, JSV.validate(wire, JSV.build!(schema, formats: true)))
+  end
+
+  describe "batch/3" do
+    test "firmware reads go in firmware_reads, in the schema's shape, beside the readings" do
+      wire = wire([reading(), names()])
+      assert valid?(wire)
+      assert [%{"value" => "1234.500"}] = wire["readings"]
+      assert wire["missed_reads"] == []
+
+      assert [%{"software" => "SIM-SW", "firmware_1" => nil, "meter_serial" => "SIM-9"}] =
+               wire["firmware_reads"]
+    end
+
+    test "a batch with no firmware reads has no firmware_reads" do
+      wire = wire([reading()])
+      assert valid?(wire)
+      refute Map.has_key?(wire, "firmware_reads")
+    end
+  end
+
+  describe "FirmwareRead.to_wire/1" do
+    test "a name the meter did not give is null, and the timestamp ISO 8601" do
+      assert %{
+               "endpoint" => %{"host" => "10.0.0.21", "port" => 502},
+               "unit_id" => 9,
+               "product_code" => "ELITE440-445",
+               "timestamp" => "2026-11-01T00:00:00Z",
+               "firmware_1" => nil,
+               "modbus_version" => "0B03"
+             } = FirmwareRead.to_wire(names())
+    end
+  end
 
   describe "Reading.to_wire/1" do
     test "the value is a decimal string, never a number" do

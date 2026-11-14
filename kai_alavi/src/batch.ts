@@ -1,5 +1,5 @@
 import { type DecodeError, decodeValue } from "./decode";
-import type { Register } from "./profile";
+import type { FirmwareName, Register } from "./profile";
 import { err, ok, type Result } from "./result";
 
 // A `batch.v1`, shaped as `alavi`'s `Alavi.Wire` shapes it. It carries no collector id: the
@@ -61,6 +61,17 @@ export interface MissedRead {
   readonly attempts: number;
 }
 
+/**
+ * A meter's software and firmware names, read in a visit that also read its serial and product
+ * code. A name is null where the meter did not give it: it answered blank, or refused the read.
+ */
+export interface FirmwareRead {
+  readonly meter: IdentifiedMeter;
+  /** The collector's clock when the names were read. */
+  readonly at: Date;
+  readonly names: { readonly [name in FirmwareName]: string | null };
+}
+
 /** The collector's clock status when every event in the batch was recorded. */
 export interface Clock {
   readonly source: "ntp" | "rtc" | "unsynced";
@@ -86,6 +97,8 @@ export interface Batch {
   readonly backlog: Backlog;
   readonly readings: readonly Reading[];
   readonly missedReads: readonly MissedRead[];
+  /** Left out of the batch when empty, as `alavi` leaves it out. */
+  readonly firmwareReads?: readonly FirmwareRead[];
 }
 
 // contract: test/batch.test.ts "readRegister"
@@ -149,6 +162,21 @@ const missedJson = (m: MissedRead) => {
   return { ...meterJson(m.meter, m.registerKey, m.at), ...reason, attempts: m.attempts, raw_words };
 };
 
+const firmwareJson = (f: FirmwareRead) => ({
+  endpoint: { host: f.meter.endpoint.host, port: f.meter.endpoint.port },
+  unit_id: f.meter.unitId,
+  meter_serial: f.meter.serial,
+  product_code: f.meter.productCode,
+  timestamp: iso(f.at),
+  software: f.names.software,
+  firmware_1: f.names.firmware_1,
+  firmware_2: f.names.firmware_2,
+  modbus_version: f.names.modbus_version,
+});
+
+const firmwareReads = (reads: readonly FirmwareRead[] = []) =>
+  reads.length === 0 ? {} : { firmware_reads: reads.map(firmwareJson) };
+
 // contract: test/batch.test.ts "batchJson"
 export const batchJson = (b: Batch) => ({
   schema_version: 1,
@@ -167,4 +195,5 @@ export const batchJson = (b: Batch) => ({
   },
   readings: b.readings.map(readingJson),
   missed_reads: b.missedReads.map(missedJson),
+  ...firmwareReads(b.firmwareReads),
 });

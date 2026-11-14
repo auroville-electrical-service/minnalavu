@@ -4,6 +4,7 @@ export {
   batchJson,
   type Clock,
   type Endpoint,
+  type FirmwareRead,
   type IdentifiedMeter,
   type Meter,
   type MissedRead,

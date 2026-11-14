@@ -52,6 +52,7 @@ defmodule Simulator.Protocol do
   def respond(meters, %Faults{} = faults, unit_id, <<fc, _::binary>> = pdu, missing \\ :silent) do
     cond do
       MapSet.member?(faults.silent_units, unit_id) -> :silent
+      silent_read?(faults, unit_id, pdu) -> :silent
       faults.busy -> {:reply, exception(fc, @busy)}
       true -> meters |> Enum.find(&(&1.unit_id == unit_id)) |> answer(pdu, missing)
     end
@@ -68,6 +69,11 @@ defmodule Simulator.Protocol do
     crc = if faults.bad_crc, do: bxor(crc(body), 0xFFFF), else: crc(body)
     <<faults.noise::binary, body::binary, crc::little-16>>
   end
+
+  defp silent_read?(faults, unit_id, <<_fc, address::16, _::binary>>),
+    do: MapSet.member?(faults.silent_reads, {unit_id, address})
+
+  defp silent_read?(_faults, _unit_id, _pdu), do: false
 
   defp answer(nil, _pdu, :silent), do: :silent
 

@@ -4,7 +4,7 @@ defmodule Alavi.BufferTest do
 
   import ExUnit.CaptureLog
 
-  alias Alavi.{Buffer, Clock, MissedRead, Reading}
+  alias Alavi.{Buffer, Clock, FirmwareRead, MissedRead, Reading}
   alias Alavi.Buffer.Batch
 
   @moduletag :tmp_dir
@@ -388,7 +388,7 @@ defmodule Alavi.BufferTest do
 
       v1 =
         <<"ALAVIBUF", 1>> <>
-          v1_frame({<<0::128>>, {:unsynced, nil}}) <> v1_frame([reading])
+          frame({<<0::128>>, {:unsynced, nil}}) <> frame([reading])
 
       path = Path.join(dir, "00000000000000000007.seg")
       File.write!(path, v1)
@@ -399,9 +399,51 @@ defmodule Alavi.BufferTest do
       assert File.read!(path <> ".discarded") == v1
       assert %{discarded_files: 1, events: 3} = Buffer.backlog(buffer)
     end
+
+    test "a segment in format 2 is still read, so an upgrade sends what was buffered",
+         %{tmp_dir: dir} do
+      reading =
+        {:reading, "127.0.0.1", 5020, 2, "SIM-2", "ELITE440-445", "elite_440",
+         "active_energy_import", "2026-11-01T00:00:00Z", [0x4700, 0x0000], {1, 25, -1}, "Wh"}
+
+      id = <<1::128>>
+
+      File.write!(
+        Path.join(dir, "00000000000000000007.seg"),
+        <<"ALAVIBUF", 2>> <> frame({id, {:unsynced, nil}}) <> frame([reading])
+      )
+
+      buffer = start!(dir)
+      assert {:ok, %Batch{events: [%Reading{unit_id: 2} = read]}} = Buffer.take(buffer)
+      assert read.value == Decimal.new("2.5")
+      assert %{discarded_files: 0} = Buffer.backlog(buffer)
+    end
+
+    test "a firmware read is kept with the readings, across a restart", %{tmp_dir: dir} do
+      names = %FirmwareRead{
+        endpoint: %{host: "127.0.0.1", port: 5020},
+        unit_id: 1,
+        meter_serial: "SIM-1",
+        product_code: "ELITE440-445",
+        timestamp: ~U[2026-11-01 00:00:00.123456Z],
+        software: "SIM-SW",
+        firmware_1: nil,
+        firmware_2: "SIM-F2",
+        modbus_version: "0100"
+      }
+
+      buffer = start!(dir)
+      :ok = Buffer.record(buffer, meter(1))
+      :ok = Buffer.record(buffer, [names])
+      buffer = restart!(dir)
+
+      assert {:ok, %Batch{events: events}} = Buffer.take(buffer)
+      assert List.last(events) == names
+      assert Enum.drop(events, -1) == meter(1)
+    end
   end
 
-  defp v1_frame(term) do
+  defp frame(term) do
     payload = :erlang.term_to_binary(term, [:compressed])
     <<byte_size(payload)::32, :erlang.crc32(payload)::32, payload::binary>>
   end

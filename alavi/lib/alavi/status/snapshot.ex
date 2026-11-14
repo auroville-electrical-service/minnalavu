@@ -16,7 +16,7 @@ defmodule Alavi.Status.Snapshot do
   as read, never a difference between two of them.
   """
 
-  alias Alavi.{Buffer, Clock, Config, MissedRead, Reading, Wire}
+  alias Alavi.{Buffer, Clock, Config, FirmwareRead, MissedRead, Reading, Wire}
   alias Alavi.Config.{Endpoint, Meter}
   alias Alavi.Profile.Register
 
@@ -43,6 +43,15 @@ defmodule Alavi.Status.Snapshot do
           read_at: time() | nil
         }
 
+  @typedoc "A meter's names as last read; a name is nil where the meter did not give it."
+  @type firmware :: %{
+          read_at: time(),
+          software: String.t() | nil,
+          firmware_1: String.t() | nil,
+          firmware_2: String.t() | nil,
+          modbus_version: String.t() | nil
+        }
+
   @typedoc """
   `serial_expected` is the polling config's; `serial` and `product_code` are
   as last read with a reading. `missed_reads` counts since the collector started.
@@ -55,7 +64,8 @@ defmodule Alavi.Status.Snapshot do
           serial: String.t() | nil,
           product_code: String.t() | nil,
           registers: [register()],
-          missed_reads: non_neg_integer()
+          missed_reads: non_neg_integer(),
+          firmware: firmware() | nil
         }
 
   @typedoc "`reason` and its `exception_code` and `detail` are as on the wire (batch.v1)."
@@ -144,6 +154,30 @@ defmodule Alavi.Status.Snapshot do
     %{snapshot | endpoints: endpoints}
   end
 
+  # contract: test/alavi/status_test.exs "Snapshot.firmware/2"
+  @doc "An endpoint or unit not in the config is ignored."
+  @spec firmware(t(), FirmwareRead.t()) :: t()
+  def firmware(%__MODULE__{} = snapshot, %FirmwareRead{endpoint: %{host: host, port: port}} = f) do
+    view = %{
+      read_at: iso(f.timestamp),
+      software: f.software,
+      firmware_1: f.firmware_1,
+      firmware_2: f.firmware_2,
+      modbus_version: f.modbus_version
+    }
+
+    endpoints =
+      Enum.map(snapshot.endpoints, fn
+        %{host: ^host, port: ^port} = endpoint ->
+          %{endpoint | meters: Enum.map(endpoint.meters, &firmware_of(&1, f.unit_id, view))}
+
+        endpoint ->
+          endpoint
+      end)
+
+    %{snapshot | endpoints: endpoints}
+  end
+
   # contract: test/alavi/status_test.exs "Snapshot.raw_lines/3"
   @spec raw_lines(t(), [String.t()], DateTime.t()) :: t()
   def raw_lines(%__MODULE__{} = snapshot, lines, now) do
@@ -206,7 +240,8 @@ defmodule Alavi.Status.Snapshot do
       serial: nil,
       product_code: nil,
       registers: Enum.map(m.profile.registers, &register/1),
-      missed_reads: 0
+      missed_reads: 0,
+      firmware: nil
     }
   end
 
@@ -256,6 +291,9 @@ defmodule Alavi.Status.Snapshot do
       attempts: m.attempts
     }
   end
+
+  defp firmware_of(%{unit_id: unit} = meter, unit, view), do: %{meter | firmware: view}
+  defp firmware_of(meter, _unit, _view), do: meter
 
   defp meter_of(meter, nil), do: meter
   defp meter_of(meter, events), do: Enum.reduce(events, meter, &event/2)
