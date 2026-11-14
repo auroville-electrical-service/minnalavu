@@ -87,12 +87,18 @@ added `status`.
 The same is shown as a page, on the collector's own PC only: open
 `http://127.0.0.1:8502/` (or `http://localhost:8502/`; the port is
 `status.port` in the settings) in a browser there. It refreshes itself every
-few seconds; `/status.json` is the same data as the file. It shows the clock,
-uplink, buffer backlog, version and start time, then per endpoint its framing,
-last rounds per unit ID and recent failures, per meter the serial expected and
-read (a mismatch is marked), the product code, the firmware names, the
-register values as read and the missed reads, then the raw-bytes lines and the
-settings.
+few seconds; `/status.json` is the same data as the file. The page is a
+summary, kept small however many meters there are: the clock, uplink, buffer
+backlog (refused, discarded or quarantined batches marked), version and start
+time; endpoints and meters counted by the state of their last round; in full,
+only what is not OK (each endpoint down, or with units that missed or read
+partly, or a serial that is not the one expected, with the reasons); links to
+the endpoints that are OK; then the raw-bytes lines and the settings. Each
+endpoint has its own page, `/endpoint/<n>` for the `n`th endpoint of the
+polling config, linked from the summary: its framing, last rounds per unit ID
+and recent failures, and per meter the serial expected and read (a mismatch is
+marked), the product code, the firmware names, the register values as read and
+the missed reads.
 
 What it does not do: it never acts. There is no control on it: no settings
 editing, no "poll now", no register read; any method but GET (and HEAD) is

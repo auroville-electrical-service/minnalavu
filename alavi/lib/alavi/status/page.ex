@@ -1,43 +1,75 @@
 defmodule Alavi.Status.Page do
   @moduledoc """
-  The status page: an `Alavi.Status.Snapshot` as one HTML document, with no
-  script, no form and no link but the one to `status.json`. Every value from
-  the snapshot is escaped: serials, product codes and raw-bytes lines come from
+  The status pages, from an `Alavi.Status.Snapshot`, with no script and no
+  form. The summary (`render/2`) stays small whatever the number of meters: the
+  collector, clock, uplink and buffer, endpoints and meters counted by state
+  (`Alavi.Status.Health`), in full only what is not OK in its last round, and
+  a link to each endpoint's own page (`endpoint/3`), which holds its rounds,
+  failures and meters with their register values. Every value from the
+  snapshot is escaped: serials, product codes and raw-bytes lines come from
   devices. Measurement only: values as read, never a difference between two.
   """
 
-  alias Alavi.Status.Snapshot
+  alias Alavi.Status.{Health, Snapshot}
 
   @style """
   body{font:14px/1.4 system-ui,sans-serif;margin:16px;color:#111;background:#fff}
   h1{font-size:20px}h2{font-size:17px;margin-top:28px;border-bottom:1px solid #999}
-  h3{font-size:15px;margin-top:20px}h4{font-size:14px;margin:14px 0 4px}
+  h3{font-size:15px;margin-top:20px}
   table{border-collapse:collapse;margin:4px 0 8px}
   th,td{border:1px solid #ccc;padding:2px 6px;text-align:left;vertical-align:top}
   th{background:#eee}
   code,.mono{font-family:monospace;word-break:break-all}
   .bad{background:#fdd;color:#900;font-weight:bold}.warn{background:#ffe8b0}
-  .ok{color:#060}.note{color:#555}
+  .ok{color:#060}.note{color:#555}.eps a{margin-right:10px;white-space:nowrap}
   """
 
-  # contract: test/alavi/status/web_test.exs "GET /"
-  @doc "The page, refreshing itself every `refresh_s` seconds."
+  @states [ok: "OK", degraded: "some units not OK", down: "down", waiting: "no round yet"]
+  @meter_states [ok: "OK", partial: "partial", missed: "missed", waiting: "not read yet"]
+
+  # contract: test/alavi/status/page_test.exs "render/2"
+  @doc "The summary page, refreshing itself every `refresh_s` seconds."
   @spec render(Snapshot.t(), pos_integer()) :: String.t()
   def render(%Snapshot{} = s, refresh_s) do
+    numbered = Enum.with_index(s.endpoints, 1)
+
+    page("alavi status", refresh_s, [
+      "<h1>alavi collector status</h1>",
+      ~s|<p class="note">Refreshes every #{refresh_s} s. This page only shows; it changes |,
+      ~s|nothing. Times are UTC. The same data: <a href="/status.json">status.json</a>.</p>|,
+      summary(s),
+      counts(Health.counts(s)),
+      not_ok(numbered),
+      links(numbered),
+      raw_lines(s.raw_lines),
+      settings(s.settings)
+    ])
+  end
+
+  # contract: test/alavi/status/page_test.exs "endpoint/3"
+  @doc "The page of the `n`th endpoint in the polling config, from 1; `:error` if there is none."
+  @spec endpoint(Snapshot.t(), pos_integer(), pos_integer()) :: {:ok, String.t()} | :error
+  def endpoint(%Snapshot{endpoints: endpoints}, n, refresh_s) do
+    case Enum.at(endpoints, n - 1) do
+      nil ->
+        :error
+
+      e ->
+        {:ok, page("alavi status: #{e.host}:#{e.port}", refresh_s, endpoint_body(e, refresh_s))}
+    end
+  end
+
+  defp page(title, refresh_s, body) do
     IO.iodata_to_binary([
       ~s|<!doctype html><html lang="en"><head><meta charset="utf-8">|,
       ~s|<meta http-equiv="refresh" content="#{refresh_s}">|,
       ~s|<meta name="viewport" content="width=device-width, initial-scale=1">|,
-      "<title>alavi status</title><style>",
+      "<title>",
+      text(title),
+      "</title><style>",
       @style,
-      "</style></head><body><h1>alavi collector status</h1>",
-      ~s|<p class="note">Refreshes every #{refresh_s} s. This page only shows; it changes |,
-      ~s|nothing. Times are UTC. The same data: <a href="/status.json">status.json</a>.</p>|,
-      summary(s),
-      "<h2>Endpoints</h2>",
-      Enum.map(s.endpoints, &endpoint/1),
-      raw_lines(s.raw_lines),
-      settings(s.settings),
+      "</style></head><body>",
+      body,
       "</body></html>"
     ])
   end
@@ -82,26 +114,124 @@ defmodule Alavi.Status.Page do
     do: [~s|<p class="bad">The buffer did not answer at |, text(at), ".</p>"]
 
   defp buffer(%{as_of: at, backlog: backlog}) do
-    rows = backlog |> Enum.sort() |> Enum.map(fn {key, value} -> {text(key), or_none(value)} end)
+    rows =
+      backlog |> Enum.sort() |> Enum.map(fn {key, value} -> {text(key), count(key, value)} end)
+
     pairs([{"As of", text(at)} | rows])
   end
 
-  defp endpoint(e) do
+  # Batches the buffer refused, discarded or quarantined are each a fault to look into.
+  defp count(key, n) when key in ["refused", "discarded_files", "quarantined"] and n > 0,
+    do: bad(n)
+
+  defp count(_key, value), do: or_none(value)
+
+  defp counts(c) do
     [
-      "<h3>",
+      "<h2>Endpoints and meters</h2>",
+      "<p>By their last round.</p>",
+      tally("Endpoints", c.endpoints, @states),
+      tally("Meters", c.meters, @meter_states),
+      pairs([{"Meters whose serial read is not the one expected", missed(c.mismatched)}])
+    ]
+  end
+
+  defp tally(what, counts, states) do
+    total = counts |> Map.values() |> Enum.sum()
+    cells = Enum.map(states, fn {state, _} -> tally_cell(state, counts[state]) end)
+    ["<h3>", what, "</h3>", table(["Total" | Keyword.values(states)], [[text(total) | cells]])]
+  end
+
+  defp tally_cell(state, n) when state in [:ok, :waiting] or n == 0, do: text(n)
+  defp tally_cell(_state, n), do: bad(n)
+
+  # One row per endpoint, the units grouped by what went wrong: the table stays
+  # short when many meters fail together.
+  defp not_ok(numbered) do
+    rows =
+      numbered
+      |> Enum.map(fn {e, n} -> {e, n, Health.endpoint(e)} end)
+      |> Enum.filter(fn {_e, _n, state} -> state in [:down, :degraded] end)
+      |> Enum.map(fn {e, n, state} ->
+        [endpoint_link(e, n), text(label(state)), text(hd(e.rounds).at), wrong(e)]
+      end)
+
+    [
+      "<h2>Not OK</h2>",
+      case rows do
+        [] -> none("Every endpoint polled so far read every meter in its last round.")
+        rows -> table(["Endpoint", "State", "Last round", "Not OK in it"], rows)
+      end
+    ]
+  end
+
+  defp wrong(e) do
+    groups =
+      hd(e.rounds).units
+      |> Enum.reject(&(&1.outcome == "ok"))
+      |> Enum.group_by(&{&1.outcome, &1.reason}, & &1.unit_id)
+      |> Enum.sort()
+      |> Enum.map(fn {{outcome, reason}, units} ->
+        [text(outcome), " (", text(reason), "): ", ids(units)]
+      end)
+
+    mismatches = e.meters |> Enum.filter(&Health.mismatched?/1) |> Enum.map(&mismatch/1)
+    Enum.intersperse(groups ++ mismatches, "; ")
+  end
+
+  defp ids([unit]), do: ["unit ", text(unit)]
+  defp ids(units), do: ["units ", Enum.map_join(units, ", ", &text/1)]
+
+  defp mismatch(m) do
+    ["unit ", text(m.unit_id), " serial ", text(m.serial)] ++
+      [~s| <span class="bad">MISMATCH</span> (expected |, text(m.serial_expected), ")"]
+  end
+
+  defp links(numbered) do
+    links =
+      for {e, n} <- numbered,
+          Health.endpoint(e) in [:ok, :waiting],
+          do: [endpoint_link(e, n), " "]
+
+    [
+      "<h2>Endpoints OK or not polled yet</h2>",
+      ~s|<p class="note">Each endpoint's rounds, failures and meters with their register |,
+      "values are on its own page, linked here and under Not OK.</p>",
+      case links do
+        [] -> none("None.")
+        links -> [~s|<p class="eps">|, links, "</p>"]
+      end
+    ]
+  end
+
+  defp endpoint_link(e, n),
+    do: [~s|<a href="/endpoint/#{n}">|, text(e.host), ":", text(e.port), "</a>"]
+
+  defp label(state), do: Keyword.fetch!(@states, state)
+
+  defp endpoint_body(e, refresh_s) do
+    state = Health.endpoint(e)
+
+    [
+      "<h1>alavi endpoint ",
       text(e.host),
       ":",
       text(e.port),
-      "</h3>",
+      "</h1>",
+      ~s|<p class="note">Refreshes every #{refresh_s} s. This page only shows; it changes |,
+      ~s|nothing. Times are UTC. <a href="/">Back to the summary</a>.</p>|,
       pairs([
+        {"State in its last round",
+         if(state in [:ok, :waiting], do: text(label(state)), else: bad(label(state)))},
         {"Framing", text(e.framing)},
         {"Polled by another system", text(e.polled_by_other_system)}
       ]),
-      "<h4>Last rounds</h4>",
+      "<h2>Last rounds</h2>",
       rounds(e.rounds),
-      "<h4>Recent failures</h4>",
+      "<h2>Recent failures</h2>",
       failures(e.failures),
-      Enum.map(e.meters, &meter/1)
+      "<h2>Meters</h2>",
+      Enum.map(e.meters, &meter(e, &1))
     ]
   end
 
@@ -141,14 +271,17 @@ defmodule Alavi.Status.Page do
     )
   end
 
-  defp meter(m) do
+  defp meter(e, m) do
+    state = Health.meter(e, m)
+
     [
-      "<h4>Unit ",
+      "<h3>Unit ",
       text(m.unit_id),
       ": ",
       text(m.profile),
-      "</h4>",
+      "</h3>",
       pairs([
+        {"Last round", meter_state(state)},
         {"Last read", or_none(m.last_read_at, "never")},
         {"Serial expected", or_none(m.serial_expected, "not configured")},
         {"Serial read", serial(m.serial_expected, m.serial)},
@@ -159,6 +292,11 @@ defmodule Alavi.Status.Page do
       registers(m.registers)
     ]
   end
+
+  defp meter_state(state) when state in [:ok, :waiting],
+    do: text(Keyword.fetch!(@meter_states, state))
+
+  defp meter_state(state), do: bad(Keyword.fetch!(@meter_states, state))
 
   defp serial(_expected, nil), do: none_text("not read yet")
   defp serial(expected, expected), do: ok(expected)

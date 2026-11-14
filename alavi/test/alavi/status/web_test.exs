@@ -112,7 +112,7 @@ defmodule Alavi.Status.WebTest do
   end
 
   describe "GET /" do
-    test "the page escapes what devices sent, and flags a serial mismatch", %{tmp_dir: dir} do
+    test "the summary escapes what devices sent, and flags a serial mismatch", %{tmp_dir: dir} do
       {status, port} = start!(dir)
       Status.round(status, [reading(1, @hostile), reading(3, "SIM-3")])
       Status.raw_lines(status, ["unit 1: reply <img src=x onerror=alert(2)>"])
@@ -124,8 +124,45 @@ defmodule Alavi.Status.WebTest do
       assert body =~ ~s|<meta http-equiv="refresh" content="5">|
       refute body =~ "<script"
       refute body =~ "<img"
-      assert body =~ "&lt;script&gt;alert(1)&lt;/script&gt;"
+      assert body =~ "unit 1 serial &lt;script&gt;alert(1)&lt;/script&gt; "
       assert body =~ "&lt;img src=x onerror=alert(2)&gt;"
+      assert [_one] = Regex.scan(~r/MISMATCH/, body)
+      assert body =~ ~s|<a href="/endpoint/1">127.0.0.1:5020</a>|
+      refute body =~ ~r/<(form|button|input|script)/i
+    end
+
+    test "answers with headers that keep it from being cached, sniffed or framed", %{tmp_dir: dir} do
+      {_status, port} = start!(dir)
+      {200, headers, _body} = request(port, "GET", "/")
+
+      assert headers["cache-control"] == "no-store"
+      assert headers["x-content-type-options"] == "nosniff"
+      assert headers["content-security-policy"] =~ "default-src 'none'"
+      refute Map.has_key?(headers, "server")
+    end
+
+    test "HEAD answers the headers without the body", %{tmp_dir: dir} do
+      {_status, port} = start!(dir)
+      {200, headers, body} = request(port, "HEAD", "/")
+      assert body == ""
+      assert String.to_integer(headers["content-length"]) > 0
+    end
+  end
+
+  describe "GET /endpoint/<n>" do
+    test "is the endpoint's page, escaped, with its register values and a mismatch flagged",
+         %{tmp_dir: dir} do
+      {status, port} = start!(dir)
+      Status.round(status, [reading(1, @hostile), reading(3, "SIM-3")])
+      :ok = eventually!(fn -> hd(Status.read(status).endpoints).rounds != [] end)
+
+      {200, headers, body} = request(port, "GET", "/endpoint/1")
+
+      assert headers["content-type"] == "text/html; charset=utf-8"
+      assert body =~ ~s|<meta http-equiv="refresh" content="5">|
+      assert body =~ "<h1>alavi endpoint 127.0.0.1:5020</h1>"
+      refute body =~ "<script"
+      assert body =~ "<th>Product code read</th><td>&lt;script&gt;alert(1)&lt;/script&gt;</td>"
       assert body =~ "1234.500"
       assert [_one] = Regex.scan(~r/MISMATCH/, body)
       refute body =~ ~r/<(form|button|input|script)/i
@@ -147,28 +184,11 @@ defmodule Alavi.Status.WebTest do
       })
 
       :ok = eventually!(fn -> hd(hd(Status.read(status).endpoints).meters).firmware != nil end)
-      {200, _headers, body} = request(port, "GET", "/")
+      {200, _headers, body} = request(port, "GET", "/endpoint/1")
 
       refute body =~ "<script"
       assert body =~ "&lt;script&gt;alert(1)&lt;/script&gt; / SIM-F1 / "
       assert body =~ ~s|<span class="note">not given</span> / 0100 at 2026-11-14T10:00:00Z|
-    end
-
-    test "answers with headers that keep it from being cached, sniffed or framed", %{tmp_dir: dir} do
-      {_status, port} = start!(dir)
-      {200, headers, _body} = request(port, "GET", "/")
-
-      assert headers["cache-control"] == "no-store"
-      assert headers["x-content-type-options"] == "nosniff"
-      assert headers["content-security-policy"] =~ "default-src 'none'"
-      refute Map.has_key?(headers, "server")
-    end
-
-    test "HEAD answers the headers without the body", %{tmp_dir: dir} do
-      {_status, port} = start!(dir)
-      {200, headers, body} = request(port, "HEAD", "/")
-      assert body == ""
-      assert String.to_integer(headers["content-length"]) > 0
     end
   end
 
@@ -221,7 +241,12 @@ defmodule Alavi.Status.WebTest do
     test "any other path gets 404", %{tmp_dir: dir} do
       {_status, port} = start!(dir)
 
-      for path <- ["/index.html", "/status.json/", "/../settings.json", "/?x=1", "/status"] do
+      paths =
+        ["/index.html", "/status.json/", "/../settings.json", "/?x=1", "/status"] ++
+          ["/endpoint/2", "/endpoint/0", "/endpoint/01", "/endpoint/-1", "/endpoint/1/"] ++
+          ["/endpoint/x", "/endpoint/", "/endpoint", "/endpoint/1?x=1", "/endpoint/9999999"]
+
+      for path <- paths do
         assert {404, _, _} = request(port, "GET", path)
       end
     end

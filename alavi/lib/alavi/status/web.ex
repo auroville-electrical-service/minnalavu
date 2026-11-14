@@ -5,9 +5,10 @@ defmodule Alavi.Status.Web do
   The status page's HTTP server, on OTP's `:httpd`. It binds 127.0.0.1 here,
   in code, whatever the settings say (ADR 0016): only the port is configured.
 
-  `GET /` is the page (`Alavi.Status.Page`, refreshing every #{@refresh_s} s),
-  `GET /status.json` the snapshot as `status.json` holds it; `HEAD` of either
-  answers the same headers. A `Host` other than `127.0.0.1:<port>` or
+  `GET /` is the summary page and `GET /endpoint/<n>` the page of the `n`th
+  endpoint in the polling config, from 1 (`Alavi.Status.Page`, each refreshing
+  every #{@refresh_s} s); `GET /status.json` is the snapshot as `status.json`
+  holds it. `HEAD` of any answers the same headers. A `Host` other than `127.0.0.1:<port>` or
   `localhost:<port>` gets 421, against DNS rebinding; another method 405;
   another path 404; a status that does not answer, 503.
 
@@ -29,6 +30,7 @@ defmodule Alavi.Status.Web do
   Record.defrecordp(:mod, Record.extract(:mod, from_lib: "inets/include/httpd.hrl"))
 
   @loopback {127, 0, 0, 1}
+  @html ~c"text/html; charset=utf-8"
   @csp ~c"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 
   @typedoc "`status`: the `Alavi.Status` to read; `root`: an existing directory, which httpd requires and never serves."
@@ -96,8 +98,8 @@ defmodule Alavi.Status.Web do
     with :ok <- host(request.hosts, port),
          :ok <- method(request.method),
          {:ok, render} <- route(request.path),
-         {:ok, snapshot} <- snapshot(read) do
-      {type, body} = render.(snapshot)
+         {:ok, snapshot} <- snapshot(read),
+         {:ok, type, body} <- render.(snapshot) do
       answer(request.method, 200, type, body)
     else
       {:error, code, message, extra} ->
@@ -118,11 +120,29 @@ defmodule Alavi.Status.Web do
   defp method(_method),
     do: {:error, 405, "This page only shows: GET only.\n", [allow: ~c"GET, HEAD"]}
 
-  defp route("/"), do: {:ok, &{~c"text/html; charset=utf-8", Page.render(&1, @refresh_s)}}
-  defp route("/status.json"), do: {:ok, &{~c"application/json", Snapshot.to_json(&1)}}
+  defp route("/"), do: {:ok, &{:ok, @html, Page.render(&1, @refresh_s)}}
+  defp route("/status.json"), do: {:ok, &{:ok, ~c"application/json", Snapshot.to_json(&1)}}
 
-  defp route(_path),
-    do: {:error, 404, "Not found: the page is at / and the data at /status.json\n", []}
+  defp route("/endpoint/" <> n) do
+    if n =~ ~r/\A[1-9][0-9]{0,5}\z/,
+      do: {:ok, &endpoint(&1, String.to_integer(n))},
+      else: not_found()
+  end
+
+  defp route(_path), do: not_found()
+
+  defp endpoint(snapshot, n) do
+    case Page.endpoint(snapshot, n, @refresh_s) do
+      {:ok, body} -> {:ok, @html, body}
+      :error -> not_found()
+    end
+  end
+
+  defp not_found,
+    do:
+      {:error, 404,
+       "Not found: the summary is at /, endpoint n's page at /endpoint/<n>, " <>
+         "and the data at /status.json\n", []}
 
   # The status may be restarting; the request is answered either way.
   defp snapshot(read) do
