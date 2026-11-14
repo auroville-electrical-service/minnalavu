@@ -20,8 +20,9 @@ backslashes are doubled (`"C:\\alavi\\buffer"`), or written as `/`.
 
 **The file holds the collector's token**, which is its identity to the
 server. Restrict its ACL (or mode) so that only the account the service runs
-as, and administrators, can read it. A new release does not bring a
-`settings.json`: copy the old one into the new release root.
+as, and administrators, can read it (on Windows, step 1 below). A new
+release does not bring a `settings.json`: copy the old one into the new
+release root, and restrict the copy too.
 
 A batch the server rejects for good is moved to `<buffer dir>/quarantine/`
 with the server's reason beside it, and never deleted; see `Alavi.Uplink.Response`
@@ -32,7 +33,12 @@ for which answers count as that.
 From the release root, in an administrator's command prompt:
 
 1. Copy `settings.example.json` to `settings.json` and fill it in (or copy
-   the old release's).
+   the old release's). Then leave only Administrators and SYSTEM, the
+   service's account, with access to it (SIDs, so the display language does
+   not matter):
+   `icacls settings.json /inheritance:r /grant "*S-1-5-32-544:F" /grant "*S-1-5-18:F"`.
+   `icacls settings.json` should then list only `BUILTIN\Administrators:(F)`
+   and `NT AUTHORITY\SYSTEM:(F)`.
 2. With no service running, check the settings: `bin\alavi.bat start` runs the
    collector in the console, and a settings error is printed there. Stop it
    with Ctrl+C.
