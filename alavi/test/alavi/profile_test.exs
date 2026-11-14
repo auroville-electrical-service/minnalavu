@@ -8,9 +8,10 @@ defmodule Alavi.ProfileTest do
   describe "load_dir/1" do
     @describetag :tmp_dir
 
-    test "loads every .json file, from a path holding characters a glob would read as pattern",
-         %{tmp_dir: tmp} do
-      dir = Path.join(tmp, ~S"profiles \ [1] {a}")
+    test "loads every .json file from a path a glob would misread", %{tmp_dir: tmp} do
+      # The backslash is a separator on Windows and part of the name elsewhere;
+      # every character here is legal in an NTFS path.
+      dir = Path.join(tmp, ~S"glob\[1] {a}")
       File.mkdir_p!(dir)
       File.cp!(Path.join(@contract, "profiles/elite_440.json"), Path.join(dir, "elite_440.json"))
       File.write!(Path.join(dir, "README.txt"), "not a profile")
