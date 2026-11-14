@@ -6,20 +6,22 @@ defmodule Simulator.Server do
 
   alias Simulator.{Faults, Meter, Protocol}
 
+  @listen_opts [:binary, active: false, reuseaddr: true, ip: {127, 0, 0, 1}]
+
   @impl true
   def init(opts) do
     Process.flag(:trap_exit, true)
-    listen_opts = [:binary, active: false, reuseaddr: true, ip: {127, 0, 0, 1}]
 
-    case :gen_tcp.listen(Keyword.fetch!(opts, :port), listen_opts) do
+    case :gen_tcp.listen(Keyword.fetch!(opts, :port), @listen_opts) do
       {:ok, listen} ->
-        server = self()
-        acceptor = spawn_link(fn -> accept(listen, server) end)
+        {:ok, port} = :inet.port(listen)
 
         {:ok,
          %{
            listen: listen,
-           acceptor: acceptor,
+           port: port,
+           acceptor: acceptor(listen),
+           offline: nil,
            framing: Keyword.fetch!(opts, :framing),
            meters: Keyword.fetch!(opts, :meters),
            max_connections: Keyword.fetch!(opts, :max_connections),
@@ -34,10 +36,7 @@ defmodule Simulator.Server do
   end
 
   @impl true
-  def handle_call(:port, _from, state) do
-    {:ok, port} = :inet.port(state.listen)
-    {:reply, port, state}
-  end
+  def handle_call(:port, _from, state), do: {:reply, state.port, state}
 
   def handle_call(:admit, _from, state) do
     if MapSet.size(state.handlers) < state.max_connections do
@@ -49,6 +48,10 @@ defmodule Simulator.Server do
       {:reply, :reject, state}
     end
   end
+
+  def handle_call({:respond, _unit_id, _pdu}, _from, %{offline: fillers} = state)
+      when fillers != nil,
+      do: {:reply, {:silent, state.faults}, state}
 
   def handle_call({:respond, unit_id, pdu}, _from, state) do
     response = Protocol.respond(state.meters, state.faults, unit_id, pdu, state.missing_units)
@@ -67,6 +70,26 @@ defmodule Simulator.Server do
   def handle_call({:faults, changes}, _from, state),
     do: {:reply, :ok, %{state | faults: struct!(state.faults, changes)}}
 
+  # The listener is replaced by one with the shortest queue, filled by
+  # connections never accepted, so the kernel drops each new SYN: a connect
+  # times out, as to a host that is gone, rather than being refused.
+  def handle_call(:offline, _from, %{offline: nil} = state) do
+    :ok = :gen_tcp.close(state.listen)
+    {:ok, listen} = :gen_tcp.listen(state.port, [{:backlog, 0} | @listen_opts])
+    {:reply, :ok, %{state | listen: listen, acceptor: nil, offline: fill(state.port, [])}}
+  end
+
+  def handle_call(:offline, _from, state), do: {:reply, :ok, state}
+
+  def handle_call(:online, _from, %{offline: nil} = state), do: {:reply, :ok, state}
+
+  def handle_call(:online, _from, %{offline: fillers} = state) do
+    Enum.each(fillers, &:gen_tcp.close/1)
+    :ok = :gen_tcp.close(state.listen)
+    {:ok, listen} = :gen_tcp.listen(state.port, @listen_opts)
+    {:reply, :ok, %{state | listen: listen, acceptor: acceptor(listen), offline: nil}}
+  end
+
   @impl true
   def handle_info({:EXIT, acceptor, reason}, %{acceptor: acceptor} = state),
     do: {:stop, reason, state}
@@ -76,6 +99,23 @@ defmodule Simulator.Server do
 
   @impl true
   def terminate(_reason, state), do: :gen_tcp.close(state.listen)
+
+  # Connects until one times out: the queue is then full. The bound only
+  # stops a kernel that never drops a SYN from hanging the simulator.
+  defp fill(port, fillers) when length(fillers) < 16 do
+    case :gen_tcp.connect(~c"127.0.0.1", port, [active: false], 50) do
+      {:ok, socket} -> fill(port, [socket | fillers])
+      {:error, :timeout} -> fillers
+    end
+  end
+
+  defp fill(_port, _fillers),
+    do: raise("the listener's queue never filled, so new connects are not timing out")
+
+  defp acceptor(listen) do
+    server = self()
+    spawn_link(fn -> accept(listen, server) end)
+  end
 
   defp change(state, unit_id, change) do
     meters =

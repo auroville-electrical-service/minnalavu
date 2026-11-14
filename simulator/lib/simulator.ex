@@ -66,6 +66,19 @@ defmodule Simulator do
     GenServer.call(sim, {:faults, changes})
   end
 
+  # contract: test/simulator_test.exs "offline/1"
+  @doc """
+  Take the endpoint off the network, as a link outage does: open connections
+  get no replies, and a new connect times out rather than being refused.
+  """
+  @spec offline(GenServer.server()) :: :ok
+  def offline(sim), do: GenServer.call(sim, :offline)
+
+  # contract: test/simulator_test.exs "online/1"
+  @doc "Put the endpoint back on the network, on the same port."
+  @spec online(GenServer.server()) :: :ok
+  def online(sim), do: GenServer.call(sim, :online)
+
   @doc "Clear all faults."
   @spec clear_faults(GenServer.server()) :: :ok
   def clear_faults(sim), do: GenServer.call(sim, {:faults, Map.from_struct(%Faults{})})
