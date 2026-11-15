@@ -37,11 +37,10 @@ defmodule Alavi.BufferTest do
       meter_serial: "SIM-#{unit_id}",
       product_code: "ELITE440-445",
       profile: "elite_440",
+      profile_version: 1,
       register_key: key,
       timestamp: ts,
-      raw_words: [0x4700, 0x0000],
-      value: Decimal.new(value),
-      unit: "Wh"
+      value: Decimal.new(value)
     }
   end
 
@@ -100,6 +99,7 @@ defmodule Alavi.BufferTest do
         unit_id: 2,
         meter_serial: "SIM-2",
         profile: "elite_440",
+        profile_version: 1,
         register_key: "active_energy_import",
         timestamp: ~U[2026-11-01 00:00:00.000001Z],
         reason: {:unreachable, {:socket, :econnrefused}},
@@ -112,10 +112,12 @@ defmodule Alavi.BufferTest do
       assert {:ok, %Batch{events: [^missed, ^decode]}} = Buffer.take(restart!(dir))
     end
 
-    property "values and timestamps come back exactly as recorded", %{tmp_dir: dir} do
+    property "values, profile versions and timestamps come back exactly as recorded",
+             %{tmp_dir: dir} do
       buffer = start!(dir)
 
       check all coef <- integer(0..999_999_999_999),
+                version <- integer(1..9_007_199_254_740_991),
                 exp <- integer(-6..0),
                 sign <- member_of([1, -1]),
                 precision <- integer(0..6),
@@ -124,7 +126,12 @@ defmodule Alavi.BufferTest do
         value = %Decimal{sign: sign, coef: coef, exp: exp}
         usec = digits * 10 ** (6 - precision)
         ts = %{~U[2026-11-01 00:00:00Z] | microsecond: {usec, precision}}
-        event = %{reading(1, "active_energy_import", "0", ts) | value: value}
+
+        event = %{
+          reading(1, "active_energy_import", "0", ts)
+          | value: value,
+            profile_version: version
+        }
 
         :ok = Buffer.record(buffer, [event])
         {:ok, batch} = Buffer.take(buffer)
@@ -390,85 +397,29 @@ defmodule Alavi.BufferTest do
       refute File.exists?(Path.join(dir, "00000000000000000008.seg"))
     end
 
-    test "a segment in format 1, whose readings lack a product code, is set aside",
-         %{tmp_dir: dir} do
+    test "a segment in an earlier format is set aside, not decoded", %{tmp_dir: dir} do
       buffer = start!(dir)
       :ok = Buffer.record(buffer, meter(1))
       :ok = stop_supervised(:buffer)
 
+      # A reading as format 4 wrote it: raw words and unit, no profile version.
       reading =
-        {:reading, "127.0.0.1", 5020, 2, "SIM-2", "elite_440", "active_energy_import",
-         "2026-11-01T00:00:00Z", [0x4700, 0x0000], {1, 25, -1}, "Wh"}
+        {:reading, "127.0.0.1", 5020, 2, "SIM-2", "ELITE440-445", "elite_440",
+         "active_energy_import", "2026-11-01T00:00:00Z", [0x4700, 0x0000], {1, 25, -1}, "Wh", nil}
 
-      v1 =
-        <<"ALAVIBUF", 1>> <>
-          frame({<<0::128>>, {:unsynced, nil}}) <> frame([reading])
-
-      path = Path.join(dir, "00000000000000000007.seg")
-      File.write!(path, v1)
+      paths =
+        for version <- 1..4 do
+          path = Path.join(dir, "0000000000000000000#{version + 4}.seg")
+          segment = <<"ALAVIBUF", version>> <> frame({<<version::128>>, {:unsynced, nil}})
+          File.write!(path, segment <> frame([reading]))
+          path
+        end
 
       log = capture_log(fn -> send(self(), {:buffer, start!(dir)}) end)
       assert_received {:buffer, buffer}
       assert log =~ "no valid header"
-      assert File.read!(path <> ".discarded") == v1
-      assert %{discarded_files: 1, events: 3} = Buffer.backlog(buffer)
-    end
-
-    test "a segment in format 2 is still read, so an upgrade sends what was buffered",
-         %{tmp_dir: dir} do
-      reading =
-        {:reading, "127.0.0.1", 5020, 2, "SIM-2", "ELITE440-445", "elite_440",
-         "active_energy_import", "2026-11-01T00:00:00Z", [0x4700, 0x0000], {1, 25, -1}, "Wh"}
-
-      id = <<1::128>>
-
-      File.write!(
-        Path.join(dir, "00000000000000000007.seg"),
-        <<"ALAVIBUF", 2>> <> frame({id, {:unsynced, nil}}) <> frame([reading])
-      )
-
-      buffer = start!(dir)
-      assert {:ok, %Batch{events: [%Reading{unit_id: 2} = read]}} = Buffer.take(buffer)
-      assert read.value == Decimal.new("2.5")
-      assert %{discarded_files: 0} = Buffer.backlog(buffer)
-    end
-
-    test "a segment in format 3, as written before request ids, is still read, with none",
-         %{tmp_dir: dir} do
-      reading =
-        {:reading, "127.0.0.1", 5020, 2, "SIM-2", "ELITE440-445", "elite_440",
-         "active_energy_import", "2026-11-01T00:00:00Z", [0x4700, 0x0000], {1, 25, -1}, "Wh"}
-
-      missed =
-        {:missed, "127.0.0.1", 5020, 3, nil, "elite_500", "active_energy_import",
-         "2026-11-01T00:00:01Z", {:exception, 11}, 3, nil}
-
-      names =
-        {:firmware, "127.0.0.1", 5020, 2, "SIM-2", "ELITE440-445", "2026-11-01T00:00:02Z",
-         "SIM-SW", nil, "SIM-F2", "0100"}
-
-      id = <<2::128>>
-
-      File.write!(
-        Path.join(dir, "00000000000000000007.seg"),
-        <<"ALAVIBUF", 3>> <>
-          frame({id, {:ntp, "2026-10-31T23:00:00Z"}}) <>
-          frame([reading, missed]) <> frame([names])
-      )
-
-      buffer = start!(dir)
-      assert {:ok, %Batch{id: batch_id, clock: clock, events: events}} = Buffer.take(buffer)
-      assert batch_id == "00000000-0000-0000-0000-000000000002"
-      assert clock == %{source: :ntp, last_sync_at: ~U[2026-10-31 23:00:00Z]}
-
-      assert [
-               %Reading{unit_id: 2, request_id: nil} = read,
-               %MissedRead{unit_id: 3, reason: {:exception, 11}, attempts: 3, request_id: nil},
-               %FirmwareRead{unit_id: 2, software: "SIM-SW", firmware_1: nil}
-             ] = events
-
-      assert read.value == Decimal.new("2.5")
-      assert %{discarded_files: 0, events: 3} = Buffer.backlog(buffer)
+      assert Enum.all?(paths, &File.exists?(&1 <> ".discarded"))
+      assert %{discarded_files: 4, events: 3} = Buffer.backlog(buffer)
     end
 
     test "a request id is kept with its reading and missed read, across a restart",
@@ -485,6 +436,7 @@ defmodule Alavi.BufferTest do
         unit_id: 2,
         meter_serial: "SIM-2",
         profile: "elite_440",
+        profile_version: 1,
         register_key: "active_energy_import",
         timestamp: ~U[2026-11-01 00:00:01Z],
         reason: :timeout,

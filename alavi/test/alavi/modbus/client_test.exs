@@ -18,9 +18,9 @@ defmodule Alavi.Modbus.ClientTest do
         client =
           Enum.reduce(
             [
-              {1, "elite_440", "123456.000"},
-              {2, "elite_440", "7.500"},
-              {3, "elite_500", "1234.500"}
+              {1, "elite_440", "123456"},
+              {2, "elite_440", "7.5"},
+              {3, "elite_500", "1234.5"}
             ],
             client,
             fn {unit, name, expected}, client ->
@@ -51,7 +51,7 @@ defmodule Alavi.Modbus.ClientTest do
       test "#{framing}: many reads on one connection stay matched to their requests" do
         ctx = start_chain(unquote(framing))
         {:ok, register} = Profile.register(ctx.profiles["elite_440"], "active_energy_import")
-        expected = %{1 => "123456.000", 2 => "7.500"}
+        expected = %{1 => "123456", 2 => "7.5"}
 
         Enum.reduce(1..50, client!(ctx), fn i, client ->
           unit = rem(i, 2) + 1
@@ -89,7 +89,7 @@ defmodule Alavi.Modbus.ClientTest do
         {:ok, client} = connect(ctx)
         {:ok, register} = Profile.register(ctx.profiles["elite_500"], "active_energy_import")
         assert {:ok, %{value: value}, _} = Reader.read(client, 4, register)
-        refute Decimal.to_string(value) == "1234.500"
+        refute Decimal.to_string(value) == "1234.5"
       end
     end
 
@@ -126,7 +126,7 @@ defmodule Alavi.Modbus.ClientTest do
       # The reply to unit 1 arrives during this read, ahead of unit 2's.
       Simulator.clear_faults(ctx.sim)
       assert {:ok, %{value: value}, _} = Reader.read(client, 2, register)
-      assert Decimal.to_string(value) == "7.500"
+      assert Decimal.to_string(value) == "7.5"
     end
 
     test "rtu_over_tcp: a missing meter times out and closes the connection" do
@@ -147,7 +147,7 @@ defmodule Alavi.Modbus.ClientTest do
     test "rtu_over_tcp: noise before each reply is skipped, even noise that starts like one" do
       ctx = start_chain(:rtu_over_tcp)
       {:ok, register} = Profile.register(ctx.profiles["elite_440"], "active_energy_import")
-      expected = %{1 => "123456.000", 2 => "7.500"}
+      expected = %{1 => "123456", 2 => "7.5"}
       # <<1, 4>> is how unit 1's reply to a function 04 read begins.
       Simulator.faults(ctx.sim, noise: <<0xFF, 1, 4>>)
 

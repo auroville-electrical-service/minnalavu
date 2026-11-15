@@ -85,11 +85,10 @@ defmodule Alavi.StatusFixture do
       meter_serial: m.serial,
       product_code: "ELITE440-445",
       profile: m.profile.name,
+      profile_version: 1,
       register_key: r.key,
       timestamp: at,
-      raw_words: [0, 1],
-      value: Decimal.new("123456.789"),
-      unit: r.unit
+      value: Decimal.new("123456.789")
     }
   end
 
@@ -99,6 +98,7 @@ defmodule Alavi.StatusFixture do
       unit_id: m.unit_id,
       meter_serial: nil,
       profile: m.profile.name,
+      profile_version: 1,
       register_key: r.key,
       timestamp: at,
       reason: :timeout,

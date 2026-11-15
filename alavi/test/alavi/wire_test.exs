@@ -31,11 +31,10 @@ defmodule Alavi.WireTest do
       meter_serial: "SIM-9",
       product_code: "ELITE440-445",
       profile: "elite_440",
+      profile_version: 1,
       register_key: "active_energy_import",
       timestamp: ~U[2026-11-01 00:00:00Z],
-      raw_words: [0x4700, 0],
-      value: Decimal.new("1234.500"),
-      unit: "Wh"
+      value: Decimal.new("1234.500")
     }
   end
 
@@ -127,11 +126,10 @@ defmodule Alavi.WireTest do
         meter_serial: "SIM-9",
         product_code: "ELITE440-445",
         profile: "elite_440",
+        profile_version: 1,
         register_key: "active_energy_import",
         timestamp: ~U[2026-11-01 00:00:00Z],
-        raw_words: [0x4700, 0],
-        value: Decimal.new("1.234500E+3"),
-        unit: "Wh"
+        value: Decimal.new("1.234500E+3")
       }
 
       assert %{"value" => "1234.500"} = Reading.to_wire(reading)
@@ -139,6 +137,12 @@ defmodule Alavi.WireTest do
 
       assert %{"meter_serial" => "SIM-9", "product_code" => "ELITE440-445"} =
                Reading.to_wire(reading)
+    end
+
+    test "the profile version is cited; the words and unit are not sent" do
+      wire = Reading.to_wire(%{reading() | profile_version: 7})
+      assert %{"profile" => "elite_440", "profile_version" => 7} = wire
+      refute Map.has_key?(wire, "raw_words") or Map.has_key?(wire, "unit")
     end
 
     test "a request id only when there is one: the schema refuses null" do
@@ -156,6 +160,7 @@ defmodule Alavi.WireTest do
         unit_id: 9,
         meter_serial: "SIM-9",
         profile: "elite_440",
+        profile_version: 1,
         register_key: "active_energy_import",
         timestamp: ~U[2026-11-01 00:00:00Z],
         reason: reason,

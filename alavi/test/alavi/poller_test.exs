@@ -32,12 +32,11 @@ defmodule Alavi.PollerTest do
         end
 
         [import_ | _] = hd(rounds)
-        assert import_.value == Decimal.new("123456.000")
+        assert import_.value == Decimal.new("123456")
         assert %{meter_serial: "SIM-1", product_code: "ELITE440-445"} = import_
-        assert %{profile: "elite_440", unit: "kWh"} = import_
+        assert %{profile: "elite_440", profile_version: 1} = import_
         assert %{meter_serial: "SIM-3", product_code: "E500C-5102"} = hd(List.last(rounds))
         assert import_.endpoint == %{host: "127.0.0.1", port: port}
-        assert [_, _] = import_.raw_words
       end
 
       test "#{framing}: a silent meter is missed after its retries and the rest of the chain is read" do
@@ -73,7 +72,7 @@ defmodule Alavi.PollerTest do
         |> Map.put("readings", readings)
 
       assert {:ok, _} = JSV.validate(batch, JSV.build!(schema, formats: true))
-      assert hd(readings)["value"] == "1234.500"
+      assert hd(readings)["value"] == "1234.5"
     end
 
     test "exception 0B is a missed read with no retry, and the next meter is read" do

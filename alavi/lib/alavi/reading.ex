@@ -2,10 +2,13 @@ defmodule Alavi.Reading do
   @moduledoc """
   One register read from one meter, as it leaves the poller. `meter_serial` and
   `product_code` are what the meter reported in the round the reading was
-  taken in, never the config's. `raw_words` keeps what the meter sent, so a
-  reading can be decoded again if its profile entry turns out to be wrong.
-  `request_id` is the request a read on demand was made for, or nil.
+  taken in, never the config's. `value` is decoded under `profile` at
+  `profile_version`, whose entry for `register_key` gives its unit and kind;
+  for a float it is lossless, so the meter's words are recoverable from it and
+  that entry. `request_id` is the request a read on demand was made for, or nil.
   """
+
+  alias Alavi.Profile
 
   @enforce_keys [
     :endpoint,
@@ -13,11 +16,10 @@ defmodule Alavi.Reading do
     :meter_serial,
     :product_code,
     :profile,
+    :profile_version,
     :register_key,
     :timestamp,
-    :raw_words,
-    :value,
-    :unit
+    :value
   ]
   defstruct @enforce_keys ++ [request_id: nil]
 
@@ -30,11 +32,10 @@ defmodule Alavi.Reading do
           meter_serial: String.t(),
           product_code: String.t(),
           profile: String.t(),
+          profile_version: Profile.version(),
           register_key: String.t(),
           timestamp: DateTime.t(),
-          raw_words: [0..0xFFFF, ...],
           value: Decimal.t(),
-          unit: String.t(),
           request_id: String.t() | nil
         }
 
@@ -47,11 +48,10 @@ defmodule Alavi.Reading do
       "meter_serial" => r.meter_serial,
       "product_code" => r.product_code,
       "profile" => r.profile,
+      "profile_version" => r.profile_version,
       "register_key" => r.register_key,
       "timestamp" => DateTime.to_iso8601(r.timestamp),
-      "raw_words" => r.raw_words,
-      "value" => Decimal.to_string(r.value, :normal),
-      "unit" => r.unit
+      "value" => Decimal.to_string(r.value, :normal)
     }
     |> request(r.request_id)
   end

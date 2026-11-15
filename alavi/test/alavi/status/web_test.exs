@@ -47,11 +47,10 @@ defmodule Alavi.Status.WebTest do
       meter_serial: serial,
       product_code: @hostile,
       profile: "elite_440",
+      profile_version: 1,
       register_key: "active_energy_import",
       timestamp: @now,
-      raw_words: [0, 1],
-      value: Decimal.new("1234.500"),
-      unit: "kWh"
+      value: Decimal.new("1234.500")
     }
   end
 

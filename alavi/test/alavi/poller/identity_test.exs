@@ -61,7 +61,7 @@ defmodule Alavi.Poller.IdentityTest do
 
   test "an Elite 440 with no unit register is read in its profile's unit" do
     poll!([sim_meter(1, "elite_440", energy_unit: :absent)], [meter(1, "elite_440")])
-    assert [%Reading{unit_id: 1, unit: "kWh"} | _] = recorded!()
+    assert [%Reading{unit_id: 1, profile: "elite_440", profile_version: 1} | _] = recorded!()
   end
 
   test "an Elite 500 with no unit register is missed with exception 02, under the serial read" do

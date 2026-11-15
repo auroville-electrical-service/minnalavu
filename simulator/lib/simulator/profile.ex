@@ -8,12 +8,13 @@ defmodule Simulator.Profile do
   defstruct @enforce_keys
 
   @type table :: :holding | :input
+  @typedoc "`decimals` is nil for a float type: a profile gives none."
   @type spec :: %{
           table: table(),
           address: 0..0xFFFF,
           type: :u16 | :i16 | :u32 | :i32 | :u64 | :f32 | :f64,
           word_order: :high_first | :low_first,
-          decimals: 0..9
+          decimals: 0..9 | nil
         }
   @typedoc """
   The identity registers a meter of this profile answers, by check: where they
@@ -82,7 +83,7 @@ defmodule Simulator.Profile do
        address: entry["address"],
        type: type(entry["type"]),
        word_order: word_order(entry["word_order"]),
-       decimals: entry["decimals"]
+       decimals: Map.get(entry, "decimals")
      }}
   end
 

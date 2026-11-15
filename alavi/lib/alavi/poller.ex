@@ -543,7 +543,7 @@ defmodule Alavi.Poller do
   defp decoded(state, meter, seen, reg, words, n) do
     case Decode.value(reg, words) do
       {:ok, value} ->
-        reading(state, meter, seen, reg, words, value)
+        reading(state, meter, seen, reg, value)
 
       {:error, reason} ->
         %{missed(state, meter, seen.serial, reg, {:decode, reason}, n) | raw_words: words}
@@ -674,18 +674,17 @@ defmodule Alavi.Poller do
 
   defp client_opts(%Endpoint{framing: :rtu_over_tcp} = e), do: [timeout: e.timeout_ms]
 
-  defp reading(state, %Meter{} = meter, seen, %Register{} = reg, words, value) do
+  defp reading(state, %Meter{} = meter, seen, %Register{} = reg, value) do
     %Reading{
       endpoint: endpoint_ref(state.endpoint),
       unit_id: meter.unit_id,
       meter_serial: seen.serial,
       product_code: seen.product_code,
       profile: meter.profile.name,
+      profile_version: meter.profile.version,
       register_key: reg.key,
       timestamp: state.clock.(),
-      raw_words: words,
       value: value,
-      unit: reg.unit,
       request_id: state.job.request_id
     }
   end
@@ -696,6 +695,7 @@ defmodule Alavi.Poller do
       unit_id: meter.unit_id,
       meter_serial: serial,
       profile: meter.profile.name,
+      profile_version: meter.profile.version,
       register_key: reg.key,
       timestamp: state.clock.(),
       reason: reason,

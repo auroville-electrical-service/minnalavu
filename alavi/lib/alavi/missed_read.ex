@@ -4,16 +4,18 @@ defmodule Alavi.MissedRead do
   is the serial the meter reported that round, or nil when none was read.
   `attempts` 0 means it was not tried: the meter or endpoint was already known
   unreachable, or did not match its profile, this round. `request_id` is the
-  request a read on demand was made for, or nil.
+  request a read on demand was made for, or nil. `raw_words` are the words of
+  a `decode` miss, which no value names, and nil otherwise.
   """
 
-  alias Alavi.{Decode, Modbus.Client, Reading}
+  alias Alavi.{Decode, Modbus.Client, Profile, Reading}
 
   @enforce_keys [
     :endpoint,
     :unit_id,
     :meter_serial,
     :profile,
+    :profile_version,
     :register_key,
     :timestamp,
     :reason,
@@ -33,6 +35,7 @@ defmodule Alavi.MissedRead do
           unit_id: 1..247,
           meter_serial: String.t() | nil,
           profile: String.t(),
+          profile_version: Profile.version(),
           register_key: String.t(),
           timestamp: DateTime.t(),
           reason: reason(),
@@ -51,6 +54,7 @@ defmodule Alavi.MissedRead do
       "unit_id" => m.unit_id,
       "meter_serial" => m.meter_serial,
       "profile" => m.profile,
+      "profile_version" => m.profile_version,
       "register_key" => m.register_key,
       "timestamp" => DateTime.to_iso8601(m.timestamp),
       "reason" => reason,

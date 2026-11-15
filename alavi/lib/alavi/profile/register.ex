@@ -9,6 +9,7 @@ defmodule Alavi.Profile.Register do
     :word_order,
     :decimals,
     :unit,
+    :kind,
     :source,
     :placeholder,
     :verified_on_device
@@ -18,15 +19,21 @@ defmodule Alavi.Profile.Register do
   @type data_type :: :u16 | :i16 | :u32 | :i32 | :u64 | :f32 | :f64
   @type word_order :: :high_first | :low_first
   @type source :: String.t()
+  @type kind :: :cumulative | :interval | :demand | :instantaneous
 
+  @typedoc """
+  `decimals` is an integer register's places, and nil for a float, which
+  decodes to the shortest decimal that names its bits.
+  """
   @type t :: %__MODULE__{
           key: String.t(),
           table: PDU.table(),
           address: 0..0xFFFF,
           type: data_type(),
           word_order: word_order(),
-          decimals: 0..9,
+          decimals: 0..9 | nil,
           unit: String.t(),
+          kind: kind(),
           source: source() | nil,
           placeholder: boolean(),
           verified_on_device: Date.t() | nil
@@ -44,6 +51,12 @@ defmodule Alavi.Profile.Register do
   }
   @word_orders %{"high_first" => :high_first, "low_first" => :low_first}
   @units ["Wh", "kWh", "varh", "kvarh"]
+  @kinds %{
+    "cumulative" => :cumulative,
+    "interval" => :interval,
+    "demand" => :demand,
+    "instantaneous" => :instantaneous
+  }
 
   @spec word_count(t() | data_type()) :: 1 | 2 | 4
   def word_count(%__MODULE__{type: type}), do: word_count(type)
@@ -59,8 +72,9 @@ defmodule Alavi.Profile.Register do
          {:ok, address} <- integer(entry, "address", 0..0xFFFF),
          {:ok, type} <- lookup(entry, "type", @types),
          {:ok, word_order} <- lookup(entry, "word_order", @word_orders),
-         {:ok, decimals} <- integer(entry, "decimals", 0..9),
+         {:ok, decimals} <- decimals(entry, type),
          {:ok, unit} <- one_of(entry, "unit", @units),
+         {:ok, kind} <- lookup(entry, "kind", @kinds),
          {:ok, placeholder} <- boolean(entry, "placeholder"),
          {:ok, verified} <- parse_verified(entry),
          {:ok, source} <- source(entry, placeholder) do
@@ -73,6 +87,7 @@ defmodule Alavi.Profile.Register do
          word_order: word_order,
          decimals: decimals,
          unit: unit,
+         kind: kind,
          source: source,
          placeholder: placeholder,
          verified_on_device: verified
@@ -104,6 +119,14 @@ defmodule Alavi.Profile.Register do
 
   def parse_verified(_entry),
     do: {:error, "verified_on_device must be null or a YYYY-MM-DD date"}
+
+  defp decimals(entry, type) when type in [:f32, :f64] do
+    if Map.has_key?(entry, "decimals"),
+      do: {:error, "decimals is for integer registers: a float has none"},
+      else: {:ok, nil}
+  end
+
+  defp decimals(entry, _type), do: integer(entry, "decimals", 0..9)
 
   defp source(%{"source" => nil}, true), do: {:ok, nil}
 

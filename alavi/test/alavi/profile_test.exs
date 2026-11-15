@@ -1,7 +1,7 @@
 defmodule Alavi.ProfileTest do
   use ExUnit.Case, async: true
 
-  alias Alavi.{Decode, Profile}
+  alias Alavi.Profile
 
   @contract Path.expand("../../../contract", __DIR__)
 
@@ -84,44 +84,84 @@ defmodule Alavi.ProfileTest do
     test "an unknown data type is rejected" do
       assert {:error, "registers[0]: type" <> _} = Profile.parse(profile_json(%{"type" => "f16"}))
     end
+
+    test "a profile has a version from 1 to 2^53 - 1" do
+      assert {:ok, %Profile{version: 3}} = Profile.parse(%{profile_json(%{}) | "version" => 3})
+
+      for bad <- [0, 9_007_199_254_740_992, "1", 1.0] do
+        json = %{profile_json(%{}) | "version" => bad}
+        assert {:error, "expected schema_version, profile, a version" <> _} = Profile.parse(json)
+      end
+
+      json = Map.delete(profile_json(%{}), "version")
+      assert {:error, "expected schema_version" <> _} = Profile.parse(json)
+    end
+
+    test "every register has a kind" do
+      assert {:ok, %{registers: [%{kind: :interval}]}} =
+               Profile.parse(profile_json(%{"kind" => "interval"}))
+
+      assert {:error, "registers[0]: kind \"net\" unknown"} =
+               Profile.parse(profile_json(%{"kind" => "net"}))
+
+      assert {:error, "registers[0]: kind must be" <> _} =
+               %{} |> entry() |> Map.delete("kind") |> with_entry() |> Profile.parse()
+    end
+
+    test "an integer register has decimals, a float none" do
+      assert {:error, "registers[0]: decimals must be an integer"} =
+               %{} |> entry() |> Map.delete("decimals") |> with_entry() |> Profile.parse()
+
+      float = %{"type" => "f32"} |> entry() |> Map.delete("decimals") |> with_entry()
+      assert {:ok, %{registers: [%{type: :f32, decimals: nil}]}} = Profile.parse(float)
+
+      assert {:error, "registers[0]: decimals is for integer registers" <> _} =
+               Profile.parse(profile_json(%{"type" => "f64", "decimals" => 3}))
+    end
   end
 
-  test "contract fixture values decode from their raw words, under accepted product codes" do
+  test "contract fixture readings cite a profile at its version, a register it names, and an accepted product code" do
     fixture =
       @contract |> Path.join("fixtures/batch.v1.basic.json") |> File.read!() |> JSON.decode!()
 
+    for event <- fixture["readings"] ++ fixture["missed_reads"] do
+      {:ok, profile} = Profile.load(Path.join(@contract, "profiles/#{event["profile"]}.json"))
+      assert event["profile_version"] == profile.version
+      assert {:ok, _register} = Profile.register(profile, event["register_key"])
+    end
+
     for reading <- fixture["readings"] do
       {:ok, profile} = Profile.load(Path.join(@contract, "profiles/#{reading["profile"]}.json"))
-      {:ok, register} = Profile.register(profile, reading["register_key"])
-
-      assert {:ok, value} = Decode.value(register, reading["raw_words"])
-      assert Decimal.to_string(value) == reading["value"]
-      assert register.unit == reading["unit"]
       assert reading["product_code"] in profile.identity.product_code.accept
     end
   end
 
-  defp profile_json(overrides) do
-    entry =
-      Map.merge(
-        %{
-          "key" => "e",
-          "table" => "input",
-          "address" => 0,
-          "type" => "u32",
-          "word_order" => "high_first",
-          "decimals" => 0,
-          "unit" => "kWh",
-          "source" => nil,
-          "placeholder" => true,
-          "verified_on_device" => nil
-        },
-        overrides
-      )
+  defp profile_json(overrides), do: overrides |> entry() |> with_entry()
 
+  defp entry(overrides) do
+    Map.merge(
+      %{
+        "key" => "e",
+        "table" => "input",
+        "address" => 0,
+        "type" => "u32",
+        "word_order" => "high_first",
+        "decimals" => 0,
+        "unit" => "kWh",
+        "kind" => "cumulative",
+        "source" => nil,
+        "placeholder" => true,
+        "verified_on_device" => nil
+      },
+      overrides
+    )
+  end
+
+  defp with_entry(entry) do
     %{
       "schema_version" => 1,
       "profile" => "test",
+      "version" => 1,
       "models" => ["Test"],
       "sources" => ["x"],
       "identity" => %{},

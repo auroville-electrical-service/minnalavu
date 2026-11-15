@@ -24,11 +24,10 @@ defmodule Alavi.StatusTest do
       meter_serial: "SIM-#{unit}",
       product_code: "ELITE440-445",
       profile: "elite_440",
+      profile_version: 1,
       register_key: key,
       timestamp: @at,
-      raw_words: [0, 1],
-      value: Decimal.new(value),
-      unit: "kWh"
+      value: Decimal.new(value)
     }
   end
 
@@ -38,6 +37,7 @@ defmodule Alavi.StatusTest do
       unit_id: unit,
       meter_serial: nil,
       profile: "elite_440",
+      profile_version: 1,
       register_key: key,
       timestamp: @at,
       reason: reason,

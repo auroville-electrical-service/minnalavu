@@ -79,7 +79,7 @@ defmodule Alavi.CollectorTest do
 
       assert length(readings) == 6
       assert Enum.all?(missed, &match?(%MissedRead{unit_id: 9}, &1))
-      assert hd(readings).value == Decimal.new("123456.000")
+      assert hd(readings).value == Decimal.new("123456")
       assert [%{unit_id: 1, software: "SIM-SW"}, %{unit_id: 3, software: "SIM-SW"}] = names
 
       :ok = stop_supervised(:collector)

@@ -6,11 +6,18 @@ defmodule Alavi.Profile do
 
   alias Alavi.Profile.{Firmware, Identity, Register}
 
-  @enforce_keys [:name, :models, :sources, :identity, :firmware, :registers]
+  @enforce_keys [:name, :version, :models, :sources, :identity, :firmware, :registers]
   defstruct @enforce_keys
+
+  # The batch schema's bound: 2^53 - 1, so a version survives a JSON number.
+  @max_version 9_007_199_254_740_991
+
+  @typedoc "Cited by every reading decoded under it; a version never changes once cited."
+  @type version :: 1..9_007_199_254_740_991
 
   @type t :: %__MODULE__{
           name: String.t(),
+          version: version(),
           models: [String.t()],
           sources: [Register.source()],
           identity: Identity.t(),
@@ -70,13 +77,14 @@ defmodule Alavi.Profile do
         %{
           "schema_version" => 1,
           "profile" => name,
+          "version" => version,
           "models" => [_ | _] = models,
           "sources" => [_ | _] = source_entries,
           "identity" => identity_json,
           "registers" => [_ | _] = entries
         } = json
       )
-      when is_binary(name) do
+      when is_binary(name) and version in 1..@max_version do
     with {:ok, sources} <- parse_sources(source_entries),
          {:ok, identity} <- Identity.parse(identity_json),
          {:ok, firmware} <- parse_firmware(json),
@@ -86,6 +94,7 @@ defmodule Alavi.Profile do
       {:ok,
        %__MODULE__{
          name: name,
+         version: version,
          models: models,
          sources: sources,
          identity: identity,
@@ -101,7 +110,7 @@ defmodule Alavi.Profile do
   def parse(_json),
     do:
       {:error,
-       "expected schema_version, profile, models, a non-empty sources list, identity, optionally firmware, and a non-empty registers list"}
+       "expected schema_version, profile, a version from 1 to 2^53 - 1, models, a non-empty sources list, identity, optionally firmware, and a non-empty registers list"}
 
   @spec register(t(), String.t()) :: {:ok, Register.t()} | {:error, :unknown_register}
   def register(%__MODULE__{registers: registers}, key) do

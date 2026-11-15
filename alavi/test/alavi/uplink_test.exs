@@ -56,11 +56,10 @@ defmodule Alavi.UplinkTest do
         meter_serial: "SIM-#{unit_id}",
         product_code: "ELITE440-445",
         profile: "elite_440",
+        profile_version: 1,
         register_key: key,
         timestamp: ~U[2026-11-01 00:00:00.123456Z],
-        raw_words: [18_417, 8192],
-        value: Decimal.new("123456789012.000123456"),
-        unit: "Wh"
+        value: Decimal.new("123456789012.000123456")
       }
     end
 
@@ -69,6 +68,7 @@ defmodule Alavi.UplinkTest do
       unit_id: unit_id,
       meter_serial: "SIM-#{unit_id}",
       profile: "elite_440",
+      profile_version: 1,
       register_key: "reactive_energy_import",
       timestamp: ~U[2026-11-01 00:00:01Z],
       reason: {:unreachable, {:socket, :econnrefused}},
