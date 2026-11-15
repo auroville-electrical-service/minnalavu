@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
   "profile": "elite_440",
+  "version": 1,
   "models": [
     "Elite 445",
     "Elite 446"
@@ -78,8 +79,8 @@
       "address": 199,
       "type": "f32",
       "word_order": "low_first",
-      "decimals": 3,
       "unit": "kWh",
+      "kind": "cumulative",
       "source": "elite_440-a",
       "placeholder": false,
       "verified_on_device": null
@@ -90,8 +91,8 @@
       "address": 201,
       "type": "f32",
       "word_order": "low_first",
-      "decimals": 3,
       "unit": "kWh",
+      "kind": "cumulative",
       "source": "elite_440-a",
       "placeholder": false,
       "verified_on_device": null

@@ -1,152 +1,219 @@
 {
   "format": "register-decode/1",
-  "description": "Raw words, in register-address order as read from the meter, and the decimal string each must decode to. Computed independently of either collector (Python struct and decimal). Integers are divided by 10^decimals exactly; floats are widened to f64, written as their shortest round-trip decimal, then rounded half-even to decimals places. profiles: entries of contract/profiles, by profile and register key, with the unit. types: each data type and word order, for an entry given inline. no_value: words that must decode to no value at all, with the error. Every implementation that decodes registers must give every value and refuse every no_value. Changing an expected value changes what is billed.",
+  "description": "Raw words, in register-address order as read from the meter, and the decimal string each must decode to. Computed independently of either collector by contract/tools/register_decode.py (Python struct, decimal and fractions). Integers are the raw integer divided by 10^decimals, exactly, with decimals places. Floats have no decimals: each decodes to the shortest decimal that, parsed at the register's own width (f32 or f64, round half to even), gives back the same bits: the fewest significant digits (at most 9 for f32, 17 for f64), and of the decimals with that many digits that do, the nearest the float's exact value, a tie going to the even last digit. The f32 is never widened to f64 first. It is written out in full, with no exponent, no trailing zeros after the point and no trailing point; negative zero is -0. profiles: entries of contract/profiles, by profile, profile_version and register key. types: each data type and word order, for an entry given inline. no_value: words that must decode to no value at all, with the error. Every implementation that decodes registers must give every value and refuse every no_value. Changing an expected value changes what is billed.",
   "profiles": [
     {
       "profile": "elite_440",
+      "profile_version": 1,
       "register_key": "active_energy_import",
       "raw_words": [
         0,
         0
       ],
-      "value": "0.000",
-      "unit": "kWh",
+      "value": "0",
       "why": "zero"
     },
     {
       "profile": "elite_440",
+      "profile_version": 1,
       "register_key": "active_energy_import",
       "raw_words": [
         20480,
         17562
       ],
-      "value": "1234.500",
-      "unit": "kWh",
+      "value": "1234.5",
       "why": "exact in f32"
     },
     {
       "profile": "elite_440",
+      "profile_version": 1,
       "register_key": "active_energy_import",
       "raw_words": [
         52429,
         15820
       ],
-      "value": "0.100",
-      "unit": "kWh",
-      "why": "0.1 is not exact in f32"
+      "value": "0.1",
+      "why": "0.1 is not exact in f32: its exact value is 0.100000001490116..., and widened to f64 its shortest form would be 0.10000000149011612"
     },
     {
       "profile": "elite_440",
+      "profile_version": 1,
+      "register_key": "active_energy_import",
+      "raw_words": [
+        46137,
+        16560
+      ],
+      "value": "5.522",
+      "why": "an ordinary reading"
+    },
+    {
+      "profile": "elite_440",
+      "profile_version": 1,
+      "register_key": "active_energy_import",
+      "raw_words": [
+        29950,
+        18345
+      ],
+      "value": "86761.984",
+      "why": "the nearest f32 is 86761.984375, and 86761.984 is the shortest that names it"
+    },
+    {
+      "profile": "elite_440",
+      "profile_version": 1,
       "register_key": "active_energy_import",
       "raw_words": [
         8293,
         18417
       ],
-      "value": "123456.789",
-      "unit": "kWh",
-      "why": "nearest f32 is 123456.7890625"
+      "value": "123456.79",
+      "why": "the nearest f32 is 123456.7890625; widened to f64 its shortest form would be that"
     },
     {
       "profile": "elite_440",
+      "profile_version": 1,
       "register_key": "active_energy_import",
       "raw_words": [
-        0,
-        16420
+        32,
+        17530
       ],
-      "value": "2.562",
-      "unit": "kWh",
-      "why": "an exact tie: half-even rounds down to 2"
+      "value": "1000.00195",
+      "why": "all nine digits needed"
     },
     {
       "profile": "elite_440",
+      "profile_version": 1,
       "register_key": "active_energy_import",
       "raw_words": [
-        0,
-        15936
+        2,
+        18816
       ],
-      "value": "0.188",
-      "unit": "kWh",
-      "why": "an exact tie: half-even rounds up to 8"
+      "value": "1048576.2",
+      "why": "exactly between the two nearest 8-digit decimals: the tie goes to the even digit, down"
     },
     {
       "profile": "elite_440",
+      "profile_version": 1,
       "register_key": "active_energy_import",
       "raw_words": [
-        4719,
-        14851
+        6,
+        18816
       ],
-      "value": "0.001",
-      "unit": "kWh",
-      "why": "widened to f64 first: 0.0005000000237... rounds up; the f32's own shortest digits (0.0005) would round down"
+      "value": "1048576.8",
+      "why": "exactly between the two nearest 8-digit decimals: the tie goes to the even digit, up"
     },
     {
       "profile": "elite_440",
-      "register_key": "active_energy_import",
-      "raw_words": [
-        14680,
-        15284
-      ],
-      "value": "0.005",
-      "unit": "kWh",
-      "why": "widened to f64 first: 0.0054999999... rounds down; the f32's own shortest digits would round up"
-    },
-    {
-      "profile": "elite_440",
+      "profile_version": 1,
       "register_key": "active_energy_import",
       "raw_words": [
         0,
         19328
       ],
-      "value": "16777216.000",
-      "unit": "kWh",
+      "value": "16777216",
       "why": "2^24, the last integer before f32 skips"
     },
     {
       "profile": "elite_440",
+      "profile_version": 1,
+      "register_key": "active_energy_import",
+      "raw_words": [
+        37704,
+        19250
+      ],
+      "value": "11703112",
+      "why": "above 2^23: the nearest f32 is 11703112"
+    },
+    {
+      "profile": "elite_440",
+      "profile_version": 1,
       "register_key": "active_energy_import",
       "raw_words": [
         65535,
         32639
       ],
-      "value": "340282346638528860000000000000000000000.000",
-      "unit": "kWh",
-      "why": "largest f32: every integer digit written out, no exponent"
+      "value": "340282350000000000000000000000000000000",
+      "why": "largest finite f32: every integer digit written out, no exponent; widened to f64 its shortest form would be 340282346638528860000000000000000000000"
     },
     {
       "profile": "elite_440",
+      "profile_version": 1,
+      "register_key": "active_energy_import",
+      "raw_words": [
+        0,
+        3968
+      ],
+      "value": "0.000000000000000000000000000012621775",
+      "why": "2^-96, a power of two: the nearest 8-digit decimal (1.2621774e-29) does not round-trip, the one above it does, so 8 digits, not 9"
+    },
+    {
+      "profile": "elite_440",
+      "profile_version": 1,
+      "register_key": "active_energy_import",
+      "raw_words": [
+        0,
+        128
+      ],
+      "value": "0.000000000000000000000000000000000000011754944",
+      "why": "smallest normal f32"
+    },
+    {
+      "profile": "elite_440",
+      "profile_version": 1,
+      "register_key": "active_energy_import",
+      "raw_words": [
+        65535,
+        127
+      ],
+      "value": "0.000000000000000000000000000000000000011754942",
+      "why": "largest f32 subnormal"
+    },
+    {
+      "profile": "elite_440",
+      "profile_version": 1,
       "register_key": "active_energy_import",
       "raw_words": [
         1,
         0
       ],
-      "value": "0.000",
-      "unit": "kWh",
-      "why": "smallest f32 subnormal"
+      "value": "0.000000000000000000000000000000000000000000001",
+      "why": "smallest f32 subnormal (1.40129846e-45 to nine digits): one digit names it"
     },
     {
       "profile": "elite_440",
+      "profile_version": 1,
       "register_key": "active_energy_export",
       "raw_words": [
         0,
         49088
       ],
-      "value": "-1.500",
-      "unit": "kWh",
+      "value": "-1.5",
       "why": "negative"
     },
     {
       "profile": "elite_440",
+      "profile_version": 1,
       "register_key": "active_energy_export",
       "raw_words": [
         0,
         32768
       ],
-      "value": "-0.000",
-      "unit": "kWh",
-      "why": "negative zero keeps its sign, as alavi's Decimal does"
+      "value": "-0",
+      "why": "negative zero keeps its sign: its bits differ from zero's"
+    },
+    {
+      "profile": "elite_440",
+      "profile_version": 1,
+      "register_key": "active_energy_export",
+      "raw_words": [
+        52429,
+        48588
+      ],
+      "value": "-0.1",
+      "why": "negative, not exact"
     },
     {
       "profile": "elite_500",
+      "profile_version": 1,
       "register_key": "active_energy_import",
       "raw_words": [
         0,
@@ -154,12 +221,12 @@
         0,
         0
       ],
-      "value": "0.000",
-      "unit": "kWh",
+      "value": "0",
       "why": "zero"
     },
     {
       "profile": "elite_500",
+      "profile_version": 1,
       "register_key": "active_energy_import",
       "raw_words": [
         58196,
@@ -168,50 +235,50 @@
         16531
       ],
       "value": "1234.567",
-      "unit": "kWh",
-      "why": "f64 holds it closely enough"
+      "why": "f64 names it in 7 digits"
     },
     {
       "profile": "elite_500",
+      "profile_version": 1,
       "register_key": "active_energy_import",
       "raw_words": [
-        43516,
-        54001,
-        25165,
-        16192
+        39322,
+        39321,
+        39321,
+        16313
       ],
-      "value": "0.000",
-      "unit": "kWh",
-      "why": "shortest digits are an exact tie and round to even (0.000); the exact binary value is above the tie and would give 0.001"
+      "value": "0.1",
+      "why": "0.1 is not exact in f64 either"
     },
     {
       "profile": "elite_500",
+      "profile_version": 1,
       "register_key": "active_energy_import",
       "raw_words": [
-        5243,
-        18350,
-        31457,
-        16228
+        27263,
+        64700,
+        21096,
+        16742
       ],
-      "value": "0.002",
-      "unit": "kWh",
-      "why": "shortest digits tie, round down to 2; the exact binary value would round up"
+      "value": "11703111.898",
+      "why": "an ordinary reading"
     },
     {
       "profile": "elite_500",
+      "profile_version": 1,
       "register_key": "active_energy_import",
       "raw_words": [
-        18874,
-        524,
-        34603,
-        16246
+        13108,
+        13107,
+        13107,
+        16339
       ],
-      "value": "0.006",
-      "unit": "kWh",
-      "why": "shortest digits tie, round up to 6; the exact binary value would round down"
+      "value": "0.30000000000000004",
+      "why": "all seventeen digits needed"
     },
     {
       "profile": "elite_500",
+      "profile_version": 1,
       "register_key": "active_energy_import",
       "raw_words": [
         0,
@@ -219,12 +286,12 @@
         0,
         17216
       ],
-      "value": "9007199254740992.000",
-      "unit": "kWh",
+      "value": "9007199254740992",
       "why": "2^53"
     },
     {
       "profile": "elite_500",
+      "profile_version": 1,
       "register_key": "active_energy_import",
       "raw_words": [
         61264,
@@ -232,61 +299,112 @@
         6884,
         17483
       ],
-      "value": "1000000000000000000000.000",
-      "unit": "kWh",
+      "value": "1000000000000000000000",
       "why": "shortest form is exponent notation in JavaScript and Python"
     },
     {
       "profile": "elite_500",
+      "profile_version": 1,
       "register_key": "active_energy_import",
       "raw_words": [
-        33654,
-        62477,
-        8693,
-        16004
+        44872,
+        39612,
+        55282,
+        15994
       ],
-      "value": "0.000",
-      "unit": "kWh",
-      "why": "shortest form is exponent notation; rounds to zero"
+      "value": "0.0000001",
+      "why": "shortest form is exponent notation in JavaScript and Python"
     },
     {
       "profile": "elite_500",
+      "profile_version": 1,
       "register_key": "active_energy_import",
       "raw_words": [
-        23698,
-        57470,
-        35881,
-        16791
+        65535,
+        65535,
+        65535,
+        32751
       ],
-      "value": "98765432.123",
-      "unit": "kWh",
-      "why": "eight integer digits"
+      "value": "179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "why": "largest finite f64: all 309 integer digits written out"
     },
     {
       "profile": "elite_500",
+      "profile_version": 1,
+      "register_key": "active_energy_import",
+      "raw_words": [
+        0,
+        0,
+        0,
+        96
+      ],
+      "value": "0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007120236347223045",
+      "why": "2^-1017, a power of two: the nearest 16-digit decimal does not round-trip, the one above it does, so 16 digits, not 17"
+    },
+    {
+      "profile": "elite_500",
+      "profile_version": 1,
+      "register_key": "active_energy_import",
+      "raw_words": [
+        0,
+        0,
+        0,
+        16
+      ],
+      "value": "0.000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000022250738585072014",
+      "why": "smallest normal f64"
+    },
+    {
+      "profile": "elite_500",
+      "profile_version": 1,
+      "register_key": "active_energy_import",
+      "raw_words": [
+        65535,
+        65535,
+        65535,
+        15
+      ],
+      "value": "0.00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002225073858507201",
+      "why": "largest f64 subnormal"
+    },
+    {
+      "profile": "elite_500",
+      "profile_version": 1,
+      "register_key": "active_energy_import",
+      "raw_words": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "value": "0.000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005",
+      "why": "smallest f64 subnormal"
+    },
+    {
+      "profile": "elite_500",
+      "profile_version": 1,
       "register_key": "reactive_energy_export",
       "raw_words": [
-        65221,
-        31666,
-        45298,
+        58548,
+        46321,
+        45308,
         49192
       ],
-      "value": "-12.346",
-      "unit": "kvarh",
+      "value": "-12.345678",
       "why": "negative, kvarh"
     },
     {
       "profile": "elite_500",
+      "profile_version": 1,
       "register_key": "reactive_energy_export",
       "raw_words": [
-        17197,
-        60188,
-        14050,
-        48922
+        0,
+        0,
+        0,
+        32768
       ],
-      "value": "-0.000",
-      "unit": "kvarh",
-      "why": "a negative that rounds to zero keeps its sign"
+      "value": "-0",
+      "why": "negative zero keeps its sign"
     }
   ],
   "types": [
@@ -364,6 +482,17 @@
       "why": "zero"
     },
     {
+      "type": "u32",
+      "word_order": "high_first",
+      "decimals": 3,
+      "raw_words": [
+        0,
+        1000
+      ],
+      "value": "1.000",
+      "why": "trailing zeros kept: decimals places"
+    },
+    {
       "type": "i32",
       "word_order": "low_first",
       "decimals": 3,
@@ -427,79 +556,84 @@
     {
       "type": "f32",
       "word_order": "high_first",
-      "decimals": 1,
       "raw_words": [
         16000,
         0
       ],
-      "value": "0.2",
-      "why": "high word first, an exact tie at one place: rounds to even"
-    },
-    {
-      "type": "f32",
-      "word_order": "high_first",
-      "decimals": 0,
-      "raw_words": [
-        16416,
-        0
-      ],
-      "value": "2",
-      "why": "rounds to even, 2"
+      "value": "0.25",
+      "why": "high word first"
     },
     {
       "type": "f32",
       "word_order": "low_first",
-      "decimals": 0,
       "raw_words": [
         0,
-        16480
+        16000
       ],
-      "value": "4",
-      "why": "rounds to even, 4"
+      "value": "0.25",
+      "why": "low word first, same value"
     },
     {
-      "type": "f64",
+      "type": "f32",
       "word_order": "high_first",
-      "decimals": 0,
       "raw_words": [
-        16352,
-        0,
-        0,
+        16384,
         0
       ],
-      "value": "0",
-      "why": "rounds to even, 0"
+      "value": "2",
+      "why": "an integer: no point"
+    },
+    {
+      "type": "f32",
+      "word_order": "low_first",
+      "raw_words": [
+        39322,
+        16025
+      ],
+      "value": "0.3",
+      "why": "not exact in f32"
     },
     {
       "type": "f64",
       "word_order": "high_first",
-      "decimals": 2,
       "raw_words": [
         49088,
         0,
         0,
         0
       ],
-      "value": "-0.12",
-      "why": "negative tie: rounds to even, -0.12"
+      "value": "-0.125",
+      "why": "high word first"
     },
     {
       "type": "f64",
       "word_order": "low_first",
-      "decimals": 9,
+      "raw_words": [
+        0,
+        0,
+        0,
+        49088
+      ],
+      "value": "-0.125",
+      "why": "low word first, same value"
+    },
+    {
+      "type": "f64",
+      "word_order": "low_first",
       "raw_words": [
         39322,
         39321,
         39321,
         16313
       ],
-      "value": "0.100000000",
-      "why": "nine places"
+      "value": "0.1",
+      "why": "not exact in f64"
     }
   ],
   "no_value": [
     {
       "profile": "elite_440",
+      "profile_version": 1,
       "register_key": "active_energy_import",
       "raw_words": [
         0,
@@ -510,6 +644,7 @@
     },
     {
       "profile": "elite_440",
+      "profile_version": 1,
       "register_key": "active_energy_import",
       "raw_words": [
         0,
@@ -520,6 +655,7 @@
     },
     {
       "profile": "elite_440",
+      "profile_version": 1,
       "register_key": "active_energy_import",
       "raw_words": [
         0,
@@ -530,6 +666,7 @@
     },
     {
       "profile": "elite_500",
+      "profile_version": 1,
       "register_key": "active_energy_import",
       "raw_words": [
         0,
@@ -542,6 +679,7 @@
     },
     {
       "profile": "elite_500",
+      "profile_version": 1,
       "register_key": "active_energy_import",
       "raw_words": [
         0,
@@ -554,6 +692,7 @@
     },
     {
       "profile": "elite_440",
+      "profile_version": 1,
       "register_key": "active_energy_import",
       "raw_words": [
         1
@@ -563,6 +702,7 @@
     },
     {
       "profile": "elite_500",
+      "profile_version": 1,
       "register_key": "active_energy_import",
       "raw_words": [
         0,

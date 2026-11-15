@@ -20,11 +20,10 @@
       "meter_serial": "SIM-445-0001",
       "product_code": "ELITE440-445",
       "profile": "elite_440",
+      "profile_version": 1,
       "register_key": "active_energy_import",
       "timestamp": "2026-11-01T00:00:00Z",
-      "raw_words": [20480, 17562],
-      "value": "1234.500",
-      "unit": "kWh"
+      "value": "1234.5"
     },
     {
       "endpoint": { "host": "10.0.0.21", "port": 502 },
@@ -32,11 +31,10 @@
       "meter_serial": "SIM-500-0001",
       "product_code": "E500C-5102",
       "profile": "elite_500",
+      "profile_version": 1,
       "register_key": "active_energy_export",
       "timestamp": "2026-11-01T00:00:01Z",
-      "raw_words": [0, 0, 18944, 16531],
-      "value": "1234.500",
-      "unit": "kWh"
+      "value": "1234.5"
     }
   ],
   "missed_reads": [
@@ -45,6 +43,7 @@
       "unit_id": 9,
       "meter_serial": "SIM-445-0009",
       "profile": "elite_440",
+      "profile_version": 1,
       "register_key": "active_energy_import",
       "timestamp": "2026-11-01T00:00:02Z",
       "reason": "exception",
@@ -58,6 +57,7 @@
       "unit_id": 1,
       "meter_serial": "SIM-445-0010",
       "profile": "elite_440",
+      "profile_version": 1,
       "register_key": "active_energy_import",
       "timestamp": "2026-11-01T00:00:03Z",
       "reason": "unreachable",

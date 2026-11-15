@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
   "profile": "elite_500",
+  "version": 1,
   "models": [
     "Elite 500"
   ],
@@ -76,8 +77,8 @@
       "address": 11149,
       "type": "f64",
       "word_order": "low_first",
-      "decimals": 3,
       "unit": "kWh",
+      "kind": "cumulative",
       "source": "elite_500-a",
       "placeholder": false,
       "verified_on_device": null
@@ -88,8 +89,8 @@
       "address": 11153,
       "type": "f64",
       "word_order": "low_first",
-      "decimals": 3,
       "unit": "kWh",
+      "kind": "cumulative",
       "source": "elite_500-a",
       "placeholder": false,
       "verified_on_device": null
@@ -100,8 +101,8 @@
       "address": 11189,
       "type": "f64",
       "word_order": "low_first",
-      "decimals": 3,
       "unit": "kvarh",
+      "kind": "cumulative",
       "source": "elite_500-a",
       "placeholder": false,
       "verified_on_device": null
@@ -112,8 +113,8 @@
       "address": 11193,
       "type": "f64",
       "word_order": "low_first",
-      "decimals": 3,
       "unit": "kvarh",
+      "kind": "cumulative",
       "source": "elite_500-a",
       "placeholder": false,
       "verified_on_device": null

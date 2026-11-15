@@ -91,6 +91,17 @@
     },
     "unit_id": { "type": "integer", "minimum": 1, "maximum": 247 },
     "word": { "type": "integer", "minimum": 0, "maximum": 65535 },
+    "profile": {
+      "description": "A profile in contract/profiles, by its name.",
+      "type": "string",
+      "minLength": 1
+    },
+    "profile_version": {
+      "description": "The version of that profile the collector read and decoded under. A version never changes once a batch cites it; a correction is a new version.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
     "request_id": {
       "description": "The request this was read for, as the server's answer listed it among the collector's jobs. Absent for a read the collector made of its own accord.",
       "type": "string",
@@ -105,11 +116,10 @@
         "meter_serial",
         "product_code",
         "profile",
+        "profile_version",
         "register_key",
         "timestamp",
-        "raw_words",
-        "value",
-        "unit"
+        "value"
       ],
       "properties": {
         "endpoint": { "$ref": "#/$defs/endpoint" },
@@ -124,21 +134,15 @@
           "type": "string",
           "minLength": 1
         },
-        "profile": { "type": "string", "minLength": 1 },
+        "profile": { "$ref": "#/$defs/profile" },
+        "profile_version": { "$ref": "#/$defs/profile_version" },
         "register_key": { "type": "string", "minLength": 1 },
         "timestamp": { "type": "string", "format": "date-time" },
-        "raw_words": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 4,
-          "items": { "$ref": "#/$defs/word" }
-        },
         "value": {
-          "description": "Decoded value as a decimal string; never a JSON number, so no float ever carries energy.",
+          "description": "The value decoded under the profile version's entry for register_key, as a decimal string, never a JSON number, so no float ever carries energy. Its unit and kind are the entry's. An integer register's value is exact; a float register's is the shortest decimal that names its bits at the register's own width (contract/fixtures/register-decode.v1.json), so the meter's words are recoverable from it.",
           "type": "string",
           "pattern": "^-?[0-9]+(\\.[0-9]+)?$"
         },
-        "unit": { "enum": ["Wh", "kWh", "varh", "kvarh"] },
         "request_id": { "$ref": "#/$defs/request_id" }
       }
     },
@@ -151,6 +155,7 @@
         "unit_id",
         "meter_serial",
         "profile",
+        "profile_version",
         "register_key",
         "timestamp",
         "reason",
@@ -167,7 +172,8 @@
           "type": ["string", "null"],
           "minLength": 1
         },
-        "profile": { "type": "string", "minLength": 1 },
+        "profile": { "$ref": "#/$defs/profile" },
+        "profile_version": { "$ref": "#/$defs/profile_version" },
         "register_key": { "type": "string", "minLength": 1 },
         "timestamp": {
           "description": "When the read was due and given up on.",
