@@ -5,9 +5,10 @@ if ((BASH_VERSINFO[0] < 5)); then
 fi
 set -euo pipefail
 
-# The SQL tests: recreate the test database, apply every migration, then run
-# each test/*.sql file in a transaction that is rolled back. Prints each
-# assertion and a count; exits non-zero on the first failure.
+# The SQL tests: recreate the test database, apply every migration and load
+# contract/profiles, then run each test/*.sql file in a transaction that is
+# rolled back. Prints each assertion and a count; exits non-zero on the first
+# failure.
 #   bin/dev central bin/test
 if (($# != 0)); then
   printf 'usage: bin/test\n' >&2
@@ -21,6 +22,7 @@ cd "$central"
 dbmate --url "$url" --wait drop >/dev/null
 dbmate --url "$url" create >/dev/null
 bin/migrate "$url" --apply >/dev/null
+bin/load-profiles "$url" --apply >/dev/null
 
 passed=0
 for file in test/*.sql; do

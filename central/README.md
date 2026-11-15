@@ -15,17 +15,20 @@ The directory is not named `minnalavu/`, since that is the repo itself.
   migration. Never edit one that has been applied anywhere that matters.
 - `test/*.sql`: the SQL tests, each a transaction that is rolled back; helpers in
   `test/lib/assert.sql`.
-- `bin/`: `migrate`, `test`, `dev-db` (dev only), `collector-token`, `alert`
-  and `test-alert`.
+- `bin/`: `migrate`, `load-profiles`, `test`, `dev-db` (dev only),
+  `collector-token`, `alert` and `test-alert`.
 
 ## Schemas and roles
 
 - `store`: the data. `readings` and `missed_reads` are hypertables. A reading
   is keyed on `(meter_serial, register_key, read_at)`, the serial being the one
-  the meter reported, and carries the product code it reported too. A missed
+  the meter reported, and carries the product code it reported too, its value
+  as sent, and the profile version it was decoded under; no raw words, unit or
+  kind (the profile catalog, below, gives those). A missed
   read is a fact about an address, keyed on `(collector_id, endpoint_host,
   endpoint_port, unit_id, register_key, read_at)`, and carries the serial read
-  in its round, or none. `firmware_reads`: a meter's software and firmware
+  in its round, or none, its profile version, and any raw words no value came
+  of. `firmware_reads`: a meter's software and firmware
   names as read, with the serial and product code read with them, keyed on
   `(collector_id, endpoint_host, endpoint_port, unit_id, read_at)`, a name it
   did not give NULL; a collector sends one when something in it changed, and
@@ -47,6 +50,28 @@ switches to the role the request's token names. Each collector has a role,
 `collector_<id>`, which inherits from `collector` the right to execute
 `api.ingest` and nothing else. The ingest function identifies the caller by
 that role, never by anything in the batch.
+
+## The profile catalog
+
+`store.profile_versions` and `store.profile_registers`: each version of each
+profile in `contract/profiles/`, and per register its table, address, type,
+word order and decimals (the decode; a float has no decimals), unit and kind.
+Every reading and missed read names a profile version and a register of it
+(a foreign key), so its unit and kind are the catalog's, and a value's
+raw words are recoverable from the value and the decode. Nothing in the
+catalog is ever updated or deleted (triggers refuse it, even for the owner).
+
+Load it as the owner after migrating, and again whenever a profile gains a
+version:
+
+    bin/load-profiles 'postgres://owner@host:5432/minnalavu?sslmode=require'           # what it would load
+    bin/load-profiles 'postgres://owner@host:5432/minnalavu?sslmode=require' --apply
+
+Every file is loaded in one transaction. A version already loaded is left as
+it is when its file still names the same registers with the same decode,
+address, unit and kind (a change to `verified_on_device` or a source is no
+change), and refused otherwise, loading nothing: a loaded version never
+changes, so a correction is a new version.
 
 ## The device registry
 
@@ -246,7 +271,12 @@ notice says only "look again": read `jobs.request_status`.
   collector's requests, lists them. Both are left out when empty. A batch with
   no readings and no missed reads is a heartbeat: it is stored as an upload,
   and its answer lists the jobs as any other.
-- 422 (`PT422`): the batch does not match the schema; the message names the field.
+- 422 (`PT422`): the batch does not match the schema, or a reading or missed
+  read names a register its profile version does not; the message names the
+  field.
+- 503 (`PT503`): a reading or missed read is under a profile version the store
+  has not loaded. The collector keeps the batch and sends it again; load the
+  version (`bin/load-profiles`) and it is accepted.
 - 409 (`PT409`): the batch id was already sent by another collector.
 - 400 (`PGRST102`): the body is not JSON.
 - 401 / 403: no token, a bad or expired token, or a role that is not a
@@ -271,7 +301,8 @@ the TimescaleDB extension and the roles):
     bin/migrate 'postgres://owner@host:5432/minnalavu?sslmode=require' --apply
 
 Once, after the first migration: `ALTER ROLE authenticator LOGIN PASSWORD '…'`,
-with the password PostgREST's `db-uri` uses.
+with the password PostgREST's `db-uri` uses. Then load the profile catalog
+(above).
 
 A new collector, as the owner:
 
@@ -286,7 +317,9 @@ then its token, signed with PostgREST's `jwt-secret`, for the collector's
 
 Through `bin/dev central …`, with `docker compose up -d timescale postgrest mailpit`:
 
-    bin/dev central bin/test             # the SQL tests, on a fresh minnalavu_test database
+    bin/dev central bin/test             # the SQL tests, on a fresh minnalavu_test database,
+                                         # with contract/profiles loaded
     bin/dev central bin/test-alert       # bin/alert on a fresh minnalavu_alert_test database,
                                          # mailing the mailpit catcher (its mailbox is cleared)
-    bin/dev central bin/dev-db --apply   # migrate the dev database PostgREST serves
+    bin/dev central bin/dev-db --apply   # migrate the dev database PostgREST serves, and load
+                                         # contract/profiles into it

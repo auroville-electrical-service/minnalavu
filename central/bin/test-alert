@@ -25,6 +25,7 @@ cd "$central"
 dbmate --url "$url" --wait drop >/dev/null
 dbmate --url "$url" create >/dev/null
 bin/migrate "$url" --apply >/dev/null
+bin/load-profiles "$url" --apply >/dev/null
 
 tmp=$(mktemp -d)
 trap 'rm -rf -- "$tmp"' EXIT
@@ -57,8 +58,8 @@ BEGIN
      backlog_quarantined, readings_inserted, readings_duplicate, readings_conflicting,
      missed_reads_inserted, missed_reads_duplicate)
   VALUES (id, 'alert_test', now(), now(), 0, 0, 0, NULL, 1000, 0, 0, 0, 1, 0, 0, 0, 0);
-  INSERT INTO store.readings VALUES (serial, 'active_energy_import', now(), 1.0, 'Wh', '{0,0}',
-    'elite_440', '10.0.0.1', 502, unit, 'alert_test', id, 'ELITE440-445');
+  INSERT INTO store.readings VALUES (serial, 'active_energy_import', now(), 1.0, 'elite_440',
+    '10.0.0.1', 502, unit, 'alert_test', id, 'ELITE440-445', 1);
 END
 $$;
 SELECT alert_test_reading('ALERT-0001', 1);

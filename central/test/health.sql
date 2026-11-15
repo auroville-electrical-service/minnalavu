@@ -37,8 +37,8 @@ $$;
 CREATE FUNCTION pg_temp.reading(serial text, batch uuid, ago interval, unit integer) RETURNS void
 LANGUAGE sql AS $$
   INSERT INTO store.readings
-  SELECT serial, 'active_energy_import', now() - ago, 1.0, 'Wh', '{0,0}', 'elite_440', '10.0.0.1',
-         502, unit, b.collector_id, batch, 'ELITE440-445'
+  SELECT serial, 'active_energy_import', now() - ago, 1.0, 'elite_440', '10.0.0.1', 502, unit,
+         b.collector_id, batch, 'ELITE440-445', 1
   FROM store.batches b WHERE b.batch_id = batch
 $$;
 
@@ -48,7 +48,7 @@ RETURNS void
 LANGUAGE sql AS $$
   INSERT INTO store.missed_reads
   SELECT serial, 'active_energy_import', now() - ago, reason, NULL, NULL, 3, NULL, 'elite_440',
-         '10.0.0.1', 502, unit, b.collector_id, batch
+         '10.0.0.1', 502, unit, b.collector_id, batch, 1
   FROM store.batches b WHERE b.batch_id = batch
 $$;
 

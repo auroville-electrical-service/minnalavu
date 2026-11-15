@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+if ((BASH_VERSINFO[0] < 5)); then
+  echo "needs bash 5+, found $BASH_VERSION" >&2
+  exit 1
+fi
+set -euo pipefail
+
+# Load every profile in contract/profiles into the store's catalog
+# (admin.load_profile), in one transaction, as the database owner. Prints each
+# profile version as new or already loaded; a loaded version whose file now
+# says otherwise stops the run and loads nothing. Without --apply, nothing is
+# kept.
+#   bin/load-profiles postgres://postgres:...@host:5432/minnalavu?sslmode=... --apply
+usage="usage: bin/load-profiles <database-url> [--apply]"
+
+if (($# < 1 || $# > 2)) || { (($# == 2)) && [[ $2 != --apply ]]; }; then
+  printf '%s\n' "$usage" >&2
+  exit 2
+fi
+
+url=$1
+root=$(cd "$(dirname "$0")/../.." && pwd -P)
+shopt -s nullglob
+files=("$root"/contract/profiles/*.json)
+if ((${#files[@]} == 0)); then
+  printf 'no profiles in %s/contract/profiles\n' "$root" >&2
+  exit 1
+fi
+
+end=ROLLBACK
+if (($# == 2)); then
+  end=COMMIT
+fi
+
+# Each file goes to psql as a variable, which :'docN' quotes as a literal.
+vars=()
+sql=("BEGIN;")
+for i in "${!files[@]}"; do
+  vars+=(-v "doc$i=$(<"${files[$i]}")")
+  sql+=("SELECT format('%s version %s: %s', d ->> 'profile', d -> 'version', admin.load_profile(d))
+         FROM (SELECT :'doc$i'::jsonb AS d) f;")
+done
+sql+=("$end;")
+
+printf '%s\n' "${sql[@]}" | psql "$url" -X -q -At -v ON_ERROR_STOP=1 "${vars[@]}"
+if [[ $end == ROLLBACK ]]; then
+  printf 'dry run: nothing loaded; add --apply to load\n' >&2
+fi

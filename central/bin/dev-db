@@ -5,9 +5,9 @@ if ((BASH_VERSINFO[0] < 5)); then
 fi
 set -euo pipefail
 
-# Dev only: migrate the dev database and let PostgREST log in as
-# authenticator with the dev password, both from compose.yaml's environment.
-# Without --apply, list the pending migrations.
+# Dev only: migrate the dev database, load contract/profiles into its catalog,
+# and let PostgREST log in as authenticator with the dev password, all from
+# compose.yaml's environment. Without --apply, list the pending migrations.
 #   bin/dev central bin/dev-db --apply
 usage="usage: bin/dev-db [--apply]"
 
@@ -22,6 +22,7 @@ bin=$(cd "$(dirname "$0")" && pwd -P)
 
 "$bin/migrate" "$url" "$@"
 if (($# == 1)); then
+  "$bin/load-profiles" "$url" --apply
   # psql substitutes :'password' (quoted) in a script, not in -c.
   printf '%s\n' "ALTER ROLE authenticator LOGIN PASSWORD :'password';" |
     psql "$url" -X -q -v ON_ERROR_STOP=1 -v password="$password"

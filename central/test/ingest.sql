@@ -2,6 +2,7 @@
 
 \ir lib/assert.sql
 \set basic `cat ../contract/fixtures/batch.v1.basic.json`
+\set p440 `cat ../contract/profiles/elite_440.json`
 
 BEGIN;
 
@@ -19,20 +20,24 @@ SELECT pg_temp.is((SELECT answer FROM answers WHERE name = 'first') - 'first_rec
   'a new batch is stored, and the answer counts what was inserted');
 
 SELECT pg_temp.is(
-  (SELECT string_agg(format('%s %s %s %s', meter_serial, register_key, value, unit), '; '
-                     ORDER BY read_at)
-   FROM store.readings),
-  'SIM-445-0001 active_energy_import 1234.500 kWh; SIM-500-0001 active_energy_export 1234.500 kWh',
-  'readings keep their value exactly as sent, scale included, import and export apart');
+  (SELECT string_agg(format('%s %s %s %s %s', r.meter_serial, r.register_key, r.value, c.unit,
+                            c.kind), '; ' ORDER BY r.read_at)
+   FROM store.readings r
+   JOIN store.profile_registers c
+     ON (c.profile, c.version, c.register_key) = (r.profile, r.profile_version, r.register_key)),
+  'SIM-445-0001 active_energy_import 1234.5 kWh cumulative; '
+  || 'SIM-500-0001 active_energy_export 1234.5 kWh cumulative',
+  'readings keep their value exactly as sent, import and export apart, and take their unit and '
+  || 'kind from their profile version');
 
 SELECT pg_temp.is(
-  (SELECT string_agg(format('%s %s %s %s %s %s %s', r.collector_id, r.raw_words, r.profile,
-                            r.endpoint_host, r.endpoint_port, r.unit_id, r.read_at), '; '
-                     ORDER BY r.read_at)
+  (SELECT string_agg(format('%s %s %s %s %s %s %s', r.collector_id, r.profile,
+                            r.profile_version, r.endpoint_host, r.endpoint_port, r.unit_id,
+                            r.read_at), '; ' ORDER BY r.read_at)
    FROM store.readings r),
-  'sqltest_a {20480,17562} elite_440 10.0.0.21 502 1 2026-11-01 00:00:00+00; '
-  || 'sqltest_a {0,0,18944,16531} elite_500 10.0.0.21 502 3 2026-11-01 00:00:01+00',
-  'readings keep their raw words, where they came from, and the calling collector');
+  'sqltest_a elite_440 1 10.0.0.21 502 1 2026-11-01 00:00:00+00; '
+  || 'sqltest_a elite_500 1 10.0.0.21 502 3 2026-11-01 00:00:01+00',
+  'readings keep their profile version, where they came from, and the calling collector');
 
 SELECT pg_temp.is(
   (SELECT string_agg(format('%s %s %s %s %s %s', meter_serial, reason, exception_code, detail,
@@ -87,9 +92,9 @@ SELECT pg_temp.ingest_as('collector_sqltest_b',
     pg_temp.changed(:'basic', '{"path": ["batch_id"], "value": "22222222-2222-4222-8222-222222222222"}'),
     '{"path": ["readings"], "value": [{"endpoint": {"host": "10.0.0.30", "port": 502},
        "unit_id": 2, "meter_serial": "SIM-445-0002", "product_code": "ELITE440-445",
-       "profile": "elite_440", "register_key": "active_energy_import",
+       "profile": "elite_440", "profile_version": 1, "register_key": "active_energy_import",
        "timestamp": "2026-11-01T00:00:00Z",
-       "raw_words": [0, 0], "value": "0.0", "unit": "Wh"}]}'));
+       "value": "0.0"}]}'));
 
 SELECT pg_temp.is(
   (SELECT string_agg(format('%s:%s', meter_serial, collector_id), ' ' ORDER BY meter_serial)
@@ -115,7 +120,7 @@ SELECT pg_temp.is(
   (SELECT format('%s / %s',
      (SELECT value FROM store.readings WHERE meter_serial = 'SIM-445-0001'),
      (SELECT string_agg(format('%s %s', value, batch_id), ', ') FROM store.reading_conflicts))),
-  '1234.500 / 999.0 33333333-3333-4333-8333-333333333333',
+  '1234.5 / 999.0 33333333-3333-4333-8333-333333333333',
   'the stored reading is unchanged and the conflicting one is kept');
 
 SELECT pg_temp.is(
@@ -160,10 +165,10 @@ SELECT pg_temp.is(
 SELECT pg_temp.is(
   pg_temp.sqlstate_as('postgres', $$
     INSERT INTO store.readings
-      (meter_serial, register_key, read_at, value, unit, raw_words, profile, endpoint_host,
+      (meter_serial, register_key, read_at, value, profile, profile_version, endpoint_host,
        endpoint_port, unit_id, product_code, collector_id, batch_id)
-    SELECT meter_serial, register_key, read_at + interval '1 second', value, unit, raw_words,
-           profile, endpoint_host, endpoint_port, unit_id, NULL, collector_id, batch_id
+    SELECT meter_serial, register_key, read_at + interval '1 second', value, profile,
+           profile_version, endpoint_host, endpoint_port, unit_id, NULL, collector_id, batch_id
     FROM store.readings LIMIT 1$$),
   '23502',
   'the store refuses a reading row without a product code');
@@ -175,23 +180,23 @@ INSERT INTO coded SELECT pg_temp.changed(pg_temp.changed(pg_temp.changed(:'basic
   '{"path": ["batch_id"], "value": "66666666-6666-4666-8666-666666666666"}'),
   '{"path": ["readings"], "value": [{"endpoint": {"host": "10.0.0.40", "port": 502},
      "unit_id": 4, "meter_serial": "SIM-445-0004", "product_code": "ELITE440-445",
-     "profile": "elite_440", "register_key": "active_energy_import",
-     "timestamp": "2026-11-02T00:00:00Z", "raw_words": [0, 0], "value": "0.0", "unit": "Wh"}]}'),
+     "profile": "elite_440", "profile_version": 1, "register_key": "active_energy_import",
+     "timestamp": "2026-11-02T00:00:00Z", "value": "0.0"}]}'),
   '{"path": ["missed_reads"], "value": [
      {"endpoint": {"host": "10.0.0.40", "port": 502}, "unit_id": 5, "meter_serial": null,
-      "profile": "elite_440", "register_key": "active_energy_import",
+      "profile": "elite_440", "profile_version": 1, "register_key": "active_energy_import",
       "timestamp": "2026-11-02T00:00:00Z", "reason": "timeout", "exception_code": null,
       "detail": null, "attempts": 3, "raw_words": null},
      {"endpoint": {"host": "10.0.0.40", "port": 502}, "unit_id": 6, "meter_serial": null,
-      "profile": "elite_440", "register_key": "active_energy_import",
+      "profile": "elite_440", "profile_version": 1, "register_key": "active_energy_import",
       "timestamp": "2026-11-02T00:00:00Z", "reason": "timeout", "exception_code": null,
       "detail": null, "attempts": 3, "raw_words": null},
      {"endpoint": {"host": "10.0.0.41", "port": 502}, "unit_id": 5, "meter_serial": "SIM-445-0007",
-      "profile": "elite_440", "register_key": "active_energy_import",
+      "profile": "elite_440", "profile_version": 1, "register_key": "active_energy_import",
       "timestamp": "2026-11-02T00:00:00Z", "reason": "exception", "exception_code": 2,
       "detail": null, "attempts": 3, "raw_words": null},
      {"endpoint": {"host": "10.0.0.42", "port": 502}, "unit_id": 5, "meter_serial": "SIM-445-0007",
-      "profile": "elite_440", "register_key": "active_energy_import",
+      "profile": "elite_440", "profile_version": 1, "register_key": "active_energy_import",
       "timestamp": "2026-11-02T00:00:00Z", "reason": "exception", "exception_code": 2,
       "detail": null, "attempts": 3, "raw_words": null}]}');
 
@@ -342,6 +347,127 @@ SELECT pg_temp.is(
     FROM store.firmware_reads LIMIT 1$$),
   '23502',
   'the store refuses a firmware read without a product code');
+
+-- The profile catalog: every reading and missed read names a register of a
+-- loaded profile version.
+CREATE FUNCTION pg_temp.renamed(batch jsonb, id text) RETURNS jsonb
+LANGUAGE sql AS $$
+  SELECT jsonb_set(batch, '{batch_id}', to_jsonb(id))
+$$;
+
+SELECT pg_temp.is(
+  pg_temp.ingest_error('collector_sqltest_a',
+    pg_temp.changed(pg_temp.renamed(:'basic', 'c0c0c0c0-c0c0-4c0c-8c0c-c0c0c0c0c0c0'),
+      '{"path": ["readings", 1, "register_key"], "value": "net_energy"}')),
+  'PT422: batch rejected: batch.readings[1].register_key is not a register of profile '
+  || 'elite_500 version 1',
+  'a reading of a register its profile version does not name is rejected, naming the field');
+
+SELECT pg_temp.is(
+  pg_temp.ingest_error('collector_sqltest_a',
+    pg_temp.changed(pg_temp.renamed(:'basic', 'c0c0c0c0-c0c0-4c0c-8c0c-c0c0c0c0c0c0'),
+      '{"path": ["missed_reads", 1, "register_key"], "value": "reactive_energy_import"}')),
+  'PT422: batch rejected: batch.missed_reads[1].register_key is not a register of profile '
+  || 'elite_440 version 1',
+  'so is a missed read of one');
+
+SELECT pg_temp.is(
+  pg_temp.ingest_error('collector_sqltest_a',
+    pg_temp.changed(pg_temp.renamed(:'basic', 'c0c0c0c0-c0c0-4c0c-8c0c-c0c0c0c0c0c0'),
+      '{"path": ["readings", 0, "profile_version"], "value": 2}')),
+  'PT503: batch.readings[0]: profile elite_440 version 2 is not loaded in the store',
+  'a reading under a profile version not loaded is refused with 503, so the collector sends it again');
+
+SELECT pg_temp.is(
+  pg_temp.ingest_error('collector_sqltest_a',
+    pg_temp.changed(pg_temp.renamed(:'basic', 'c0c0c0c0-c0c0-4c0c-8c0c-c0c0c0c0c0c0'),
+      '{"path": ["missed_reads", 0, "profile"], "value": "elite_999"}')),
+  'PT503: batch.missed_reads[0]: profile elite_999 version 1 is not loaded in the store',
+  'so is a missed read under a profile not loaded');
+
+SELECT pg_temp.is(
+  (SELECT count(*) FROM store.batches WHERE batch_id = 'c0c0c0c0-c0c0-4c0c-8c0c-c0c0c0c0c0c0'),
+  0::bigint,
+  'and nothing of their batches is stored');
+
+SELECT admin.load_profile(jsonb_set(:'p440', '{version}', '2'));
+
+SELECT pg_temp.is(
+  pg_temp.ingest_as('collector_sqltest_a',
+    pg_temp.changed(pg_temp.renamed(:'basic', 'c0c0c0c0-c0c0-4c0c-8c0c-c0c0c0c0c0c0'),
+      '{"path": ["readings", 0, "profile_version"], "value": 2}')) -> 'readings',
+  '{"received": 2, "inserted": 0, "duplicate": 1, "conflicting": 1}',
+  'once the version is loaded the batch is accepted, and a reading under another version of '
+  || 'the stored one''s profile is conflicting');
+
+SELECT pg_temp.is(
+  (SELECT format('%s %s', profile, profile_version) FROM store.reading_conflicts
+   WHERE batch_id = 'c0c0c0c0-c0c0-4c0c-8c0c-c0c0c0c0c0c0'),
+  'elite_440 2',
+  'the conflicting reading keeps its profile version');
+
+SELECT pg_temp.ingest_as('collector_sqltest_a',
+  pg_temp.changed(pg_temp.changed(pg_temp.renamed(:'basic', 'c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c1c1'),
+    '{"path": ["readings"], "value": []}'),
+    '{"path": ["missed_reads"], "value": [
+       {"endpoint": {"host": "10.0.0.50", "port": 502}, "unit_id": 1, "meter_serial": "SIM-445-0050",
+        "profile": "elite_440", "profile_version": 2, "register_key": "active_energy_export",
+        "timestamp": "2026-11-03T00:00:00Z", "reason": "profile_mismatch", "exception_code": null,
+        "detail": "product code ELITE440-447", "attempts": 1, "raw_words": null},
+       {"endpoint": {"host": "10.0.0.50", "port": 502}, "unit_id": 2, "meter_serial": "SIM-445-0051",
+        "profile": "elite_440", "profile_version": 1, "register_key": "active_energy_import",
+        "timestamp": "2026-11-03T00:00:00Z", "reason": "decode", "exception_code": null,
+        "detail": "NaN", "attempts": 1, "raw_words": [1, 32704]}]}'));
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s %s %s %s', reason, profile, profile_version,
+                            coalesce(raw_words::text, 'NULL')), '; ' ORDER BY unit_id)
+   FROM store.missed_reads WHERE batch_id = 'c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c1c1'),
+  'profile_mismatch elite_440 2 NULL; decode elite_440 1 {1,32704}',
+  'missed reads keep their profile version, a profile mismatch included, and the raw words '
+  || 'no value came of');
+
+-- The extremes of a float's shortest decimal: the largest finite f64, in full,
+-- has 309 integer digits; the smallest subnormal, 324 fractional digits.
+CREATE TEMP TABLE extremes (value text, at text);
+INSERT INTO extremes VALUES
+  ('17976931348623157' || repeat('0', 292), '2026-11-04T00:00:00Z'),
+  ('-0.' || repeat('0', 323) || '5', '2026-11-04T00:00:01Z');
+
+SELECT pg_temp.ingest_as('collector_sqltest_a',
+  pg_temp.changed(pg_temp.renamed(:'basic', 'c2c2c2c2-c2c2-4c2c-8c2c-c2c2c2c2c2c2'),
+    jsonb_build_object('path', jsonb_build_array('readings'), 'value',
+      (SELECT jsonb_agg(jsonb_set(jsonb_set(:'basic'::jsonb -> 'readings' -> 1,
+                                            '{value}', to_jsonb(e.value)),
+                                  '{timestamp}', to_jsonb(e.at)) ORDER BY e.at)
+       FROM extremes e))));
+
+SELECT pg_temp.is(
+  (SELECT string_agg(r.value::text, ' ' ORDER BY r.read_at) FROM store.readings r
+   WHERE r.batch_id = 'c2c2c2c2-c2c2-4c2c-8c2c-c2c2c2c2c2c2'),
+  (SELECT string_agg(e.value, ' ' ORDER BY e.at) FROM extremes e),
+  'a value of 309 integer digits and one of 324 fractional digits are stored exactly');
+
+SELECT pg_temp.is(
+  pg_temp.sqlstate_as('postgres', $$
+    INSERT INTO store.readings
+      (meter_serial, register_key, read_at, value, profile, profile_version, endpoint_host,
+       endpoint_port, unit_id, product_code, collector_id, batch_id)
+    SELECT meter_serial, 'net_energy', read_at, value, profile, profile_version, endpoint_host,
+           endpoint_port, unit_id, product_code, collector_id, batch_id
+    FROM store.readings LIMIT 1$$),
+  '23503',
+  'the store refuses a reading row whose register its profile version does not name');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s.%s', table_name, column_name), ', '
+                     ORDER BY table_name, column_name)
+   FROM information_schema.columns
+   WHERE table_schema = 'store' AND table_name IN ('readings', 'reading_conflicts', 'missed_reads')
+     AND column_name IN ('raw_words', 'unit', 'kind', 'profile_version')),
+  'missed_reads.profile_version, missed_reads.raw_words, reading_conflicts.profile_version, '
+  || 'readings.profile_version',
+  'readings carry a profile version and no raw words, unit or kind; missed reads keep raw words');
 
 SELECT pg_temp.is(
   (SELECT string_agg(format('%s.%s %s', table_name, column_name, data_type), '; '
