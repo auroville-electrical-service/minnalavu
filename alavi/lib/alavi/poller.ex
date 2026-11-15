@@ -472,8 +472,39 @@ defmodule Alavi.Poller do
 
   defp read_identity(%Meter{unit_id: unit, profile: %{identity: identity}}, state) do
     identity
-    |> Identity.reads()
-    |> Enum.reduce_while({%{}, state}, &identity_read(&1, &2, unit, identity))
+    |> Identity.requests()
+    |> Enum.reduce_while({%{}, state}, &identity_request(&1, &2, unit, identity))
+  end
+
+  defp identity_request({_, _, _, [read]}, acc, unit, identity),
+    do: identity_read(read, acc, unit, identity)
+
+  defp identity_request(
+         {table, address, count, reads} = request,
+         {results, state},
+         unit,
+         identity
+       ) do
+    case read_words(state, {unit, table, address, count}, 1) do
+      {{:ok, words, _n}, state} ->
+        {:cont, {Map.merge(results, Identity.split(request, words)), state}}
+
+      # A meter refuses the whole request if any register in it is missing (an
+      # Elite 440 without the unit setting), so each read is made alone, as if never merged.
+      {{:skip_register, _error, _n}, state} ->
+        identity_reads(reads, {results, state}, unit, identity)
+
+      {{:skip_meter, reason, n}, state} ->
+        serial = Identity.observed(identity, results).serial
+        {:halt, {{:missed, reason, n, serial}, state}}
+    end
+  end
+
+  defp identity_reads(reads, acc, unit, identity) do
+    case Enum.reduce_while(reads, acc, &identity_read(&1, &2, unit, identity)) do
+      {{:missed, _reason, _n, _serial}, _state} = missed -> {:halt, missed}
+      acc -> {:cont, acc}
+    end
   end
 
   defp identity_read({check, table, address, count}, {results, state}, unit, identity) do

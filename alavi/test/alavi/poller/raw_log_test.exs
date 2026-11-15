@@ -81,9 +81,9 @@ defmodule Alavi.Poller.RawLogTest do
       {lines, _port} = poll!(:rtu_over_tcp, [bad_crc: true], limits, 300)
       assert [line | _] = lines
 
-      # The first read of each round is the identity check: 6 registers of product code.
+      # The first read of each round is the identity check: the 36 registers 0-35, cut at 64 bytes.
       assert line =~
-               ~r/unit 1: 17 bytes skipped before the reply \(bad CRC.*\): 01 03 0C( [0-9A-F]{2}){14}$/
+               ~r/unit 1: 77 bytes skipped before the reply \(bad CRC.*\): 01 03 48( [0-9A-F]{2}){61} \(first 64 shown\)$/
     end
 
     test "holds the cap: max_lines per window, then a count of what was suppressed" do

@@ -1,6 +1,6 @@
 {
   "format": "identity-checks/1",
-  "description": "The identity check a collector runs every round before trusting a meter's energy registers, under the profiles in contract/profiles. reads: what each profile reads, in order, as [check, table, address, count]. cases: what each read returned (words, a Modbus exception code, or another failure such as a timeout), the verdict, and what was observed. verdict: ok, mismatch (the meter is not read; a missed read with reason profile_mismatch), or read_failed with the failure, treated like any failed read. The first check that fails decides. A product code must be one the profile accepts. A serial is never compared with anything here, not even a configured one; it must only be readable as a label: printable ASCII, not empty. Both are decoded as ASCII, two bytes per register, high byte first, with trailing NULs and then surrounding spaces trimmed. observed: the serial and product code as decoded, whatever the verdict, or null where the read failed or the text is empty or not printable ASCII. Every implementation that reads meters must give every verdict and observe every value.",
+  "description": "The identity check a collector runs every round before trusting a meter's energy registers, under the profiles in contract/profiles. reads: what each profile reads, in order, as [check, table, address, count]. requests: those reads merged into the requests sent, in order, as [table, address, count, checks]: reads in one table share a request when at most 15 unread registers lie between them and the request stays within 125 registers, and a merged reply is cut into each read's words. A meter that refuses a merged request with an exception is read again one read per request, and each of those results is judged as below. cases: what each read returned (words, a Modbus exception code, or another failure such as a timeout), the verdict, and what was observed. verdict: ok, mismatch (the meter is not read; a missed read with reason profile_mismatch), or read_failed with the failure, treated like any failed read. The first check that fails decides. A product code must be one the profile accepts. A serial is never compared with anything here, not even a configured one; it must only be readable as a label: printable ASCII, not empty. Both are decoded as ASCII, two bytes per register, high byte first, with trailing NULs and then surrounding spaces trimmed. observed: the serial and product code as decoded, whatever the verdict, or null where the read failed or the text is empty or not printable ASCII. Every implementation that reads meters must give every verdict and observe every value.",
   "reads": {
     "elite_440": [
       [
@@ -40,6 +40,39 @@
         "holding",
         1957,
         1
+      ]
+    ]
+  },
+  "requests": {
+    "elite_440": [
+      [
+        "holding",
+        0,
+        36,
+        [
+          "product_code",
+          "serial",
+          "energy_unit"
+        ]
+      ]
+    ],
+    "elite_500": [
+      [
+        "holding",
+        1999,
+        28,
+        [
+          "product_code",
+          "serial"
+        ]
+      ],
+      [
+        "holding",
+        1957,
+        1,
+        [
+          "energy_unit"
+        ]
       ]
     ]
   },

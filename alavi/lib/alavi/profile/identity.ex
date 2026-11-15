@@ -2,8 +2,10 @@ defmodule Alavi.Profile.Identity do
   @moduledoc """
   What a meter must report before its profile's registers are trusted, parsed
   from a profile's `identity` section. Every check is optional per profile.
-  Pure: `reads/1` lists what to read, `verdict/2` judges what came back and
-  says what the meter reported, and `observed/2` says it for reads cut short.
+  Pure: `reads/1` lists what to read, `requests/1` merges those reads into
+  as few requests as the meters answer and `split/2` takes a merged reply
+  apart, `verdict/2` judges what came back and says what the meter reported,
+  and `observed/2` says it for reads cut short.
   """
 
   alias Alavi.Config.Fields
@@ -49,6 +51,8 @@ defmodule Alavi.Profile.Identity do
 
   @type check :: :product_code | :serial | :energy_unit
   @type read :: {check(), PDU.table(), 0..0xFFFF, pos_integer()}
+  @typedoc "One request covering `reads`, in the order `reads/1` lists them."
+  @type request :: {PDU.table(), 0..0xFFFF, 1..125, [read(), ...]}
   @type result :: {:ok, [0..0xFFFF]} | {:error, Client.error()}
   @type outcome :: :ok | {:mismatch, String.t()} | {:error, Client.error()}
   @typedoc """
@@ -63,6 +67,11 @@ defmodule Alavi.Profile.Identity do
   @tables %{"holding" => :holding, "input" => :input}
   @parts %{"high_byte" => :high_byte, "word" => :word}
   @illegal_address {:exception, 2}
+  # The widest run of unread registers seen answered inside one identity
+  # request: 15 on an Elite 440 (4-18) and 14 on an Elite 500 (2007-2020),
+  # one meter each, 2026-11-14. The 500 refused a request across 1958-1998 (41).
+  @max_gap 15
+  @max_count 125
 
   # contract: test/alavi/profile/identity_test.exs "parse/1"
   @spec parse(term()) :: {:ok, t()} | {:error, String.t()}
@@ -93,6 +102,32 @@ defmodule Alavi.Profile.Identity do
         do: {check, spec.table, spec.address, words(check, spec)}
   end
 
+  # contract: test/alavi/profile/identity_test.exs "requests/1"
+  @doc """
+  The reads merged into requests: reads in one table join a request when at
+  most #{@max_gap} unread registers lie between them and it stays within
+  #{@max_count} registers. In the order of each request's first read.
+  """
+  @spec requests(t()) :: [request()]
+  def requests(%__MODULE__{} = identity) do
+    reads = reads(identity)
+
+    reads
+    |> Enum.sort_by(fn {_, table, address, _} -> {table, address} end)
+    |> Enum.chunk_while(nil, &join/2, &close/1)
+    |> Enum.map(&request(&1, reads))
+    |> Enum.sort_by(fn {_, _, _, [first | _]} -> Enum.find_index(reads, &(&1 == first)) end)
+  end
+
+  # contract: test/alavi/profile/identity_test.exs "split/2"
+  @doc "Each read's words, out of a reply to `request`."
+  @spec split(request(), [0..0xFFFF]) :: %{check() => {:ok, [0..0xFFFF]}}
+  def split({_table, start, _count, reads}, words),
+    do:
+      Map.new(reads, fn {check, _, address, n} ->
+        {check, {:ok, Enum.slice(words, address - start, n)}}
+      end)
+
   # contract: test/alavi/profile/identity_test.exs "verdict/2"
   @spec verdict(t(), %{check() => result()}) :: verdict()
   def verdict(%__MODULE__{} = identity, results),
@@ -113,6 +148,26 @@ defmodule Alavi.Profile.Identity do
         failed -> {:halt, failed}
       end
     end)
+  end
+
+  defp join(read, nil), do: {:cont, [read]}
+
+  defp join({_, table, address, count} = read, [{_, table, start, _} | _] = group) do
+    last = Enum.max(for {_, _, a, n} <- group, do: a + n)
+
+    if address - last <= @max_gap and address + count - start <= @max_count,
+      do: {:cont, group ++ [read]},
+      else: {:cont, group, [read]}
+  end
+
+  defp join(read, group), do: {:cont, group, [read]}
+
+  defp close(nil), do: {:cont, nil}
+  defp close(group), do: {:cont, group, nil}
+
+  defp request([{_, table, start, _} | _] = group, reads) do
+    last = Enum.max(for {_, _, a, n} <- group, do: a + n)
+    {table, start, last - start, Enum.filter(reads, &(&1 in group))}
   end
 
   defp observe({:ok, words}), do: words |> Text.trimmed() |> Text.printable()

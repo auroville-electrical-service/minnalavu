@@ -19,12 +19,16 @@ export { encodeRequest, type Framing } from "./framing";
 export {
   type Check,
   type IdentityRead,
+  type IdentityRequest,
   identityReads,
+  identityRequests,
   identityVerdict,
   type Observed,
   type Outcome,
   type ReadFailure,
   type ReadResult,
+  type Results,
+  splitReply,
   type Verdict,
 } from "./identity";
 export { functionCode, type ReadRequest, readRequest, type Table } from "./pdu";

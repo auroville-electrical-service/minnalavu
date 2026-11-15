@@ -119,6 +119,7 @@ const check = z.enum(["product_code", "serial", "energy_unit"]);
 const identityFixture = z.object({
   format: z.literal("identity-checks/1"),
   reads: z.record(z.string(), z.array(z.tuple([check, z.string(), z.int(), z.int()]))),
+  requests: z.record(z.string(), z.array(z.tuple([z.string(), z.int(), z.int(), z.array(check)]))),
   cases: z.array(
     z.object({
       why: z.string(),

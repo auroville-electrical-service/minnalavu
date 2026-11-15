@@ -24,12 +24,45 @@ defmodule Simulator.MeterTest do
       assert :unmapped = meter |> Meter.identify(:serial, :absent) |> Meter.read(:holding, 0, 4)
     end
 
-    test "an Elite 440 answers its invented names; the registers between them stay unmapped" do
+    test "an Elite 440 answers its invented names; the registers between them read 0" do
       meter = Meter.new(1, Profile.load!("elite_440"))
       assert {:ok, software} = Meter.read(meter, :holding, 4, 4)
       assert text(software) == "SIM-SW"
       assert {:ok, [0x0100]} = Meter.read(meter, :holding, 18, 1)
-      assert :unmapped = Meter.read(meter, :holding, 0, 25)
+      assert {:ok, [0, 0]} = Meter.read(meter, :holding, 16, 2)
+    end
+
+    test "an Elite 440 answers its identity block 0-35 in one request, and nothing past it" do
+      meter = Meter.new(1, Profile.load!("elite_440"))
+      assert {:ok, block} = Meter.read(meter, :holding, 0, 36)
+      assert text(Enum.slice(block, 0, 4)) == "SIM-1"
+      assert text(Enum.slice(block, 19, 6)) == "ELITE440-445"
+      assert Enum.at(block, 35) == 0x0100
+      assert :unmapped = Meter.read(meter, :holding, 0, 37)
+    end
+
+    test "an Elite 440 without the unit setting refuses the block, and answers the rest of it" do
+      meter = Meter.new(1, Profile.load!("elite_440")) |> Meter.identify(:energy_unit, :absent)
+      assert :unmapped = Meter.read(meter, :holding, 0, 36)
+      assert :unmapped = Meter.read(meter, :holding, 35, 1)
+      assert {:ok, [0]} = Meter.read(meter, :holding, 34, 1)
+      assert {:ok, _} = Meter.read(meter, :holding, 0, 35)
+    end
+
+    test "an unmapped name is unmapped inside the block too" do
+      meter = Meter.new(1, Profile.load!("elite_440")) |> Meter.name(:software, :absent)
+      assert :unmapped = Meter.read(meter, :holding, 0, 36)
+      assert :unmapped = Meter.read(meter, :holding, 7, 1)
+      assert {:ok, [0]} = Meter.read(meter, :holding, 16, 1)
+    end
+
+    test "an Elite 500 answers 1999-2026 in one request, but not from its unit register at 1957" do
+      meter = Meter.new(3, Profile.load!("elite_500"))
+      assert {:ok, block} = Meter.read(meter, :holding, 1999, 28)
+      assert text(Enum.slice(block, 0, 8)) == "SIM-3"
+      assert text(Enum.slice(block, 22, 6)) == "E500C-5102"
+      assert {:ok, [3]} = Meter.read(meter, :holding, 1957, 1)
+      assert :unmapped = Meter.read(meter, :holding, 1957, 70)
     end
 
     test "an Elite 500's names, in its three-register module 2, can be overridden or unmapped" do

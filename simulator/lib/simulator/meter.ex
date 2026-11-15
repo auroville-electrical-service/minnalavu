@@ -8,6 +8,11 @@ defmodule Simulator.Meter do
   register unmapped (exception 02), as on a meter with no unit setting. A new
   meter's serial is `SIM-<unit_id>`, an invented value.
 
+  Each model's identity block answers as one request, as the real meters do:
+  holding 0-35 on the Elite 440 family, 1999-2026 on the Elite 500. Registers
+  in it the simulator does not model read 0. A register left `:absent` is
+  unmapped in the block too, so a request across it is refused whole.
+
   `firmware` holds what the profile's name registers report, per name, or
   `:absent` to unmap them. A new meter's names are invented too (`SIM-SW`,
   `SIM-F1`, `SIM-F2`, version `0100`); the version is the hex digits of its
@@ -63,6 +68,10 @@ defmodule Simulator.Meter do
     "elite_440" => %{function_code: 6, other: {16, 2}, addresses: [520, 700, 800, 801]},
     "elite_500" => %{function_code: 16, other: {6, 1}, addresses: [900, 1500, 5002, 5003]}
   }
+
+  # Identity blocks one request reads whole, by PDU address, seen on one meter
+  # each (2026-11-14).
+  @blocks %{"elite_440" => [0..35], "elite_500" => [1999..2026]}
 
   @doc "A meter whose registers all start at zero, then take `values`."
   @spec new(1..247, Profile.t(), %{String.t() => Decimal.t()}) :: t()
@@ -150,10 +159,28 @@ defmodule Simulator.Meter do
           into: %{},
           do: {spec.address + offset, word}
 
-    registers
+    meter
+    |> block_bank(table)
+    |> Map.merge(registers)
     |> Map.merge(identity_bank(meter, table))
     |> Map.merge(firmware_bank(meter, table))
     |> Map.merge(selector_bank(meter, table))
+    |> Map.drop(absent(meter, table))
+  end
+
+  defp block_bank(%__MODULE__{profile: %Profile{name: name}}, :holding),
+    do: for(block <- Map.get(@blocks, name, []), address <- block, into: %{}, do: {address, 0})
+
+  defp block_bank(_meter, :input), do: %{}
+
+  defp absent(%__MODULE__{profile: profile, identity: identity, firmware: names}, table) do
+    specs =
+      for({check, :absent} <- identity, do: profile.identity[check]) ++
+        for {name, :absent} <- names, do: profile.firmware[name]
+
+    for %{table: ^table, address: address} = spec <- specs,
+        offset <- 0..(Map.get(spec, :count, 1) - 1),
+        do: address + offset
   end
 
   defp selector_bank(%__MODULE__{selectors: selectors}, :holding), do: selectors

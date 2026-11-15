@@ -1,6 +1,6 @@
 import type { Table } from "./pdu";
 import type { Profile } from "./profile";
-import type { Result } from "./result";
+import { ok, type Result } from "./result";
 import { bytesOf, printable, trimmed } from "./text";
 
 // The checks guard against a meter registered under the wrong model and say what the meter
@@ -13,6 +13,14 @@ export interface IdentityRead {
   readonly table: Table;
   readonly address: number;
   readonly count: number;
+}
+
+// One request covering `reads`, in the order `identityReads` lists them.
+export interface IdentityRequest {
+  readonly table: Table;
+  readonly address: number;
+  readonly count: number;
+  readonly reads: readonly IdentityRead[];
 }
 
 export type ReadFailure =
@@ -39,7 +47,7 @@ export interface Verdict {
 }
 
 type Identity = Profile["identity"];
-type Results = Readonly<Partial<Record<Check, ReadResult>>>;
+export type Results = Readonly<Partial<Record<Check, ReadResult>>>;
 
 const illegalAddress = 2;
 const passed: Outcome = { kind: "ok" };
@@ -52,6 +60,56 @@ export const identityReads = (identity: Identity): readonly IdentityRead[] =>
     if (!spec) return [];
     return [{ check, table: spec.table, address: spec.address, count: "count" in spec ? spec.count : 1 }];
   });
+
+// The widest run of unread registers seen answered inside one identity request: 15 on an Elite
+// 440 (4-18) and 14 on an Elite 500 (2007-2020), one meter each, 2026-11-14. The 500 refused a
+// request across 1958-1998 (41). Follows `alavi`'s `Alavi.Profile.Identity.requests/1`.
+const maxGap = 15;
+const maxCount = 125;
+
+const end = (r: { readonly address: number; readonly count: number }): number => r.address + r.count;
+
+const joins = (group: readonly IdentityRead[], read: IdentityRead): boolean => {
+  const [first] = group;
+  if (!first || first.table !== read.table) return false;
+  const last = Math.max(...group.map(end));
+  return read.address - last <= maxGap && end(read) - first.address <= maxCount;
+};
+
+const asRequest = (group: readonly IdentityRead[], reads: readonly IdentityRead[]): IdentityRequest => {
+  const [first] = group;
+  if (!first) throw new Error("an empty group of identity reads");
+  const last = Math.max(...group.map(end));
+  return {
+    table: first.table,
+    address: first.address,
+    count: last - first.address,
+    reads: reads.filter((r) => group.includes(r)),
+  };
+};
+
+// contract: test/identity.test.ts "identityRequests"
+// Reads in one table join a request when at most `maxGap` unread registers lie between them and
+// it stays within `maxCount` registers; in the order of each request's first read.
+export const identityRequests = (identity: Identity): readonly IdentityRequest[] => {
+  const reads = identityReads(identity);
+  const sorted = [...reads].sort((a, b) => a.table.localeCompare(b.table) || a.address - b.address);
+  const groups: IdentityRead[][] = [];
+  for (const read of sorted) {
+    const current = groups.at(-1);
+    if (current && joins(current, read)) current.push(read);
+    else groups.push([read]);
+  }
+  const position = (r: IdentityRequest): number => (r.reads[0] ? reads.indexOf(r.reads[0]) : -1);
+  return groups.map((g) => asRequest(g, reads)).sort((a, b) => position(a) - position(b));
+};
+
+// contract: test/identity.test.ts "splitReply"
+// Each read's words, out of a reply to `request`.
+export const splitReply = (request: IdentityRequest, words: readonly number[]): Results =>
+  Object.fromEntries(
+    request.reads.map((r) => [r.check, ok(words.slice(r.address - request.address, end(r) - request.address))]),
+  );
 
 // contract: test/identity.test.ts "identityVerdict"
 export const identityVerdict = (identity: Identity, results: Results): Verdict => ({

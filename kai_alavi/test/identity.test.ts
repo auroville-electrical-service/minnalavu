@@ -1,5 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { err, identityReads, identityVerdict, type Outcome, ok, type ReadResult } from "../src/index";
+import {
+  err,
+  type IdentityRequest,
+  identityReads,
+  identityRequests,
+  identityVerdict,
+  type Outcome,
+  ok,
+  type ReadResult,
+  type Results,
+  splitReply,
+} from "../src/index";
 import { loadIdentityFixture, loadProfiles } from "./contract";
 
 const fixture = loadIdentityFixture();
@@ -45,6 +56,93 @@ describe("identityReads", () => {
     const listed = identityReads(identity(name)).map((r) => [r.check, r.table, r.address, r.count]);
     expect<unknown>(listed).toEqual(reads);
   });
+});
+
+describe("identityRequests", () => {
+  test.each(Object.entries(fixture.requests))("%s merges its reads into the fixture's requests", (name, requests) => {
+    const made = identityRequests(identity(name)).map((r) => [
+      r.table,
+      r.address,
+      r.count,
+      r.reads.map((x) => x.check),
+    ]);
+    expect<unknown>(made).toEqual(requests);
+  });
+
+  test("an empty identity makes no request", () => {
+    expect(identityRequests({})).toEqual([]);
+  });
+
+  test("15 registers between reads share a request; 16 part them, requests following their first read", () => {
+    const id = (serialAt: number) => ({
+      product_code: { ...located, address: serialAt + 4, count: 6, accept: ["AB"] },
+      serial: { ...located, address: serialAt, count: 4 },
+      energy_unit: { ...located, address: 0, part: "word" as const, expect: 1, absent_ok: false },
+    });
+    const shape = (serialAt: number) => identityRequests(id(serialAt)).map((r) => [r.address, r.count]);
+    expect(shape(16)).toEqual([[0, 26]]);
+    expect(shape(17)).toEqual([
+      [17, 10],
+      [0, 1],
+    ]);
+  });
+
+  test("a request never passes 125 registers, nor joins reads in another table", () => {
+    const id = (count: number, table: "holding" | "input" = "holding") => ({
+      serial: { ...located, count: 110 },
+      product_code: { ...located, table, address: 110, count, accept: ["AB"] },
+    });
+    const shape = (i: ReturnType<typeof id>) => identityRequests(i).map((r) => [r.table, r.address, r.count]);
+    expect(shape(id(15))).toEqual([["holding", 0, 125]]);
+    expect(shape(id(16))).toEqual([
+      ["holding", 110, 16],
+      ["holding", 0, 110],
+    ]);
+    expect(shape(id(6, "input"))).toEqual([
+      ["input", 110, 6],
+      ["holding", 0, 110],
+    ]);
+  });
+});
+
+describe("splitReply", () => {
+  test("each read gets its own words out of a merged reply", () => {
+    const request: IdentityRequest = {
+      table: "holding",
+      address: 10,
+      count: 8,
+      reads: [
+        { check: "product_code", table: "holding", address: 15, count: 3 },
+        { check: "serial", table: "holding", address: 10, count: 2 },
+      ],
+    };
+    expect(splitReply(request, [1, 2, 3, 4, 5, 6, 7, 8])).toEqual({ product_code: ok([6, 7, 8]), serial: ok([1, 2]) });
+  });
+
+  // A meter's reply to each request, its other registers 0xFFFF; or, where any of its reads fails
+  // alone, those reads made alone, as `alavi` falls back to them.
+  const replied = (request: IdentityRequest, alone: Results): Results => {
+    const own = request.reads.map((r) => ({ r, result: alone[r.check] }));
+    if (!own.every(({ result }) => result?.ok))
+      return Object.fromEntries(own.map(({ r, result }) => [r.check, result]));
+    const words = own.reduce<readonly number[]>((words, { r, result }) => {
+      const value = result?.ok ? result.value : [];
+      const at = r.address - request.address;
+      return [...words.slice(0, at), ...value, ...words.slice(at + value.length)];
+    }, Array(request.count).fill(0xffff));
+    return splitReply(request, words);
+  };
+
+  test.each(fixture.cases.map((c) => [`${c.profile}: ${c.why}`, c] as const))(
+    "a merged reply gives each read its words alone, and the same verdict: %s",
+    (_, c) => {
+      const id = identity(c.profile);
+      const alone: Results = Object.fromEntries(Object.entries(c.results).map(([check, r]) => [check, result(r)]));
+      const merged = Object.assign({}, ...identityRequests(id).map((r) => replied(r, alone)));
+      expect(merged).toEqual(alone);
+      expect(identityVerdict(id, merged)).toEqual(identityVerdict(id, alone));
+    },
+  );
 });
 
 describe("identityVerdict", () => {
