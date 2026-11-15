@@ -76,7 +76,7 @@ contract or `central/`.
 - **Do not guess register addresses.** Every register map entry names its `source`, an ID whose provenance (document, version, section) is recorded outside the repo, and carries `verified_on_device`: the date it was checked against a real meter, or null. Provenance itself is never committed.
   - Record word order, scaling, data type, and holding vs. input register for each entry.
 - **A change to a register profile, a decode or a unit alters what consumers are charged:** it sets the energy every charge is computed from. Write and test such changes, and flag them clearly (at the top of the PR description, when there is one).
-- **Collector timestamps:** collectors may be offline for long periods, so keep clocks synced (NTP when online, RTC hardware otherwise) and record clock source/quality per batch.
+- **Collector timestamps are measured, not trusted.** The collector checks its clock against an NTP reference at start, daily and after a step, and each check is stored raw: its four times and its outcome, answered or not. The OS's own sync status is kept beside it per batch, as what the OS claims. Offsets, and which readings no check grounds, are views.
 
 ## Conventions
 
