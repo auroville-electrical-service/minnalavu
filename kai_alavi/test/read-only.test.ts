@@ -84,11 +84,11 @@ describe("only the builder makes a request, and nothing does I/O", () => {
     expect(makers).toEqual(["pdu.ts"]);
   });
 
-  test("the package imports nothing but its own modules, zod and big.js, and only statically", () => {
+  test("the package imports nothing but its own modules and zod, and only statically", () => {
     // Bun's own parser lists what the code imports, which comments and strings cannot hide.
     const transpiler = new Bun.Transpiler({ loader: "ts" });
     const imports = sources.flatMap(([f, text]) => transpiler.scanImports(text).map((i) => [f, i.path] as const));
-    const foreign = imports.filter(([, spec]) => !spec?.startsWith("./") && spec !== "zod" && spec !== "big.js");
+    const foreign = imports.filter(([, spec]) => !spec?.startsWith("./") && spec !== "zod");
     expect(foreign).toEqual([]);
     const dynamic = sources.filter(([, text]) => /\bimport\s*\(|\brequire\b/.test(text)).map(([f]) => f);
     expect(dynamic).toEqual([]);

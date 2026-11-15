@@ -21,31 +21,43 @@ export const loadProfiles = (): ReadonlyMap<string, Profile> =>
 
 const words = z.array(z.int().min(0).max(0xffff));
 
+const wordOrder = z.enum(["high_first", "low_first"]);
+
 const decodeFixture = z.object({
   format: z.literal("register-decode/1"),
   profiles: z.array(
     z.object({
       profile: z.string(),
+      profile_version: z.int(),
       register_key: z.string(),
       raw_words: words,
       value: z.string(),
-      unit: z.string(),
       why: z.string(),
     }),
   ),
   types: z.array(
-    z.object({
-      type: z.enum(["u16", "i16", "u32", "i32", "u64", "f32", "f64"]),
-      word_order: z.enum(["high_first", "low_first"]),
-      decimals: z.int(),
-      raw_words: words,
-      value: z.string(),
-      why: z.string(),
-    }),
+    z.discriminatedUnion("type", [
+      z.strictObject({
+        type: z.enum(["u16", "i16", "u32", "i32", "u64"]),
+        word_order: wordOrder,
+        decimals: z.int(),
+        raw_words: words,
+        value: z.string(),
+        why: z.string(),
+      }),
+      z.strictObject({
+        type: z.enum(["f32", "f64"]),
+        word_order: wordOrder,
+        raw_words: words,
+        value: z.string(),
+        why: z.string(),
+      }),
+    ]),
   ),
   no_value: z.array(
     z.object({
       profile: z.string(),
+      profile_version: z.int(),
       register_key: z.string(),
       raw_words: words,
       error: z.enum(["wrong_word_count", "not_finite"]),

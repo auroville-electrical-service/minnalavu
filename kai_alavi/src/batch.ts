@@ -1,5 +1,5 @@
-import { type DecodeError, decodeValue } from "./decode";
-import type { FirmwareName, Register } from "./profile";
+import { type DecodeError, type Decoding, decodeValue } from "./decode";
+import type { FirmwareName } from "./profile";
 import { err, ok, type Result } from "./result";
 
 // A `batch.v1`, shaped as `alavi`'s `Alavi.Wire` shapes it. It carries no collector id: the
@@ -17,6 +17,8 @@ export interface Meter {
   /** The serial the meter reported this round, never one configured; null when none was read. */
   readonly serial: string | null;
   readonly profile: string;
+  /** The version of `profile` its registers are read and decoded under. */
+  readonly profileVersion: number;
 }
 
 /** A meter whose identity was read and passed this round: only such a meter has readings. */
@@ -31,10 +33,8 @@ export interface Reading {
   readonly registerKey: string;
   /** The collector's clock when the reply arrived. */
   readonly at: Date;
-  readonly rawWords: readonly number[];
-  /** A decimal string, never a number. */
+  /** A decimal string, never a number; its unit and kind are the profile version's entry's. */
   readonly value: string;
-  readonly unit: Register["unit"];
 }
 
 export type MissReason =
@@ -105,7 +105,7 @@ export interface Batch {
 // contract: test/batch.test.ts "readRegister"
 export const readRegister = (
   meter: IdentifiedMeter,
-  register: Pick<Register, "key" | "type" | "word_order" | "decimals" | "unit">,
+  register: Decoding & { readonly key: string },
   words: readonly number[],
   at: Date,
   attempts: number,
@@ -113,7 +113,7 @@ export const readRegister = (
   const decoded = decodeValue(register, words);
   const base = { meter, registerKey: register.key, at };
   return decoded.ok
-    ? ok({ ...base, rawWords: words, value: decoded.value, unit: register.unit })
+    ? ok({ ...base, value: decoded.value })
     : err({ ...base, reason: { kind: "decode", error: decoded.error, rawWords: words }, attempts });
 };
 
@@ -131,6 +131,7 @@ const meterJson = (meter: Meter, registerKey: string, at: Date) => ({
   unit_id: meter.unitId,
   meter_serial: meter.serial,
   profile: meter.profile,
+  profile_version: meter.profileVersion,
   register_key: registerKey,
   timestamp: iso(at),
 });
@@ -138,9 +139,7 @@ const meterJson = (meter: Meter, registerKey: string, at: Date) => ({
 const readingJson = (r: Reading) => ({
   ...meterJson(r.meter, r.registerKey, r.at),
   product_code: r.meter.productCode,
-  raw_words: [...r.rawWords],
   value: r.value,
-  unit: r.unit,
 });
 
 const reasonJson = (reason: MissReason) => {

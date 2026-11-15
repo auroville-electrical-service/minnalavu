@@ -13,7 +13,7 @@ export {
   readRegister,
 } from "./batch";
 export { crc16 } from "./crc";
-export { type DecodeError, decodeValue, wordCount } from "./decode";
+export { type DecodeError, type Decoding, decodeValue, wordCount } from "./decode";
 export { decodeName, firmwareReads, type NameError, type NameRead } from "./firmware";
 export { encodeRequest, type Framing } from "./framing";
 export {
@@ -32,7 +32,10 @@ export {
   type DataType,
   type Firmware,
   type FirmwareName,
+  type FloatType,
   findRegister,
+  type IntegerType,
+  type Kind,
   type NameEntry,
   type Profile,
   parseProfile,

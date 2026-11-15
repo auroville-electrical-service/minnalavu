@@ -11,20 +11,31 @@ const verified_on_device = z.iso.date().nullable();
 // What a product code read must be for the poller to file it: alavi's rule too.
 const printable = z.string().regex(/^[\x20-\x7e]+$/, "must be non-empty printable ASCII");
 
+const integerType = z.enum(["u16", "i16", "u32", "i32", "u64"]);
+const floatType = z.enum(["f32", "f64"]);
+
+const entry = {
+  key: text,
+  table,
+  address,
+  word_order: z.enum(["high_first", "low_first"]),
+  unit: z.enum(["Wh", "kWh", "varh", "kvarh"]),
+  kind: z.enum(["cumulative", "interval", "demand", "instantaneous"]),
+  source: source.nullable(),
+  placeholder: z.boolean(),
+  verified_on_device,
+};
+
+// An integer's value is the raw integer over 10^decimals; a float's needs no precision (`decode.ts`).
 const register = z
-  .object({
-    key: text,
-    table,
-    address,
-    type: z.enum(["u16", "i16", "u32", "i32", "u64", "f32", "f64"]),
-    word_order: z.enum(["high_first", "low_first"]),
-    // The decoded value's precision; see `decode.ts`.
-    decimals: z.int().min(0).max(9),
-    unit: z.enum(["Wh", "kWh", "varh", "kvarh"]),
-    source: source.nullable(),
-    placeholder: z.boolean(),
-    verified_on_device,
-  })
+  .discriminatedUnion("type", [
+    z.object({ ...entry, type: integerType, decimals: z.int().min(0).max(9) }),
+    z.object({
+      ...entry,
+      type: floatType,
+      decimals: z.never({ error: "decimals is for integer registers: a float has none" }).optional(),
+    }),
+  ])
   .readonly()
   .refine((r) => r.source !== null || r.placeholder, {
     message: "source is null but the entry is not marked placeholder",
@@ -77,6 +88,8 @@ const profile = z
   .object({
     schema_version: z.literal(1),
     profile: text,
+    // Cited by every reading decoded under it; the batch schema's bound, so it survives a JSON number.
+    version: z.int().min(1).max(Number.MAX_SAFE_INTEGER),
     models: z.array(z.string()).min(1),
     sources: z.array(source).min(1),
     identity,
@@ -97,8 +110,11 @@ export type Register = z.infer<typeof register>;
 export type Firmware = z.infer<typeof firmware>;
 export type FirmwareName = keyof Firmware;
 export type NameEntry = z.infer<typeof nameEntry>;
+export type IntegerType = z.infer<typeof integerType>;
+export type FloatType = z.infer<typeof floatType>;
 export type DataType = Register["type"];
 export type WordOrder = Register["word_order"];
+export type Kind = Register["kind"];
 
 // contract: test/profile.test.ts "parseProfile"
 // Follows `alavi`'s `Alavi.Profile.parse/1`. One difference no test can reach: of a key given twice,

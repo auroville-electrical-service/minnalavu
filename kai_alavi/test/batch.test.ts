@@ -42,11 +42,18 @@ const register = (profile: string, key: string) => {
 };
 
 const at = (s: string) => new Date(`2026-11-01T00:00:0${s}Z`);
+const versionOf = (profile: string): number => {
+  const found = profiles.get(profile);
+  if (!found) throw new Error(`no profile ${profile}`);
+  return found.version;
+};
+
 const meter = (host: string, unitId: number, serial: string | null, profile: string): Meter => ({
   endpoint: { host, port: 502 },
   unitId,
   serial,
   profile,
+  profileVersion: versionOf(profile),
 });
 
 const identified = (unitId: number, serial: string, profile: string, productCode: string): IdentifiedMeter => ({
@@ -162,7 +169,7 @@ describe("batchJson", () => {
   test("a reading the schema accepts keeps its decimal string, not a number", () => {
     const batch = batchJson(basic);
     expect(validate(batch) ? [] : validate.errors).toEqual([]);
-    expect(batch.readings.map((r) => r.value)).toEqual(["1234.500", "1234.500"]);
+    expect(batch.readings.map((r) => r.value)).toEqual(["1234.5", "1234.5"]);
   });
 
   test("a detail is cut by code points, never inside a surrogate pair", () => {
