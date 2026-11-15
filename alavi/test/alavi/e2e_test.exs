@@ -454,6 +454,7 @@ defmodule Alavi.EndToEndTest do
     # The dev database keeps earlier runs' readings, which a fixed clock would repeat.
     :ok = Simulator.identify(sim, 1, :serial, String.upcase(id))
     {:ok, clock} = Agent.start_link(fn -> ~U[2026-11-13 23:59:59Z] end)
+
     endpoints = [
       endpoint(port, "tcp", [meter(1, "elite_440")], %{"interval_ms" => 5, "timeout_ms" => 2_000})
     ]
@@ -600,5 +601,120 @@ defmodule Alavi.EndToEndTest do
              """)
 
     assert detail =~ third and detail =~ second
+  end
+
+  defp register_endpoint!(id, name, port) do
+    sql!("""
+    SELECT to_json(admin.register_endpoint(
+      endpoint_id => '#{id}_#{name}', valid_from => '2026-01-01Z', collector_id => '#{id}',
+      host => '127.0.0.1', port => #{port}, framing => 'tcp', polled_by_other_system => false,
+      timeout_ms => 100, max_timeouts => 3, retries => 2, busy_backoff_ms => 10,
+      reconnect_backoff_min_ms => 10, reconnect_backoff_max_ms => 40, interval_ms => 300))
+    """)
+  end
+
+  defp register_target!(id, name, unit, profile, valid_from \\ "'2026-01-01Z'") do
+    sql!("""
+    SELECT to_json(admin.register_target(endpoint_id => '#{id}_#{name}', unit_id => #{unit},
+      valid_from => #{valid_from}, profile => '#{profile}', interval_ms => NULL))
+    """)
+  end
+
+  test "a registry change reaches the running pollers: new endpoints polled, removed ones stopped, changed ones with their new settings",
+       ctx do
+    {id, token} = new_collector!()
+
+    [kept, changed, removed, added] =
+      for _ <- 1..4 do
+        {sim, port} = start_sim!(:tcp)
+        # Readings are keyed by serial: each chain's meters their own.
+        for unit <- [1, 3] do
+          serial = Base.encode16(:crypto.strong_rand_bytes(4))
+          :ok = Simulator.identify(sim, unit, :serial, serial)
+        end
+
+        port
+      end
+
+    for {name, port} <- [kept: kept, changed: changed, removed: removed] do
+      register_endpoint!(id, name, port)
+      register_target!(id, name, 1, "elite_440")
+    end
+
+    local = [endpoint(kept, "tcp", [meter(1, "elite_440")], %{"interval_ms" => 300})]
+    {:ok, digest} = Digest.digest(%{"schema_version" => 1, "endpoints" => local})
+    keeper = [digest: digest, profiles: profiles(), name: Alavi.ConfigKeeper]
+
+    collector =
+      start_collector!(
+        ctx.tmp_dir,
+        local,
+        token,
+        [pollers: Alavi.Pollers],
+        &DateTime.utc_now/0,
+        keeper
+      )
+
+    readings = fn port, unit ->
+      sql!("""
+      SELECT count(*) FROM store.readings
+      WHERE collector_id = '#{id}' AND endpoint_port = #{port} AND unit_id = #{unit}
+      """)
+    end
+
+    reported = fn ->
+      sql!("""
+      SELECT coalesce(to_json((SELECT config_digest FROM store.uploads
+        WHERE collector_id = '#{id}' ORDER BY received_at DESC, upload_id DESC LIMIT 1)), 'null')
+      """)
+    end
+
+    served = fn ->
+      sql!("SELECT to_json(registry.config_digest(registry.collector_config('#{id}')))")
+    end
+
+    await!("the registry's endpoints polled", fn ->
+      Enum.all?([kept, changed, removed], &(readings.(&1, 1) > 0))
+    end)
+
+    first = served.()
+    await!("the registry's config reported", fn -> reported.() == first end)
+
+    poller = fn port ->
+      List.keyfind(Alavi.Pollers.pollers(Alavi.Pollers), {Alavi.Poller, "127.0.0.1", port}, 0)
+    end
+
+    {_id, kept_pid} = poller.(kept)
+    {_id, changed_pid} = poller.(changed)
+
+    sql!("""
+    SELECT to_json(admin.retire_target(endpoint_id => '#{id}_removed', unit_id => 1, valid_from => now()));
+    """)
+
+    sql!(
+      "SELECT to_json(admin.retire_endpoint(endpoint_id => '#{id}_removed', valid_from => now()))"
+    )
+
+    register_target!(id, "changed", 3, "elite_500", "now()")
+    register_endpoint!(id, "added", added)
+    register_target!(id, "added", 1, "elite_440")
+    second = served.()
+    refute second == first
+
+    await!("the added endpoint and the changed one's new target polled", fn ->
+      readings.(added, 1) > 0 and readings.(changed, 3) > 0
+    end)
+
+    await!("the changed config reported", fn -> reported.() == second end)
+    await!("the removed endpoint's poller gone", fn -> poller.(removed) == nil end)
+    await!("the buffer emptied", fn -> Buffer.backlog(Buffer).events == 0 end)
+    stopped = readings.(removed, 1)
+    Process.sleep(1_000)
+    assert readings.(removed, 1) == stopped
+    assert readings.(changed, 1) > 0
+    assert {_id, ^kept_pid} = poller.(kept)
+    assert {_id, pid} = poller.(changed)
+    assert is_pid(pid) and pid != changed_pid
+    assert Process.alive?(collector)
   end
 end

@@ -128,4 +128,52 @@ defmodule Alavi.RestoreTest do
       assert File.read!(path) == "{"
     end
   end
+
+  describe "retire/2" do
+    @describetag :tmp_dir
+
+    test "removed, it puts back the selectors owed before it stops, however long that takes",
+         %{tmp_dir: dir} do
+      {sim, port} = start_sim!(:tcp)
+      :ok = Simulator.select(sim, 1, @history, 3)
+      Simulator.faults(sim, lost_writes: [{1, @history}])
+      owe!(dir, port)
+      endpoint = %{host: "127.0.0.1", port: port}
+
+      capture_log(fn ->
+        sup = start!(port, dir)
+        until!(&match?({:selectors, {:owed, _, 1}}, &1))
+        [{_id, pid}] = Alavi.Pollers.pollers(sup)
+        ref = Process.monitor(pid)
+        Alavi.Poller.retire(pid, :removed)
+
+        until!(&match?({:selectors, {:owed, _, 3}}, &1))
+        refute_received {:DOWN, ^ref, _, _, _}
+        Simulator.clear_faults(sim)
+        until!(&(&1 == {:selectors, :restored}))
+        assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 2_000
+      end)
+
+      assert Store.owed(dir, endpoint) == :none
+    end
+
+    test "replaced, it stops leaving the selectors owed, for its successor finds them at start",
+         %{tmp_dir: dir} do
+      {sim, port} = start_sim!(:tcp)
+      :ok = Simulator.select(sim, 1, @history, 3)
+      Simulator.faults(sim, lost_writes: [{1, @history}])
+      owe!(dir, port)
+
+      capture_log(fn ->
+        sup = start!(port, dir)
+        until!(&match?({:selectors, {:owed, _, 1}}, &1))
+        [{_id, pid}] = Alavi.Pollers.pollers(sup)
+        ref = Process.monitor(pid)
+        Alavi.Poller.retire(pid, :replaced)
+        assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 2_000
+      end)
+
+      assert {:ok, %Record{}} = Store.owed(dir, %{host: "127.0.0.1", port: port})
+    end
+  end
 end

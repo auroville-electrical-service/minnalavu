@@ -7,8 +7,9 @@ defmodule Alavi.ConfigKeeper do
   (`answered/2`). One that is neither the config applied nor the one refused
   is fetched (`fetch`) and parsed against the loaded profiles as the local
   file is. One that parses is saved (`Alavi.Config.Saved`), so the collector
-  starts from it, becomes the config applied, and is handed to `applied`;
-  one that does not is refused, and not fetched again while the server
+  starts from it, and becomes the config applied: sent to each subscriber
+  (`subscribe/1`) as `{:alavi_config, config, digest}`. One that does not is
+  refused, and not fetched again while the server
   serves it. A fetch that fails is no refusal: the next answer tries again.
   An answer naming the config applied clears a refusal, for the server no
   longer serves what was refused.
@@ -31,8 +32,7 @@ defmodule Alavi.ConfigKeeper do
   @typedoc """
   `config` and `digest` are what the collector started from. `dir` is the
   collector's durable state, the buffer's `dir`. `fetch` asks the server for
-  the config it serves this collector; `applied` takes each config that
-  becomes the one applied.
+  the config it serves this collector.
   """
   @type option ::
           {:config, Config.t()}
@@ -40,7 +40,6 @@ defmodule Alavi.ConfigKeeper do
           | {:profiles, %{String.t() => Profile.t()}}
           | {:dir, Path.t()}
           | {:fetch, (-> {:ok, term()} | {:error, String.t()})}
-          | {:applied, (Config.t(), Digest.t() -> term())}
           | {:status, GenServer.server()}
           | {:name, GenServer.name()}
 
@@ -62,6 +61,14 @@ defmodule Alavi.ConfigKeeper do
   @spec current(GenServer.server()) :: {Config.t(), Digest.t()}
   def current(server), do: GenServer.call(server, :current, :infinity)
 
+  # contract: test/alavi/config_keeper_test.exs "subscribe/1"
+  @doc """
+  The config applied now, and every config applied after it sent to the
+  caller as `{:alavi_config, config, digest}`, until the caller exits.
+  """
+  @spec subscribe(GenServer.server()) :: {Config.t(), Digest.t()}
+  def subscribe(server), do: GenServer.call(server, :subscribe, :infinity)
+
   @impl true
   def init(opts) do
     state = %{
@@ -71,7 +78,7 @@ defmodule Alavi.ConfigKeeper do
       profiles: Keyword.fetch!(opts, :profiles),
       dir: Keyword.fetch!(opts, :dir),
       fetch: Keyword.fetch!(opts, :fetch),
-      applied: Keyword.fetch!(opts, :applied),
+      subscribers: %{},
       status: Keyword.fetch!(opts, :status)
     }
 
@@ -81,6 +88,15 @@ defmodule Alavi.ConfigKeeper do
   @impl true
   def handle_call(:report, _from, state), do: {:reply, report_of(state), state}
   def handle_call(:current, _from, state), do: {:reply, {state.config, state.digest}, state}
+
+  def handle_call(:subscribe, {pid, _tag}, state) do
+    subscribers = Map.put_new_lazy(state.subscribers, pid, fn -> Process.monitor(pid) end)
+    {:reply, {state.config, state.digest}, %{state | subscribers: subscribers}}
+  end
+
+  @impl true
+  def handle_info({:DOWN, _ref, :process, pid, _reason}, state),
+    do: {:noreply, %{state | subscribers: Map.delete(state.subscribers, pid)}}
 
   @impl true
   def handle_cast({:answered, digest}, state), do: {:noreply, answered_with(state, digest)}
@@ -118,7 +134,7 @@ defmodule Alavi.ConfigKeeper do
     case Saved.save(state.dir, document) do
       :ok ->
         Logger.info("alavi config: the served config #{digest} saved, replacing #{state.digest}")
-        state.applied.(config, digest)
+        for {pid, _ref} <- state.subscribers, do: send(pid, {:alavi_config, config, digest})
         reported(%{state | config: config, digest: digest, refused: nil})
 
       {:error, why} ->

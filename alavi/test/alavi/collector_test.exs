@@ -300,6 +300,99 @@ defmodule Alavi.CollectorTest do
     end
   end
 
+  describe "start_link/1, with a config keeper" do
+    test "a config applied reaches the status and the uplink's intake, started again or not, which reads a job at an endpoint only it polls",
+         ctx do
+      {_sim, port} = start_sim!(:tcp)
+      {sim, added} = start_sim!(:tcp)
+      :ok = Simulator.identify(sim, 1, :serial, "NEW-1")
+      # Polled often, so the uplink started again has batches, and answers, soon.
+      often = %{"interval_ms" => 200}
+      start = [endpoint(port, "tcp", [meter(1, "elite_440")], often)]
+      {:ok, local} = Digest.digest(%{"schema_version" => 1, "endpoints" => start})
+      new = endpoint(added, "tcp", [meter(1, "elite_440", %{"serial" => "NEW-1"})], often)
+      served = %{"schema_version" => 1, "endpoints" => start ++ [new]}
+      {:ok, digest} = Digest.digest(served)
+      id = "7d2c1f0e-4b3a-4c5d-8e6f-1a2b3c4d5e6f"
+      tag = System.unique_integer([:positive])
+      {:ok, listed} = Agent.start_link(fn -> [] end)
+
+      again = "0b6f8d2e-5c1a-4e7b-9a3d-2f4c6e8a0b1c"
+
+      job = fn request_id ->
+        %{
+          "request_id" => request_id,
+          "kind" => "read_on_demand",
+          "meters" => ["NEW-1"],
+          "requested_at" => "2026-11-01T00:00:00Z",
+          "expires_at" => DateTime.utc_now() |> DateTime.add(3_600) |> DateTime.to_iso8601()
+        }
+      end
+
+      # The job is listed once the config is fetched: listed before, it would
+      # be resolved against the config started from, and not tried again.
+      answer = fn
+        %{method: "GET"} ->
+          Agent.update(listed, fn _ -> [job.(id)] end)
+          {200, JSON.encode!(served)}
+
+        %{body: body} ->
+          jobs = Agent.get(listed, & &1)
+          batch = JSON.decode!(body)["batch_id"]
+          {200, JSON.encode!(%{"batch_id" => batch, "config_digest" => digest, "jobs" => jobs})}
+      end
+
+      server = start_supervised!({TestServer, owner: self(), answers: [answer]})
+      uplink = uplink_to(TestServer.port(server)) ++ [name: :"uplink_#{tag}"]
+
+      status = [
+        config: config!(start),
+        settings: [],
+        version: "0.1.0",
+        buffer: :no_such_buffer,
+        file: Path.join(ctx.tmp_dir, "status.json"),
+        clock: &DateTime.utc_now/0,
+        tick_ms: 60_000,
+        name: :"status_#{tag}"
+      ]
+
+      start_supervised!({Alavi.Status, status}, id: :status)
+
+      start_collector!(ctx.tmp_dir, start, uplink, :"status_#{tag}", &DateTime.utc_now/0,
+        pollers: :"pollers_#{tag}",
+        config_keeper: [digest: local, profiles: profiles(), name: :"keeper_#{tag}"]
+      )
+
+      assert %{wire: %{"meter_serial" => "NEW-1"}} = tagged!(id)
+      Agent.update(listed, fn _ -> [] end)
+      Process.exit(Process.whereis(:"uplink_#{tag}"), :kill)
+      Agent.update(listed, fn _ -> [job.(again)] end)
+      assert %{wire: %{"meter_serial" => "NEW-1"}} = tagged!(again)
+      ports = Enum.map(Alavi.Status.read(:"status_#{tag}").endpoints, & &1.port)
+      assert ports == [port, added]
+    end
+  end
+
+  # The first reading posted that carries `request_id`.
+  defp tagged!(request_id, tries \\ 500) do
+    assert_receive {:request, request}, 2_000
+
+    tagged =
+      case request do
+        %{method: "GET"} ->
+          nil
+
+        %{body: body} ->
+          body |> JSON.decode!() |> events() |> Enum.find(&(&1.wire["request_id"] == request_id))
+      end
+
+    cond do
+      tagged != nil -> tagged
+      tries > 0 -> tagged!(request_id, tries - 1)
+      true -> flunk("nothing posted carried #{request_id}")
+    end
+  end
+
   describe "start_link/1, fed to a status" do
     test "the pollers feed the status, and its crash leaves the collector be", ctx do
       {_sim, port} = start_sim!(:tcp)

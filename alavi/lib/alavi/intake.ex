@@ -32,6 +32,12 @@ defmodule Alavi.Intake do
   def new(pollers, %Config{endpoints: endpoints}),
     do: %__MODULE__{pollers: pollers, endpoints: endpoints, seen: Seen.new()}
 
+  # contract: test/alavi/intake_test.exs "configured/2"
+  @doc "The intake resolving serials against `config`'s endpoints, remembering the requests it has run."
+  @spec configured(t(), Config.t()) :: t()
+  def configured(%__MODULE__{} = intake, %Config{endpoints: endpoints}),
+    do: %{intake | endpoints: endpoints}
+
   # contract: test/alavi/intake_test.exs "offer/3"
   @doc "The answer's `jobs`, received at `now` (monotonic milliseconds)."
   @spec offer(t(), term(), integer()) :: t()

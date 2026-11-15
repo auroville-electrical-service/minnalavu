@@ -268,4 +268,28 @@ defmodule Alavi.IntakeTest do
       assert [%Reading{unit_id: 1, request_id: @id} | _] = requested!()
     end
   end
+
+  describe "configured/2" do
+    test "serials resolve against the config applied; requests already run stay run" do
+      {_sim, port} = start_sim!(:tcp)
+      sup = start_pollers!([chain(port)])
+      round!()
+      elsewhere = Intake.new(sup, config!([endpoint(5999, "tcp", [meter(4, "elite_440")])]))
+
+      {elsewhere, log} =
+        with_log(fn ->
+          elsewhere = Intake.offer(elsewhere, [job(%{"request_id" => @other})], @now)
+          refute_receive {:recorded, [%{request_id: @other} | _]}, 300
+          elsewhere
+        end)
+
+      assert log =~ "\"SIM-3\" not read or configured"
+      intake = Intake.configured(elsewhere, config!([chain(port)]))
+
+      intake = Intake.offer(intake, [job()], @now)
+      assert [%Reading{unit_id: 3, request_id: @id} | _] = requested!()
+      Intake.offer(intake, [job(%{"request_id" => @other})], @now)
+      refute_receive {:recorded, [%{request_id: @other} | _]}, 300
+    end
+  end
 end

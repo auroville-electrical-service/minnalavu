@@ -18,7 +18,7 @@ defmodule Alavi.ConfigKeeperTest do
   end
 
   # The server serves whatever `served` holds now; each fetch, and each config
-  # applied and report cast to the status, is sent to the test.
+  # applied (the test subscribes) and report cast to the status, is sent to the test.
   defp keeper!(dir, served) do
     test = self()
     start = document(5020)
@@ -35,11 +35,12 @@ defmodule Alavi.ConfigKeeperTest do
       profiles: profiles(),
       dir: dir,
       fetch: fetch,
-      applied: fn config, digest -> send(test, {:applied, config, digest}) end,
       status: test
     ]
 
-    {start_supervised!({ConfigKeeper, opts}), digest!(start)}
+    keeper = start_supervised!({ConfigKeeper, opts})
+    {%Config{}, _digest} = ConfigKeeper.subscribe(keeper)
+    {keeper, digest!(start)}
   end
 
   defp served!(result), do: start_supervised!({Agent, fn -> result end})
@@ -68,7 +69,7 @@ defmodule Alavi.ConfigKeeperTest do
 
       assert answer(keeper, digest) == %{digest: digest, refused: nil}
       assert_received :fetched
-      assert_received {:applied, %Config{endpoints: [%{port: 5021}]}, ^digest}
+      assert_received {:alavi_config, %Config{endpoints: [%{port: 5021}]}, ^digest}
       assert_received {:"$gen_cast", {:config, %{digest: ^digest}}}
       assert {%Config{endpoints: [%{port: 5021}]}, ^digest} = ConfigKeeper.current(keeper)
       assert {:ok, _path, ^new} = Saved.read(dir)
@@ -88,7 +89,7 @@ defmodule Alavi.ConfigKeeperTest do
 
       assert reason =~ "no_such_profile"
       assert_received :fetched
-      refute_received {:applied, _, _}
+      refute_received {:alavi_config, _, _}
       assert {_config, ^digest} = ConfigKeeper.current(keeper)
       assert Saved.read(dir) == :none
 
@@ -152,7 +153,41 @@ defmodule Alavi.ConfigKeeperTest do
       assert answer(keeper, digest!(new)) == %{digest: digest, refused: nil}
       assert_received :fetched
       assert_received :fetched
-      refute_received {:applied, _, _}
+      refute_received {:alavi_config, _, _}
+    end
+  end
+
+  describe "subscribe/1" do
+    test "each subscriber is given the config applied now, then each one applied after it",
+         %{tmp_dir: dir} do
+      new = document(5021)
+      {keeper, digest} = keeper!(dir, served!({:ok, new}))
+      test = self()
+
+      spawn_link(fn ->
+        send(test, {:subscribed, ConfigKeeper.subscribe(keeper)})
+        receive do: (message -> send(test, {:other, message}))
+      end)
+
+      assert_receive {:subscribed, {%Config{endpoints: [%{port: 5020}]}, ^digest}}
+      answer(keeper, digest!(new))
+      assert_received {:alavi_config, %Config{endpoints: [%{port: 5021}]}, _}
+      assert_receive {:other, {:alavi_config, %Config{endpoints: [%{port: 5021}]}, _}}
+    end
+
+    test "a subscriber that exits is sent nothing more, and subscribing twice sends once",
+         %{tmp_dir: dir} do
+      served = served!({:ok, document(5021)})
+      {keeper, _digest} = keeper!(dir, served)
+      ConfigKeeper.subscribe(keeper)
+      gone = spawn(fn -> ConfigKeeper.subscribe(keeper) end)
+      ref = Process.monitor(gone)
+      assert_receive {:DOWN, ^ref, :process, ^gone, _}
+
+      answer(keeper, digest!(document(5021)))
+      assert_received {:alavi_config, _, _}
+      refute_received {:alavi_config, _, _}
+      assert Process.alive?(keeper)
     end
   end
 end

@@ -26,16 +26,12 @@ defmodule Alavi.Collector do
   alias Alavi.Poller.RawLog
   alias Alavi.Uplink.{HTTP, Response, Target}
 
-  require Logger
-
   @typedoc """
   `uplink` is the uplink's options but `buffer`, `status`, `heartbeat_ms` and
   `intake` (the collector supplies them), or `:none` for no uplink (tests that
   inspect the buffer); the pollers nudge it after a read on demand only if it
-  has a `name`. Its heartbeat is due after the shortest polling interval of
-  any meter this collector polls without an answer from the server: one round
-  of the meter polled most often; with no meter polled here, after the
-  uplink's `idle_ms`. Its intake runs the jobs the server lists only if
+  has a `name`. Its heartbeat is `Alavi.Uplink.heartbeat_ms/2` of the config
+  polled. Its intake runs the jobs the server lists only if
   `pollers` is given, for it reaches them by that name. `clock_status` is the
   options of an `Alavi.Clock.Windows` to start first, or `:none`; the buffer's
   `clock_status` must read it if there is one. `clock_check` is the options
@@ -47,7 +43,9 @@ defmodule Alavi.Collector do
   collector's durable state. `config_keeper` is an `Alavi.ConfigKeeper`'s
   `digest` (of `config`), `profiles` and `name`, the collector supplying the
   rest and fetching through the uplink's target; `:none` for a collector that
-  does not fetch its config, and always without an uplink.
+  does not fetch its config, and always without an uplink. With a keeper, the
+  pollers, the uplink's heartbeat and intake, and the status follow each config
+  it applies, from the one it holds when each starts (`Alavi.Pollers`).
   """
   @type option ::
           {:config, Config.t()}
@@ -125,16 +123,17 @@ defmodule Alavi.Collector do
           supplied = [
             buffer: Keyword.fetch!(buffer, :name),
             status: status,
-            heartbeat_ms: heartbeat_ms(config, Keyword.fetch!(uplink, :idle_ms)),
             intake: intake(Keyword.get(opts, :pollers), config),
             config: keeper_name
           ]
+
+          supplied = supplied ++ heartbeat(keeper_name, config, Keyword.fetch!(uplink, :idle_ms))
 
           {[{Uplink, uplink ++ supplied}], Keyword.get(uplink, :name, :none)}
       end
 
     pollers = [
-      config: config,
+      config: following(keeper_name, config),
       sink: sink,
       clock: Keyword.fetch!(opts, :clock),
       raw_log: Keyword.fetch!(opts, :raw_log),
@@ -172,17 +171,16 @@ defmodule Alavi.Collector do
     target = Keyword.fetch!(uplink, :target)
     timeout = Keyword.fetch!(uplink, :timeout_ms)
     fetch = fn -> target |> HTTP.get_config(timeout) |> Response.config() end
-    opts = keeper ++ supplied ++ [fetch: fetch, applied: &applied/2]
+    opts = keeper ++ supplied ++ [fetch: fetch]
     {[{ConfigKeeper, opts}], Keyword.fetch!(keeper, :name)}
   end
 
-  # Where a served config reaches the running pollers. Until it does, it is
-  # saved, and the collector starts from it.
-  defp applied(%Config{}, digest),
-    do:
-      Logger.info(
-        "alavi config: #{digest} is not applied to the running pollers; it is the config the collector starts from"
-      )
+  # With a keeper, the pollers and the uplink follow the config it applies.
+  defp following(:none, config), do: config
+  defp following(keeper, _config), do: {:keeper, keeper}
+
+  defp heartbeat(:none, config, idle_ms), do: [heartbeat_ms: Uplink.heartbeat_ms(config, idle_ms)]
+  defp heartbeat(_keeper, _config, _idle_ms), do: []
 
   defp polling_config(settings, profiles) do
     case Saved.read(settings.buffer.dir) do
@@ -222,14 +220,6 @@ defmodule Alavi.Collector do
 
   defp check([]), do: :none
   defp check(servers), do: Clock.Check.options(servers)
-
-  defp heartbeat_ms(%Config{endpoints: endpoints}, idle_ms) do
-    endpoints
-    |> Enum.reject(& &1.polled_by_other_system)
-    |> Enum.flat_map(& &1.meters)
-    |> Enum.map(& &1.interval_ms)
-    |> Enum.min(fn -> idle_ms end)
-  end
 
   defp intake(nil, _config), do: :none
   defp intake(pollers, config), do: Intake.new(pollers, config)

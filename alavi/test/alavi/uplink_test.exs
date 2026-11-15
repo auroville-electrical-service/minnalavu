@@ -2,7 +2,14 @@ defmodule Alavi.UplinkTest do
   use ExUnit.Case, async: true
 
   import Alavi.PollerCase,
-    only: [start_status!: 1, eventually!: 1, refused: 0, endpoint: 3, meter: 2, profiles: 0]
+    only: [
+      start_status!: 1,
+      eventually!: 1,
+      refused: 0,
+      endpoint: 4,
+      meter: 2,
+      profiles: 0
+    ]
 
   import ExUnit.CaptureLog
 
@@ -59,6 +66,12 @@ defmodule Alavi.UplinkTest do
       timeout_ms: 2_000,
       status: Alavi.NoStatus
     ]
+
+    # With a keeper, the heartbeat is its config's.
+    base =
+      if Keyword.get(opts, :config, :none) == :none,
+        do: base,
+        else: Keyword.delete(base, :heartbeat_ms)
 
     start_supervised!({Uplink, Keyword.merge(base, opts)})
   end
@@ -402,13 +415,16 @@ defmodule Alavi.UplinkTest do
       end
     end
 
-    defp keeper!(dir, port) do
+    # Its config's meter is polled every `interval_ms`, so the heartbeat is due as often.
+    defp keeper!(dir, port, interval_ms \\ 50) do
       {:ok, target} =
         Target.parse("http://127.0.0.1:#{port}", @token, allow_http: true, cacerts: [])
 
       start = %{
         "schema_version" => 1,
-        "endpoints" => [endpoint(5020, "tcp", [meter(1, "elite_440")])]
+        "endpoints" => [
+          endpoint(5020, "tcp", [meter(1, "elite_440")], %{"interval_ms" => interval_ms})
+        ]
       }
 
       {:ok, config} = Config.parse(start, profiles())
@@ -422,7 +438,6 @@ defmodule Alavi.UplinkTest do
          profiles: profiles(),
          dir: dir,
          fetch: fn -> target |> HTTP.get_config(2_000) |> Response.config() end,
-         applied: fn _config, _digest -> :ok end,
          status: Alavi.NoStatus,
          name: name}
       )
@@ -444,13 +459,13 @@ defmodule Alavi.UplinkTest do
          ctx do
       served = %{
         "schema_version" => 1,
-        "endpoints" => [endpoint(5021, "tcp", [meter(1, "elite_440")])]
+        "endpoints" => [endpoint(5021, "tcp", [meter(1, "elite_440")], %{"interval_ms" => 50})]
       }
 
       {:ok, new} = Digest.digest(served)
       server = server!([serving(served)])
       {keeper, start} = keeper!(ctx.tmp_dir, TestServer.port(server))
-      uplink!(ctx.buffer, TestServer.port(server), heartbeat_ms: 50, config: keeper)
+      uplink!(ctx.buffer, TestServer.port(server), config: keeper)
 
       {first, 0} = post!()
 
@@ -470,12 +485,33 @@ defmodule Alavi.UplinkTest do
       assert [{_, 0}, {_, 0}] = posts!(2)
     end
 
+    test "a config applied sets the heartbeat interval, and with it a heartbeat is its config's",
+         ctx do
+      served = %{
+        "schema_version" => 1,
+        "endpoints" => [endpoint(5021, "tcp", [meter(1, "elite_440")], %{"interval_ms" => 50})]
+      }
+
+      server = server!([serving(served)])
+      {keeper, _start} = keeper!(ctx.tmp_dir, TestServer.port(server), 60_000)
+
+      assert_raise RuntimeError, ~r/the heartbeat follows its config/, fn ->
+        uplink!(ctx.buffer, TestServer.port(server), config: keeper, heartbeat_ms: 50)
+      end
+
+      uplink!(ctx.buffer, TestServer.port(server), config: keeper)
+      refute_receive {:request, _}, 200
+      record!(ctx.buffer, 1)
+      {_batch, 0} = post!()
+      assert [{_, 1}, {_, 0}] = posts!(2)
+    end
+
     test "a refused config is reported in each backlog and not fetched again", ctx do
       served = %{"schema_version" => 1, "endpoints" => []}
       {:ok, refused} = Digest.digest(served)
       server = server!([serving(served)])
       {keeper, start} = keeper!(ctx.tmp_dir, TestServer.port(server))
-      uplink!(ctx.buffer, TestServer.port(server), heartbeat_ms: 50, config: keeper)
+      uplink!(ctx.buffer, TestServer.port(server), config: keeper)
 
       [{_, 0}, {_, 1} | rest] = posts!(5)
       assert Enum.all?(rest, &match?({_, 0}, &1))
@@ -499,7 +535,7 @@ defmodule Alavi.UplinkTest do
 
       log =
         capture_log(fn ->
-          uplink!(ctx.buffer, TestServer.port(server), heartbeat_ms: 50, config: keeper)
+          uplink!(ctx.buffer, TestServer.port(server), config: keeper)
           assert [{_, 0}, {_, 0}, {_, 0}] = posts!(3)
         end)
 

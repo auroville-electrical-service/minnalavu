@@ -33,7 +33,8 @@ defmodule Alavi.Poller.Schedule do
 
   @reads_max 8
 
-  @spec next([Job.t()], integer(), due(), [Meter.t(), ...]) :: decision()
+  @doc "With no `meters`, no round starts: the queue drains (a poller retiring)."
+  @spec next([Job.t()], integer(), due(), [Meter.t()]) :: decision()
   def next(queue, now, due, meters) do
     ranks = ranks(meters, due, now)
 
@@ -63,6 +64,11 @@ defmodule Alavi.Poller.Schedule do
   @spec restore([Job.t()], integer(), Job.held()) :: [Job.t()]
   def restore(queue, at, held),
     do: [Job.restore(at, held) | Enum.reject(queue, &(&1.kind == :restore))]
+
+  # contract: test/alavi/poller/schedule_test.exs "retired/1"
+  @doc "`queue` without the poll rounds not yet begun: a retiring poller's next round boundary."
+  @spec retired([Job.t()]) :: [Job.t()]
+  def retired(queue), do: Enum.reject(queue, &(&1.kind == :poll_round and &1.events == []))
 
   # contract: test/alavi/poller/schedule_test.exs "reconnected/2"
   @doc "`queue` once the endpoint is connected again: a restore held for want of a connection is ready."

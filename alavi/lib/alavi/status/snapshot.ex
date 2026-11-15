@@ -317,6 +317,49 @@ defmodule Alavi.Status.Snapshot do
   @spec config(t(), Alavi.ConfigKeeper.report()) :: t()
   def config(%__MODULE__{} = snapshot, report), do: %{snapshot | config: Wire.config(report)}
 
+  # contract: test/alavi/status_test.exs "Snapshot.polling/2"
+  @doc """
+  The endpoints of a new polling config: one at the host and port of an
+  endpoint shown keeps its rounds, failures and selectors, and each of its
+  meters at the same unit, with the same profile, expected serial and
+  registers, keeps what was read; the rest start afresh, and an endpoint the
+  config no longer has goes.
+  """
+  @spec polling(t(), Config.t()) :: t()
+  def polling(%__MODULE__{} = snapshot, %Config{endpoints: endpoints}) do
+    shown = Map.new(snapshot.endpoints, &{{&1.host, &1.port}, &1})
+    %{snapshot | endpoints: Enum.map(endpoints, &carried(endpoint(&1), shown))}
+  end
+
+  defp carried(fresh, shown) do
+    case Map.fetch(shown, {fresh.host, fresh.port}) do
+      {:ok, old} ->
+        meters = Map.new(old.meters, &{&1.unit_id, &1})
+
+        %{
+          fresh
+          | rounds: old.rounds,
+            failures: old.failures,
+            selectors: old.selectors,
+            meters: Enum.map(fresh.meters, &carried_meter(&1, meters[&1.unit_id]))
+        }
+
+      :error ->
+        fresh
+    end
+  end
+
+  defp carried_meter(fresh, nil), do: fresh
+
+  defp carried_meter(fresh, old),
+    do: if(configured(old) == configured(fresh), do: old, else: fresh)
+
+  defp configured(meter),
+    do: {
+      Map.take(meter, [:unit_id, :profile, :serial_expected]),
+      Enum.map(meter.registers, &Map.drop(&1, [:value, :read_at]))
+    }
+
   # contract: test/alavi/status_test.exs "Snapshot.clock/2"
   @spec clock(t(), Clock.status()) :: t()
   def clock(%__MODULE__{} = snapshot, status), do: %{snapshot | clock: clock_view(status)}

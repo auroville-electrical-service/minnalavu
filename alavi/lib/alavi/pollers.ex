@@ -1,11 +1,19 @@
 defmodule Alavi.Pollers do
+  @moduledoc """
+  One `Alavi.Poller` per endpoint of the config. Given a config, they poll it
+  until they stop; given `{:keeper, keeper}`, they start from the config the
+  `Alavi.ConfigKeeper` applies now and follow each it applies after
+  (`Alavi.Pollers.Applier`), whichever of them restarts.
+  """
+
   use Supervisor
 
-  alias Alavi.{Config, Poller, Sink}
+  alias Alavi.{Config, ConfigKeeper, Poller, Sink}
   alias Alavi.Poller.RawLog
+  alias Alavi.Pollers.Applier
 
   @type option ::
-          {:config, Config.t()}
+          {:config, Config.t() | {:keeper, GenServer.server()}}
           | {:sink, Sink.t()}
           | {:clock, Poller.clock()}
           | {:raw_log, RawLog.limits()}
@@ -20,17 +28,36 @@ defmodule Alavi.Pollers do
 
   @impl true
   def init(opts) do
-    %Config{endpoints: endpoints} = Keyword.fetch!(opts, :config)
-
     shared =
       for key <- [:sink, :clock, :raw_log, :status, :selectors_dir],
           do: {key, Keyword.fetch!(opts, key)}
 
     # No uplink to nudge (tests that read the sink) unless one is named.
     shared = [{:uplink, Keyword.get(opts, :uplink, :none)} | shared]
+    {%Config{endpoints: endpoints}, follow} = config(Keyword.fetch!(opts, :config), shared)
     children = Enum.map(endpoints, &{Poller, [{:endpoint, &1} | shared]})
-    Supervisor.init(children, strategy: :one_for_one)
+    Supervisor.init(children ++ follow, strategy: :one_for_one)
   end
+
+  # In a supervisor's `init/1`, `self()` is the supervisor.
+  defp config(%Config{} = config, _shared), do: {config, []}
+
+  defp config({:keeper, keeper}, shared) do
+    {config, _digest} = ConfigKeeper.current(keeper)
+    status = Keyword.fetch!(shared, :status)
+    {config, [{Applier, pollers: self(), keeper: keeper, shared: shared, status: status}]}
+  end
+
+  # contract: test/alavi/pollers/applier_test.exs "start_link/1"
+  @doc "Each poller's child ID and pid, `:undefined` or `:restarting`."
+  @spec pollers(Supervisor.supervisor()) ::
+          [{{Poller, String.t(), :inet.port_number()}, pid() | :undefined | :restarting}]
+  def pollers(pollers),
+    do:
+      for(
+        {{Poller, _, _} = id, child, _, _} <- Supervisor.which_children(pollers),
+        do: {id, child}
+      )
 
   # contract: test/alavi/poller_test.exs "Pollers.log_latency/2"
   @doc """
@@ -39,8 +66,7 @@ defmodule Alavi.Pollers do
   """
   @spec log_latency(Supervisor.supervisor(), timeout()) :: :ok
   def log_latency(pollers, timeout) do
-    pids =
-      for {_id, pid, _type, _modules} <- Supervisor.which_children(pollers), is_pid(pid), do: pid
+    pids = for {_id, pid} <- pollers(pollers), is_pid(pid), do: pid
 
     pids
     |> Task.async_stream(&logged(&1, timeout),
@@ -75,12 +101,13 @@ defmodule Alavi.Pollers do
              | :poller_down
              | :no_units
              | {:unknown_units, [term()]}
-             | :busy}
+             | :busy
+             | :retiring}
   def read_now(pollers, {host, port}, units, request_id \\ nil) do
-    case List.keyfind(Supervisor.which_children(pollers), {Poller, host, port}, 0) do
-      {_id, pid, _type, _modules} when is_pid(pid) -> call(pid, units, request_id)
-      {_id, :undefined, _type, _modules} -> {:error, :polled_by_other_system}
-      {_id, :restarting, _type, _modules} -> {:error, :restarting}
+    case List.keyfind(pollers(pollers), {Poller, host, port}, 0) do
+      {_id, pid} when is_pid(pid) -> call(pid, units, request_id)
+      {_id, :undefined} -> {:error, :polled_by_other_system}
+      {_id, :restarting} -> {:error, :restarting}
       nil -> {:error, :unknown_endpoint}
     end
   end
@@ -101,9 +128,7 @@ defmodule Alavi.Pollers do
           %{{String.t(), :inet.port_number()} => %{(1..247) => String.t()}}
   def serials(pollers) do
     running =
-      for {{Poller, host, port}, pid, _, _} <- Supervisor.which_children(pollers),
-          is_pid(pid),
-          do: {{host, port}, pid}
+      for {{Poller, host, port}, pid} <- pollers(pollers), is_pid(pid), do: {{host, port}, pid}
 
     running
     |> Task.async_stream(fn {endpoint, pid} -> {endpoint, serials_of(pid)} end,

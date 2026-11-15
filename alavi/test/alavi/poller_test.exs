@@ -420,4 +420,48 @@ defmodule Alavi.PollerTest do
       assert [%Reading{endpoint: %{port: ^port}} | _] = recorded!(250)
     end
   end
+
+  describe "retire/2" do
+    test "a read on demand queued before is run, one asked after is refused, then it stops" do
+      {slow, port} = start_sim!(:tcp)
+      Simulator.faults(slow, delay_ms: 30)
+      meters = [meter(1, "elite_440"), meter(2, "elite_440"), meter(3, "elite_500")]
+
+      sup =
+        start_pollers!([
+          endpoint(port, "tcp", meters, %{"interval_ms" => 60_000, "timeout_ms" => 1_000})
+        ])
+
+      assert [%Reading{unit_id: 1} | _] = recorded!()
+      [{_id, pid}] = Alavi.Pollers.pollers(sup)
+      ref = Process.monitor(pid)
+      assert {:ok, read} = Alavi.Pollers.read_now(sup, {"127.0.0.1", port}, [3], "before")
+      Alavi.Poller.retire(pid, :removed)
+
+      assert Alavi.Pollers.read_now(sup, {"127.0.0.1", port}, [1], "after") ==
+               {:error, :retiring}
+
+      assert_receive {:alavi_read, ^read, [%Reading{unit_id: 3, request_id: "before"} | _]}, 2_000
+      assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 2_000
+      assert Alavi.Pollers.pollers(sup) == [{{Alavi.Poller, "127.0.0.1", port}, :undefined}]
+    end
+
+    test "its latency so far is logged and recorded as it stops" do
+      {_sim, port} = start_sim!(:tcp)
+      sup = start_pollers!([endpoint(port, "tcp", [meter(1, "elite_440")])])
+      recorded!()
+      [{_id, pid}] = Alavi.Pollers.pollers(sup)
+
+      {_down, log} =
+        with_log(fn ->
+          ref = Process.monitor(pid)
+          Alavi.Poller.retire(pid, :replaced)
+          assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 2_000
+        end)
+
+      assert log =~ "latency, before stopping"
+      assert log =~ "stopped at a round boundary"
+      assert_receive {:latency, [%LatencyDay{unit_id: 1}]}
+    end
+  end
 end

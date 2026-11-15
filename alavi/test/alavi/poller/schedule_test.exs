@@ -242,4 +242,26 @@ defmodule Alavi.Poller.ScheduleTest do
                Schedule.next([], 12_000, due, ms)
     end
   end
+
+  describe "retired/1" do
+    test "a round not yet begun goes; one begun, reads on demand and a restore stay" do
+      [m1, m2, _m3] = meters()
+      waiting = Job.poll_round([m1, m2], 0)
+      begun = Job.polled(waiting, [:read], {m1, seen(1), nil})
+      {:ok, read} = Job.read_on_demand([m1, m2], [2], 0, {self(), make_ref()})
+      restore = Job.restore(0, :backoff)
+
+      assert Schedule.retired([restore, waiting, read]) == [restore, read]
+      assert Schedule.retired([begun, read]) == [begun, read]
+    end
+
+    test "with no meters, no round starts: the queue drains, and a held restore is waited for" do
+      [m1, _m2, _m3] = meters()
+      {:ok, read} = Job.read_on_demand([m1], [1], 0, {self(), make_ref()})
+      held = Job.restore(500, :backoff)
+
+      assert Schedule.next([read], 100, %{}, []) == {:step, read, []}
+      assert Schedule.next([held], 100, %{}, []) == {:wait, 400}
+    end
+  end
 end

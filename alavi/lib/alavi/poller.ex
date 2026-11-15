@@ -29,6 +29,15 @@ defmodule Alavi.Poller do
   the status shows the endpoint faulted (`Alavi.Status.selectors/3`). It
   records no readings and no missed reads.
 
+  A poller retired (`retire/2`) starts no more rounds, and stops once the job
+  under way and the reads on demand already queued are done: at a round
+  boundary, never mid-round, and so never inside a selector session, which
+  runs within one step. Retired `:removed`, it first puts back any owed
+  selectors, retrying as before however long that takes; retired
+  `:replaced`, it leaves them owed on disk, for the poller that replaces it
+  finds them at start. Its latency so far is logged and recorded as when
+  the collector stops.
+
   Each request's round trip, from send to reply, not the connect, counts in
   its meter's `Alavi.Poller.Latency`: shown on the status page after each
   job (`Alavi.Status.latency/3`); and when a UTC day ends, and on
@@ -77,7 +86,8 @@ defmodule Alavi.Poller do
   Its readings and missed reads carry `request_id`.
   """
   @spec read_now(GenServer.server(), [1..247], String.t() | nil) ::
-          {:ok, reference()} | {:error, :no_units | {:unknown_units, [term()]} | :busy}
+          {:ok, reference()}
+          | {:error, :no_units | {:unknown_units, [term()]} | :busy | :retiring}
   def read_now(server, units, request_id \\ nil),
     do: GenServer.call(server, {:read_now, units, request_id}, :infinity)
 
@@ -98,10 +108,27 @@ defmodule Alavi.Poller do
   @spec log_latency(GenServer.server(), timeout()) :: :ok
   def log_latency(server, timeout), do: GenServer.call(server, :log_latency, timeout)
 
+  # contract: test/alavi/poller_test.exs "retire/2"
+  # contract: test/alavi/restore_test.exs "retire/2"
+  @doc """
+  Stop at the next round boundary: `:removed`, the endpoint is no longer
+  polled; `:replaced`, a poller with new settings takes it over. Retiring
+  again changes only which.
+  """
+  @spec retire(GenServer.server(), :removed | :replaced) :: :ok
+  def retire(server, why) when why in [:removed, :replaced],
+    do: GenServer.cast(server, {:retire, why})
+
+  # Transient: a poller that stops once retired is not started again.
   @spec child_spec([option()]) :: Supervisor.child_spec()
   def child_spec(opts) do
     %Endpoint{host: host, port: port} = Keyword.fetch!(opts, :endpoint)
-    %{id: {__MODULE__, host, port}, start: {__MODULE__, :start_link, [opts]}}
+
+    %{
+      id: {__MODULE__, host, port},
+      start: {__MODULE__, :start_link, [opts]},
+      restart: :transient
+    }
   end
 
   @impl true
@@ -115,9 +142,13 @@ defmodule Alavi.Poller do
   end
 
   @impl true
-  def handle_continue(:poll, state), do: {:noreply, wake(state)}
+  def handle_continue(:poll, state), do: wake(state)
 
   @impl true
+  def handle_call({:read_now, _units, _request_id}, _from, %{retiring: why} = state)
+      when why != nil,
+      do: {:reply, {:error, :retiring}, state}
+
   def handle_call({:read_now, units, request_id}, {pid, _tag}, state) do
     ref = make_ref()
 
@@ -136,10 +167,20 @@ defmodule Alavi.Poller do
     do: {:reply, log_days(state, "before stopping"), state}
 
   @impl true
-  def handle_info(:step, state), do: {:noreply, wake(state)}
+  def handle_cast({:retire, why}, state) do
+    state = %{state | retiring: why, queue: Schedule.retired(state.queue)}
 
-  def handle_info({:poll, timer}, %{timer: timer} = state),
-    do: {:noreply, wake(%{state | timer: nil})}
+    cond do
+      retired?(state) -> stop(state)
+      state.timer == nil -> {:noreply, state}
+      true -> {:noreply, %{state | timer: nil}, {:continue, :poll}}
+    end
+  end
+
+  @impl true
+  def handle_info(:step, state), do: wake(state)
+
+  def handle_info({:poll, timer}, %{timer: timer} = state), do: wake(%{state | timer: nil})
 
   # A timer whose wake-up came another way: nothing to do.
   def handle_info({:poll, _stale}, state), do: {:noreply, state}
@@ -173,7 +214,8 @@ defmodule Alavi.Poller do
       started: clock.(),
       serials: %{},
       backoff: endpoint.reconnect_backoff_ms.min,
-      reconnect_at: now
+      reconnect_at: now,
+      retiring: nil
     }
 
     {:ok, owed_at_start(state, now), {:continue, :poll}}
@@ -206,7 +248,32 @@ defmodule Alavi.Poller do
   defp queued(%{timer: nil} = state, ref), do: {:reply, {:ok, ref}, state}
   defp queued(state, ref), do: {:reply, {:ok, ref}, %{state | timer: nil}, {:continue, :poll}}
 
-  defp wake(state), do: state |> act() |> rearm()
+  defp wake(state) do
+    state = act(state)
+    if retired?(state), do: stop(state), else: {:noreply, rearm(state)}
+  end
+
+  # Between steps, `state.job` is nil and the job under way is in the queue.
+  defp retired?(%{retiring: nil}), do: false
+  defp retired?(%{retiring: :removed, queue: queue}), do: queue == []
+
+  defp retired?(%{retiring: :replaced, queue: queue}),
+    do: Enum.all?(queue, &(&1.kind == :restore))
+
+  defp stop(state) do
+    log_days(state, "before stopping")
+
+    Logger.info(
+      "alavi poller #{label(state)}: stopped at a round boundary, the endpoint #{retired_line(state)}"
+    )
+
+    {:stop, :normal, state}
+  end
+
+  defp retired_line(%{retiring: :removed}), do: "no longer polled"
+
+  defp retired_line(%{retiring: :replaced}),
+    do: "polled with new settings, any owed restore left to them"
 
   defp act(state) do
     case decide(state) do
@@ -229,7 +296,11 @@ defmodule Alavi.Poller do
     end
   end
 
-  defp decide(state), do: Schedule.next(state.queue, now(), state.due, state.endpoint.meters)
+  # Retiring, no meter is due: no round starts, and the queue drains.
+  defp decide(%{retiring: nil} = state),
+    do: Schedule.next(state.queue, now(), state.due, state.endpoint.meters)
+
+  defp decide(state), do: Schedule.next(state.queue, now(), %{}, [])
 
   defp begin_round(%Job{started: started} = round, state) do
     state = log_raw(state, &RawLog.flush(&1, started))

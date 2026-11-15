@@ -10,14 +10,16 @@ defmodule Alavi.Uplink do
   it learns of pending jobs, and the server sees an idle collector, not a
   silent one. Every answer's `jobs` go to the `intake` (`Alavi.Intake`), and
   its `config_digest` to the `config` keeper (`Alavi.ConfigKeeper`), whose
-  report each batch's backlog carries.
+  report each batch's backlog carries. With a keeper, the heartbeat interval
+  (`heartbeat_ms/2`) and the endpoints the intake resolves serials against
+  follow each config it applies (`Alavi.ConfigKeeper.subscribe/1`).
   """
 
   use GenServer
 
   require Logger
 
-  alias Alavi.{Buffer, ConfigKeeper, Intake, Status, Wire}
+  alias Alavi.{Buffer, Config, ConfigKeeper, Intake, Status, Wire}
   alias Alavi.Buffer.Batch
   alias Alavi.Uplink.{HTTP, Response, Target}
 
@@ -28,6 +30,7 @@ defmodule Alavi.Uplink do
   `:none` where no jobs are run (tests); jobs an answer lists are then logged.
   `config` is `:none` for a collector that does not fetch its config: its
   backlog then has no `config`, and answers' digests are not looked at.
+  `heartbeat_ms` is given only then, for with a keeper it is the config's.
   """
   @type option ::
           {:buffer, GenServer.server()}
@@ -46,18 +49,35 @@ defmodule Alavi.Uplink do
   @spec start_link([option()]) :: GenServer.on_start()
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, Keyword.take(opts, [:name]))
 
+  # contract: test/alavi/collector_test.exs "start_link/1"
+  @doc """
+  Due after the shortest polling interval of any meter this collector polls,
+  one round of the meter polled most often; with none, after `idle_ms`.
+  """
+  @spec heartbeat_ms(Config.t(), pos_integer()) :: pos_integer()
+  def heartbeat_ms(%Config{endpoints: endpoints}, idle_ms) do
+    endpoints
+    |> Enum.reject(& &1.polled_by_other_system)
+    |> Enum.flat_map(& &1.meters)
+    |> Enum.map(& &1.interval_ms)
+    |> Enum.min(fn -> idle_ms end)
+  end
+
   @impl true
   def init(opts) do
     backoff = Keyword.fetch!(opts, :backoff_ms)
+    idle_ms = Keyword.fetch!(opts, :idle_ms)
+    keeper = Keyword.fetch!(opts, :config)
+    {heartbeat_ms, intake} = polling(keeper, opts, idle_ms)
 
     state = %{
       buffer: Keyword.fetch!(opts, :buffer),
       target: Keyword.fetch!(opts, :target),
       clock: Keyword.fetch!(opts, :clock),
-      idle_ms: Keyword.fetch!(opts, :idle_ms),
-      heartbeat_ms: Keyword.fetch!(opts, :heartbeat_ms),
-      intake: Keyword.fetch!(opts, :intake),
-      config: Keyword.fetch!(opts, :config),
+      idle_ms: idle_ms,
+      heartbeat_ms: heartbeat_ms,
+      intake: intake,
+      config: keeper,
       answered: monotonic(),
       timeout_ms: Keyword.fetch!(opts, :timeout_ms),
       status: Keyword.fetch!(opts, :status),
@@ -73,6 +93,20 @@ defmodule Alavi.Uplink do
   @impl true
   def handle_continue(:send, state), do: {:noreply, attempt(state)}
 
+  defp polling(:none, opts, _idle_ms),
+    do: {Keyword.fetch!(opts, :heartbeat_ms), Keyword.fetch!(opts, :intake)}
+
+  defp polling(keeper, opts, idle_ms) do
+    if Keyword.has_key?(opts, :heartbeat_ms),
+      do: raise(ArgumentError, "with a config keeper, the heartbeat follows its config")
+
+    {config, _digest} = ConfigKeeper.subscribe(keeper)
+    {heartbeat_ms(config, idle_ms), configured(Keyword.fetch!(opts, :intake), config)}
+  end
+
+  defp configured(:none, _config), do: :none
+  defp configured(intake, config), do: Intake.configured(intake, config)
+
   # contract: test/alavi/uplink_test.exs "nudge/1"
   @doc "Something new is in the buffer: send it now if the uplink is idle."
   @spec nudge(GenServer.server()) :: :ok
@@ -87,6 +121,12 @@ defmodule Alavi.Uplink do
 
   # The attempt it was for came sooner, by a nudge.
   def handle_info({:send, _stale}, state), do: {:noreply, state}
+
+  # The next attempt takes the new heartbeat interval.
+  def handle_info({:alavi_config, %Config{} = config, _digest}, state) do
+    heartbeat_ms = heartbeat_ms(config, state.idle_ms)
+    {:noreply, %{state | heartbeat_ms: heartbeat_ms, intake: configured(state.intake, config)}}
+  end
 
   defp attempt(state) do
     {result, wait, state} =

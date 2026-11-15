@@ -315,6 +315,57 @@ defmodule Alavi.StatusTest do
     end
   end
 
+  describe "Snapshot.polling/2" do
+    test "an endpoint kept keeps its history and its unchanged meters; the rest start afresh" do
+      read =
+        snapshot()
+        |> Snapshot.round([
+          reading(1, "active_energy_import", "5"),
+          reading(3, "active_energy_import", "7")
+        ])
+        |> Snapshot.selectors(%{host: "127.0.0.1", port: 5020}, :restored, @now)
+
+      changed =
+        config!([
+          endpoint(5021, "tcp", [meter(2, "elite_440")]),
+          endpoint(5020, "rtu_over_tcp", [
+            meter(1, "elite_440"),
+            meter(3, "elite_500", %{"serial" => "SIM-3"}),
+            meter(4, "elite_440")
+          ])
+        ])
+
+      assert [%{port: 5021, rounds: [], meters: [%{unit_id: 2, last_read_at: nil}]}, kept] =
+               Snapshot.polling(read, changed).endpoints
+
+      assert %{framing: "rtu_over_tcp", rounds: [_round], selectors: %{state: "restored"}} = kept
+      assert [one, three, four] = kept.meters
+      assert one == meter_view(read, 1)
+      assert %{unit_id: 3, profile: "elite_500", last_read_at: nil} = three
+      assert %{unit_id: 4, last_read_at: nil} = four
+    end
+
+    test "an endpoint the config no longer has goes; another serial expected starts a meter afresh" do
+      read = Snapshot.round(snapshot(), [reading(1, "active_energy_import", "5")])
+
+      assert [
+               %{
+                 port: 5020,
+                 meters: [%{unit_id: 1, serial_expected: "OTHER-1", last_read_at: nil}]
+               }
+             ] =
+               Snapshot.polling(
+                 read,
+                 config!([
+                   endpoint(5020, "tcp", [meter(1, "elite_440", %{"serial" => "OTHER-1"})])
+                 ])
+               ).endpoints
+
+      assert [%{port: 5022}] =
+               Snapshot.polling(read, config!([endpoint(5022, "tcp", [meter(1, "elite_440")])])).endpoints
+    end
+  end
+
   describe "Snapshot.clock/2" do
     test "the clock's source and last sync" do
       status = %{source: :ntp, last_sync_at: ~U[2026-11-14 09:00:00Z]}
@@ -490,6 +541,8 @@ defmodule Alavi.StatusTest do
       Status.latency(status, %{host: "127.0.0.1", port: 5020}, %{3 => @summary})
       Status.selectors(status, %{host: "127.0.0.1", port: 5020}, {:owed, "found at start", 0})
       snapshot = Status.read(status)
+      Status.polling(status, config!([endpoint(5021, "tcp", [meter(1, "elite_440")])]))
+      assert [%{port: 5021}] = Status.read(status).endpoints
 
       assert meter_view(snapshot, 1).serial == "SIM-1"
       assert [%{line: "alavi poller " <> _}] = snapshot.raw_lines
