@@ -10,12 +10,14 @@ defmodule Alavi.EndToEndTest do
 
   import Alavi.PollerCase
 
-  alias Alavi.{Buffer, Clock, Collector, Uplink}
+  alias Alavi.{Buffer, Clock, Collector, FakeNtp, Uplink}
   alias Alavi.Uplink.Target
 
   @moduletag :e2e
   @moduletag :tmp_dir
   @moduletag :capture_log
+  @collector_at ~U[2026-11-01 00:00:04.000123Z]
+  @server_at 1_793_491_208_215_003_051
   @token_script Path.expand("../../../central/bin/collector-token", __DIR__)
 
   defp env!(name), do: System.fetch_env!(name)
@@ -268,9 +270,8 @@ defmodule Alavi.EndToEndTest do
     assert status.()["readings"] == 4
   end
 
-  test "a heartbeat is stored as an upload of nothing", ctx do
-    {id, token} = new_collector!()
-
+  # A buffer and an uplink with no pollers: what is stored is what the test records.
+  defp start_uplink!(dir, id, token) do
     {:ok, target} =
       Target.parse(env!("MINNALAVU_API_URL"), token, allow_http: true, cacerts: [])
 
@@ -278,7 +279,7 @@ defmodule Alavi.EndToEndTest do
 
     start_supervised!(
       {Buffer,
-       dir: ctx.tmp_dir,
+       dir: dir,
        max_bytes: 1_000_000,
        max_batch_events: 1_000,
        clock_status: &Clock.unsynced/0,
@@ -297,6 +298,13 @@ defmodule Alavi.EndToEndTest do
        timeout_ms: 5_000,
        status: no_status()}
     )
+
+    buffer
+  end
+
+  test "a heartbeat is stored as an upload of nothing", ctx do
+    {id, token} = new_collector!()
+    start_uplink!(ctx.tmp_dir, id, token)
 
     uploads = fn ->
       rows!("""
@@ -321,5 +329,101 @@ defmodule Alavi.EndToEndTest do
                &1
              )
            )
+  end
+
+  # The collector's clock reads `@collector_at` until the fake server takes the
+  # query, and 300 µs later from then on: t1 and t4 are known exactly.
+  defp start_check!(buffer, servers, respond) do
+    {:ok, clock} = Agent.start_link(fn -> @collector_at end)
+
+    answer = fn request ->
+      Agent.update(clock, &DateTime.add(&1, 300, :microsecond))
+      respond.(request)
+    end
+
+    port = FakeNtp.start!(answer)
+
+    start_supervised!(
+      {Clock.Check,
+       servers: servers,
+       port: port,
+       sink: {Buffer, buffer},
+       status: no_status(),
+       clock: fn -> Agent.get(clock, & &1) end,
+       monotonic: fn -> System.monotonic_time(:millisecond) end,
+       timeout_ms: 200,
+       watch_ms: 60_000,
+       step_ms: 2_000,
+       day_ms: 86_400_000,
+       step_gap_ms: 600_000}
+    )
+  end
+
+  test "an answered clock check is stored, and its offset computed exactly from its four times",
+       ctx do
+    {id, token} = new_collector!()
+    buffer = start_uplink!(ctx.tmp_dir, id, token)
+    sent = @server_at + 41_001
+
+    start_check!(
+      buffer,
+      ["127.0.0.1"],
+      &{:reply, FakeNtp.reply(&1, received: @server_at, sent: sent)}
+    )
+
+    offsets = fn ->
+      rows!("""
+      SELECT (t1 AT TIME ZONE 'UTC')::text AS t1, (t4 AT TIME ZONE 'UTC')::text AS t4, t2_unix::text AS t2, t3_unix::text AS t3, offset_seconds::text AS offset,
+             delay_seconds::text AS delay, error_bound_seconds::text AS bound,
+             server, host(address) AS address, stratum, leap, trigger::text AS trigger
+      FROM store.clock_offsets WHERE collector_id = '#{id}'
+      """)
+    end
+
+    await!("the check stored", fn -> offsets.() != [] end)
+
+    # t2 − t1 = 4.214880051 s and t3 − t4 = 4.214621052 s, to the nanosecond.
+    assert [
+             %{
+               "t1" => "2026-11-01 00:00:04.000123",
+               "t4" => "2026-11-01 00:00:04.000423",
+               "t2" => "1793491208.215003051",
+               "t3" => "1793491208.215044052",
+               "offset" => "4.2147505515",
+               "delay" => "0.000258999",
+               "bound" => "0.0001294995",
+               "server" => "127.0.0.1",
+               "address" => "127.0.0.1",
+               "stratum" => 2,
+               "leap" => 0,
+               "trigger" => "start"
+             }
+           ] = offsets.()
+  end
+
+  test "a clock check no server answered is stored with its outcome", ctx do
+    {id, token} = new_collector!()
+    buffer = start_uplink!(ctx.tmp_dir, id, token)
+    start_check!(buffer, ["127.0.0.1"], fn _ -> :drop end)
+
+    checks = fn ->
+      rows!("""
+      SELECT (t1 AT TIME ZONE 'UTC')::text AS t1, outcome::text AS outcome, t2_unix, address
+      FROM store.clock_checks WHERE collector_id = '#{id}'
+      """)
+    end
+
+    await!("the check stored", fn -> checks.() != [] end)
+
+    assert [
+             %{
+               "t1" => "2026-11-01 00:00:04.000123",
+               "outcome" => "timeout",
+               "t2_unix" => nil,
+               "address" => nil
+             }
+           ] = checks.()
+
+    assert sql!("SELECT count(*) FROM store.clock_offsets WHERE collector_id = '#{id}'") == 0
   end
 end
