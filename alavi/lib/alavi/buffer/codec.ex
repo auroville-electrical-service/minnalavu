@@ -12,7 +12,7 @@ defmodule Alavi.Buffer.Codec do
   # read: a segment in any other is set aside, not decoded. An event kind added
   # within a version is read by this release, not by an older one.
 
-  alias Alavi.{Clock, ClockCheck, FirmwareRead, MissedRead, Reading, Sink}
+  alias Alavi.{Clock, ClockCheck, FirmwareRead, LatencyDay, MissedRead, Reading, Sink}
 
   @version 5
   @magic <<"ALAVIBUF", @version>>
@@ -106,6 +106,11 @@ defmodule Alavi.Buffer.Codec do
   defp encode_event(%ClockCheck{} = c),
     do: {:clock_check, c.trigger, c.server, iso(c.t1), iso(c.t4), c.outcome}
 
+  defp encode_event(%LatencyDay{} = l) do
+    {:latency_day, l.endpoint.host, l.endpoint.port, l.unit_id, Date.to_iso8601(l.date),
+     iso(l.poller_started_at), l.buckets_version, l.retries, l.timeouts, l.max_ms, l.buckets}
+  end
+
   defp decode_event(
          {:reading, host, port, unit_id, serial, product_code, profile, version, key, ts,
           {sign, coef, exp}, request_id}
@@ -169,6 +174,23 @@ defmodule Alavi.Buffer.Codec do
       t4: datetime(t4),
       outcome: outcome
     }
+
+  defp decode_event(
+         {:latency_day, host, port, unit_id, date, started, version, retries, timeouts, max_ms,
+          buckets}
+       ) do
+    %LatencyDay{
+      endpoint: %{host: host, port: port},
+      unit_id: unit_id,
+      date: Date.from_iso8601!(date),
+      poller_started_at: datetime(started),
+      buckets_version: version,
+      retries: retries,
+      timeouts: timeouts,
+      max_ms: max_ms,
+      buckets: buckets
+    }
+  end
 
   defp iso(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
 

@@ -43,7 +43,7 @@ defmodule Alavi.EndToEndTest do
     String.trim(token)
   end
 
-  defp start_collector!(dir, endpoints, token, named \\ []) do
+  defp start_collector!(dir, endpoints, token, named \\ [], clock \\ &DateTime.utc_now/0) do
     {:ok, target} =
       Target.parse(env!("MINNALAVU_API_URL"), token, allow_http: true, cacerts: [])
 
@@ -66,7 +66,7 @@ defmodule Alavi.EndToEndTest do
     opts = [
       config: config!(endpoints),
       buffer: buffer,
-      clock: &DateTime.utc_now/0,
+      clock: clock,
       uplink: uplink,
       raw_log: raw_log(),
       clock_status: :none,
@@ -425,5 +425,71 @@ defmodule Alavi.EndToEndTest do
            ] = checks.()
 
     assert sql!("SELECT count(*) FROM store.clock_offsets WHERE collector_id = '#{id}'") == 0
+  end
+
+  # Every reply 41 ms late: each answer lands in the (40, 50] ms bucket, so
+  # every percentile is that bucket's bound cut to the exact max.
+  test "a meter's latency for a day is stored when the day ends, and its percentiles computed exactly",
+       ctx do
+    {id, token} = new_collector!()
+    {sim, port} = start_sim!(:tcp)
+    Simulator.faults(sim, delay_ms: 41)
+    # The dev database keeps earlier runs' readings, which a fixed clock would repeat.
+    :ok = Simulator.identify(sim, 1, :serial, String.upcase(id))
+    {:ok, clock} = Agent.start_link(fn -> ~U[2026-11-13 23:59:59Z] end)
+    endpoints = [endpoint(port, "tcp", [meter(1, "elite_440")], %{"interval_ms" => 5})]
+    start_collector!(ctx.tmp_dir, endpoints, token, [], fn -> Agent.get(clock, & &1) end)
+
+    readings = fn ->
+      sql!("SELECT count(*) FROM store.readings WHERE collector_id = '#{id}'")
+    end
+
+    await!("a round's readings stored", fn -> readings.() >= 2 end)
+    Agent.update(clock, fn _ -> ~U[2026-11-14 00:00:01Z] end)
+
+    days = fn ->
+      rows!("""
+      SELECT endpoint_host, endpoint_port, unit_id, day::text AS day,
+             (poller_started_at AT TIME ZONE 'UTC')::text AS started, buckets_version, retries,
+             timeouts, max_ms, buckets
+      FROM store.latency_days WHERE collector_id = '#{id}'
+      """)
+    end
+
+    await!("the day's latency stored", fn -> days.() != [] end)
+
+    assert [
+             %{
+               "endpoint_host" => "127.0.0.1",
+               "endpoint_port" => ^port,
+               "unit_id" => 1,
+               "day" => "2026-11-13",
+               "started" => "2026-11-13 23:59:59",
+               "buckets_version" => 1,
+               "retries" => 0,
+               "timeouts" => 0,
+               "max_ms" => max,
+               "buckets" => buckets
+             }
+           ] = days.()
+
+    answered = Enum.sum(buckets)
+    assert length(buckets) == 44 and answered > 0
+    assert Enum.at(buckets, 14) == answered, "every answer in the (40, 50] ms bucket"
+    assert max > 40 and max <= 50
+
+    assert [
+             %{
+               "answered" => ^answered,
+               "p50_ms" => ^max,
+               "p90_ms" => ^max,
+               "p99_ms" => ^max,
+               "max_ms" => ^max
+             }
+           ] =
+             rows!("""
+             SELECT answered, p50_ms, p90_ms, p99_ms, max_ms
+             FROM store.latency_meter_days WHERE collector_id = '#{id}'
+             """)
   end
 end

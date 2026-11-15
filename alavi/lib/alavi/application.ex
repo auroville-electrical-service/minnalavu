@@ -12,8 +12,9 @@ defmodule Alavi.Application do
     end
   end
 
-  # Before the pollers stop, their latency so far goes to the log, which
-  # outlives them; a poller has a few seconds to finish the step under way.
+  # Before the pollers stop, their latency so far goes to the log and the
+  # buffer, which outlive them; a poller has a few seconds to finish the step
+  # under way.
   @impl true
   def prep_stop(state) do
     if Process.whereis(Alavi.Pollers), do: Alavi.Pollers.log_latency(Alavi.Pollers, 5_000)

@@ -4,13 +4,13 @@ defmodule Alavi.Wire do
   no collector id: the server knows the collector from its token.
   """
 
-  alias Alavi.{Buffer, Clock, ClockCheck, FirmwareRead, MissedRead, Reading}
+  alias Alavi.{Buffer, Clock, ClockCheck, FirmwareRead, LatencyDay, MissedRead, Reading}
   alias Alavi.Buffer.Batch
 
   # contract: test/alavi/wire_test.exs "batch/3"
   @doc """
-  `sent_at` is the collector's clock. `firmware_reads` and `clock_checks` only
-  when the batch holds any.
+  `sent_at` is the collector's clock. `firmware_reads`, `clock_checks` and
+  `latency` only when the batch holds any.
   """
   @spec batch(Batch.t(), DateTime.t(), Buffer.backlog()) :: %{String.t() => term()}
   def batch(%Batch{} = batch, sent_at, backlog) do
@@ -27,6 +27,7 @@ defmodule Alavi.Wire do
     }
     |> optional("firmware_reads", wire(events, FirmwareRead))
     |> optional("clock_checks", wire(events, ClockCheck))
+    |> optional("latency", wire(events, LatencyDay))
   end
 
   defp wire(events, kind), do: events |> Map.get(kind, []) |> Enum.map(&kind.to_wire/1)

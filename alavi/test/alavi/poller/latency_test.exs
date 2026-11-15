@@ -77,6 +77,13 @@ defmodule Alavi.Poller.LatencyTest do
   end
 
   describe "summary/1" do
+    # The store's test of store.latency_meter_days (central/test/latency.sql)
+    # counts the same answers.
+    test "nearest rank at each edge: the smallest bucket holding at least p % of the answers" do
+      ms = List.duplicate(1, 49) ++ [2] ++ List.duplicate(3, 40) ++ List.duplicate(4, 9) ++ [5]
+      assert %{answered: 100, p50: 2, p90: 3, p99: 4, max: 5} = Latency.summary(answers(ms))
+    end
+
     test "nil before anything was recorded" do
       assert Latency.summary(Latency.new()) == nil
     end
@@ -128,6 +135,44 @@ defmodule Alavi.Poller.LatencyTest do
 
     test "nil for a day not kept" do
       assert Latency.line(answers([5]), Date.add(@day, 1)) == nil
+    end
+  end
+
+  describe "counts/2" do
+    test "every bucket's count in order, one above the last bound, with the day's figures" do
+      latency =
+        answers([3, 38, 40, 41, 75_000])
+        |> Latency.record(@day, 2, 44, :ok)
+        |> Latency.record(@day, 1, 3_000, :timeout)
+
+      assert %{retries: 1, timeouts: 1, max: 75_000, buckets: buckets} =
+               Latency.counts(latency, @day)
+
+      assert length(buckets) == length(Latency.bounds()) + 1
+      assert Enum.sum(buckets) == 6
+      by_bound = Enum.zip(Latency.bounds() ++ [:over], buckets)
+      assert Enum.reject(by_bound, &(elem(&1, 1) == 0)) == [{3, 1}, {40, 2}, {50, 2}, {:over, 1}]
+    end
+
+    test "a day of timeouts only has every bucket empty and no max" do
+      latency = Latency.record(Latency.new(), @day, 1, 100, :timeout)
+      assert %{timeouts: 1, max: nil, buckets: buckets} = Latency.counts(latency, @day)
+      assert Enum.all?(buckets, &(&1 == 0))
+    end
+
+    test "nil for a day not kept" do
+      assert Latency.counts(answers([5]), Date.add(@day, 1)) == nil
+    end
+  end
+
+  describe "bounds/0" do
+    test "are the bounds of the contract's version that bucket_version/0 names" do
+      version = Latency.bucket_version()
+      path = Path.expand("../../../../contract/latency/buckets.v#{version}.json", __DIR__)
+      contract = path |> File.read!() |> JSON.decode!()
+
+      assert contract["version"] == version
+      assert contract["bounds_ms"] == Latency.bounds()
     end
   end
 

@@ -4,7 +4,16 @@ defmodule Alavi.BufferTest do
 
   import ExUnit.CaptureLog
 
-  alias Alavi.{Buffer, Clock, ClockCheckFixture, FirmwareRead, MissedRead, Reading}
+  alias Alavi.{
+    Buffer,
+    Clock,
+    ClockCheckFixture,
+    FirmwareRead,
+    LatencyDayFixture,
+    MissedRead,
+    Reading
+  }
+
   alias Alavi.Buffer.Batch
 
   @moduletag :tmp_dir
@@ -489,6 +498,24 @@ defmodule Alavi.BufferTest do
 
       assert {:ok, %Batch{events: ^checks}} = Buffer.take(buffer)
       assert Buffer.backlog(buffer).oldest == ~U[2026-11-01 00:00:04.000123Z]
+    end
+
+    test "latency days are kept, across a restart, the oldest from the start of what each counts",
+         %{tmp_dir: dir} do
+      days = [LatencyDayFixture.answered(), LatencyDayFixture.timeouts_only()]
+
+      buffer = start!(dir)
+      :ok = Buffer.record(buffer, days)
+      buffer = restart!(dir)
+
+      assert {:ok, %Batch{events: ^days}} = Buffer.take(buffer)
+      # The poller started the day before, so the day's own start.
+      assert Buffer.backlog(buffer).oldest == ~U[2026-11-14 00:00:00Z]
+
+      later = %{hd(days) | poller_started_at: ~U[2026-11-14 09:15:00.5Z]}
+      buffer = restart!(Path.join(dir, "later"))
+      :ok = Buffer.record(buffer, [later])
+      assert Buffer.backlog(buffer).oldest == ~U[2026-11-14 09:15:00.5Z]
     end
   end
 

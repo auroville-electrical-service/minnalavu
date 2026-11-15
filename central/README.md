@@ -40,6 +40,12 @@ The directory is not named `minnalavu/`, since that is the repo itself.
   the nanosecond, which `timestamptz` cannot hold), the address, stratum, leap
   indicator and reference id; a kiss-o'-death keeps its address and reference id
   (the kiss code). The views on it are under *Clock checks* below.
+  `latency_days`: each meter's request latency for a UTC day as one poller
+  counted it, keyed on `(collector_id, endpoint_host, endpoint_port, unit_id,
+  day, poller_started_at)`, so a restart's part of a day is a row of its own:
+  the bucket version, retries, timeouts, the exact `max_ms` (NULL when nothing
+  answered) and `buckets`, every bucket's count. The views on it are under
+  *Request latency* below.
   `batches` (one row per batch, as first received), `uploads` (every arrival of a batch, with the collector's
   backlog), `reading_conflicts` (a reading whose key was already taken by one
   with other content) and `collectors`. Nothing in `store` can be updated,
@@ -60,6 +66,9 @@ that role, never by anything in the batch.
 
 ## The profile catalog
 
+`store.latency_bucket_versions`: each version of `contract/latency/`'s
+bucket bounds, loaded with the profiles and never changed in the same way.
+
 `store.profile_versions` and `store.profile_registers`: each version of each
 profile in `contract/profiles/`, and per register its table, address, type,
 word order and decimals (the decode; a float has no decimals), unit and kind.
@@ -74,11 +83,27 @@ version:
     bin/load-profiles 'postgres://owner@host:5432/minnalavu?sslmode=require'           # what it would load
     bin/load-profiles 'postgres://owner@host:5432/minnalavu?sslmode=require' --apply
 
-Every file is loaded in one transaction. A version already loaded is left as
+Every file, profiles and bucket versions, is loaded in one transaction. A
+bucket version already loaded is left as it is when its bounds are the same,
+and refused otherwise. A profile version already loaded is left as
 it is when its file still names the same registers with the same decode,
 address, unit and kind (a change to `verified_on_device` or a source is no
 change), and refused otherwise, loading nothing: a loaded version never
 changes, so a correction is a new version.
+
+## Request latency
+
+Views over `store.latency_days`, as the owner. Percentiles are read as the
+collector's status page reads them: nearest rank, the upper bound of the
+smallest bucket holding at least p % of the answers, never above the exact
+max (the max itself above the last bound), NULL when nothing answered.
+Buckets merge only within a bucket version, so each figure names one.
+
+- `store.latency_meter_days`: per meter (collector, host, port, unit), UTC day
+  and bucket version, its entries merged: answered (the buckets' sum),
+  retries, timeouts, p50, p90, p99 and max, in ms.
+- `store.latency_endpoint_days`: the same per endpoint, every meter's entries
+  merged, with how many meters.
 
 ## Clock checks
 
@@ -179,9 +204,14 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
   failed over due, NULL when none was due; and `erroring`, at or above
   `endpoint_error_rate` while in service and not polled by another system.
   Counted on an address and time index, so a run costs the lookback's
-  readings, never a scan of all of them. The store holds no request latency:
-  the collector's status page shows it, and its log keeps a line per meter
-  per day.
+  readings, never a scan of all of them. Request latency is in
+  `health.endpoint_latency`.
+- `health.endpoint_latency`: per registered endpoint, as registered now, a
+  row per UTC day overlapping the lookback and bucket version, from
+  `store.latency_endpoint_days` at each address it had while in service that
+  day: meters, entries, answered, retries, timeouts, p50, p90, p99 and max.
+  Only the lookback's days are read (by index on the day). No problem kind
+  is raised on it.
 - `health.unregistered_serials`: serials with readings within the lookback
   that are not in the registry.
 - `health.unregistered_serial_places`: the same serials, one row per place
@@ -335,7 +365,7 @@ notice says only "look again": read `jobs.request_status`.
   counts readings `received`, `inserted`, `duplicate` and `conflicting`,
   missed reads `received`, `inserted` and `duplicate`, and firmware reads
   `received`, `inserted`, `duplicate` and `conflicting` (a conflicting one is
-  counted, not kept), and clock checks the same. `jobs`, when the collector has
+  counted, not kept), and clock checks and latency entries the same. `jobs`, when the collector has
   pending requests, lists them oldest first, each with its `request_id`, `kind`,
   `meters` (serials), `requested_at` and `expires_at`; a request is listed
   until a reading or missed read for it arrives or it expires, so a collector
@@ -344,11 +374,13 @@ notice says only "look again": read `jobs.request_status`.
   collector's requests, lists them. Both are left out when empty. A batch with
   no readings and no missed reads is a heartbeat: it is stored as an upload,
   and its answer lists the jobs as any other.
-- 422 (`PT422`): the batch does not match the schema, or a reading or missed
-  read names a register its profile version does not; the message names the
-  field.
-- 503 (`PT503`): a reading or missed read is under a profile version the store
-  has not loaded. The collector keeps the batch and sends it again; load the
+- 422 (`PT422`): the batch does not match the schema, a reading or missed
+  read names a register its profile version does not, or a latency entry does
+  not fit its bucket version or itself (a count per bucket, retries at most the
+  answers, `max_ms` in the last bucket counted, a poller started before its
+  date ended); the message names the field.
+- 503 (`PT503`): a reading or missed read is under a profile version, or a
+  latency entry under a bucket version, the store has not loaded. The collector keeps the batch and sends it again; load the
   version (`bin/load-profiles`) and it is accepted.
 - 409 (`PT409`): the batch id was already sent by another collector.
 - 400 (`PGRST102`): the body is not JSON.

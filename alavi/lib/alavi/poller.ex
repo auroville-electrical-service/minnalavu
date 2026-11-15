@@ -31,8 +31,9 @@ defmodule Alavi.Poller do
 
   Each request's round trip, from send to reply, not the connect, counts in
   its meter's `Alavi.Poller.Latency`: shown on the status page after each
-  job (`Alavi.Status.latency/3`), and logged a line per meter when a UTC day
-  ends, and on `log_latency/2`.
+  job (`Alavi.Status.latency/3`); and when a UTC day ends, and on
+  `log_latency/2`, logged a line per meter and recorded to the sink as an
+  `Alavi.LatencyDay` per meter, under the time the poller started.
   """
 
   use GenServer
@@ -40,7 +41,7 @@ defmodule Alavi.Poller do
   require Logger
 
   alias Alavi.Config.{Endpoint, Meter}
-  alias Alavi.{Decode, FirmwareRead, MissedRead, Reading, Sink, Status, Uplink}
+  alias Alavi.{Decode, FirmwareRead, LatencyDay, MissedRead, Reading, Sink, Status, Uplink}
   alias Alavi.Modbus.Client
   alias Alavi.Poller.{Job, Latency, Names, Policy, RawLog, Schedule}
   alias Alavi.Profile.{Firmware, Identity, Register}
@@ -90,9 +91,9 @@ defmodule Alavi.Poller do
 
   # contract: test/alavi/poller_test.exs "Pollers.log_latency/2"
   @doc """
-  Log each meter's latency for the day so far, as when a day ends: for a
-  collector about to stop, whose latency is otherwise lost. The reply waits
-  for the step under way.
+  Log each meter's latency for the day so far and record it to the sink, as
+  when a day ends: for a collector about to stop, whose latency is otherwise
+  lost. The reply waits for the step under way.
   """
   @spec log_latency(GenServer.server(), timeout()) :: :ok
   def log_latency(server, timeout), do: GenServer.call(server, :log_latency, timeout)
@@ -169,6 +170,7 @@ defmodule Alavi.Poller do
       names: Map.new(endpoint.meters, &{&1.unit_id, Names.new()}),
       latency: Map.new(endpoint.meters, &{&1.unit_id, Latency.new()}),
       today: nil,
+      started: clock.(),
       serials: %{},
       backoff: endpoint.reconnect_backoff_ms.min,
       reconnect_at: now
@@ -658,6 +660,19 @@ defmodule Alavi.Poller do
       Logger.info("alavi poller #{label(state)} unit #{unit}: latency, #{why}, #{line}")
     end
 
+    record_days(state)
+  end
+
+  # A refusal is the sink's to report, as for readings.
+  defp record_days(state) do
+    days =
+      for %Meter{unit_id: unit} <- state.endpoint.meters,
+          counts = Latency.counts(state.latency[unit], state.today),
+          counts != nil,
+          do:
+            LatencyDay.new(endpoint_ref(state.endpoint), unit, state.started, state.today, counts)
+
+    if days != [], do: recorded(days, state)
     :ok
   end
 

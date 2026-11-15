@@ -16,6 +16,10 @@ What the collector and the server share. Nothing else is shared between them.
   version never changes, and a correction is a new version. Each register
   has a `kind` (`cumulative`, `interval`, `demand` or `instantaneous`), and
   its unit and kind belong to the version, not to each reading.
+- `latency/buckets.v*.json`: the bounds of the request latency histogram's
+  buckets, upper bounds in milliseconds, one file per version. A version never
+  changes once a batch cites it; a change is a new version in a new file, and
+  the old file stays, since collectors in the field go on citing it.
 - `tools/`: scripts that compute fixtures independently of any collector.
   `register_decode.py` writes `register-decode.v1.json`
   (`uv run --script contract/tools/register_decode.py`, from the repo root);
@@ -81,6 +85,21 @@ server times, stratum or leap. Any other check has none of those. The times
 are stored as measured: offset, delay and error bound are computed in the
 store, never sent. Ingest keys a check on (collector, `t1`). `clock` stays
 beside it: what the OS claims, where `clock_checks` is what was measured.
+
+A batch may also carry `latency`: each meter's request latency for a UTC
+date, as one poller counted it, sent when the date ends by the collector's
+clock and when the poller stops. An entry names the meter's `endpoint` and
+`unit_id`, the `date`, `poller_started_at` (so a restart's part of a day is
+an entry of its own) and the `buckets_version` of `latency/` its answers were
+counted under; then `retries` (answers on a retry), `timeouts` (censored,
+never timed), `max_ms` (exact, null when nothing answered) and `buckets`, the
+answers in each bucket in order, every bucket given: one per bound, and one
+for answers above the last. The answers are the sum of `buckets`; the store
+refuses an entry whose bucket count is not its version's, whose `max_ms` is
+not in its last counted bucket, whose retries outnumber its answers, or
+whose poller started after its date ended.
+Percentiles are the store's to compute, never sent. Ingest keys an entry on
+(collector, endpoint, `unit_id`, `date`, `poller_started_at`).
 
 A reading or missed read taken for a request carries its `request_id`: one
 of the jobs the server's answer to an upload listed (`central/README.md`).

@@ -4,15 +4,17 @@ defmodule Alavi.Sink do
   `module.record(arg, events)` once per meter per round with its readings and
   missed reads, and once more with a meter's `Alavi.FirmwareRead` when it,
   serial and product code included, differs from the last the sink kept (and
-  for the first after start). `Alavi.Clock.Check` calls it too, with each
-  check's `Alavi.ClockCheck`s. A sink must not return `:ok` before the events
+  for the first after start), and with each meter's `Alavi.LatencyDay` when
+  a UTC day ends and when the poller stops. `Alavi.Clock.Check` calls it too,
+  with each check's `Alavi.ClockCheck`s. A sink must not return `:ok` before the events
   are kept, and it runs in the caller's process, so it delays the endpoint's
   next read.
   """
 
-  alias Alavi.{ClockCheck, FirmwareRead, MissedRead, Reading}
+  alias Alavi.{ClockCheck, FirmwareRead, LatencyDay, MissedRead, Reading}
 
-  @type event :: Reading.t() | MissedRead.t() | FirmwareRead.t() | ClockCheck.t()
+  @type event ::
+          Reading.t() | MissedRead.t() | FirmwareRead.t() | ClockCheck.t() | LatencyDay.t()
   @type t :: {module(), term()}
 
   @callback record(arg :: term(), [event(), ...]) :: :ok | {:error, term()}

@@ -5,11 +5,11 @@ if ((BASH_VERSINFO[0] < 5)); then
 fi
 set -euo pipefail
 
-# Load every profile in contract/profiles into the store's catalog
-# (admin.load_profile), in one transaction, as the database owner. Prints each
-# profile version as new or already loaded; a loaded version whose file now
-# says otherwise stops the run and loads nothing. Without --apply, nothing is
-# kept.
+# Load every profile in contract/profiles (admin.load_profile) and every
+# latency bucket version in contract/latency (admin.load_latency_buckets)
+# into the store's catalog, in one transaction, as the database owner. Prints
+# each version as new or already loaded; a loaded version whose file now says
+# otherwise stops the run and loads nothing. Without --apply, nothing is kept.
 #   bin/load-profiles postgres://postgres:...@host:5432/minnalavu?sslmode=... --apply
 usage="usage: bin/load-profiles <database-url> [--apply]"
 
@@ -26,6 +26,11 @@ if ((${#files[@]} == 0)); then
   printf 'no profiles in %s/contract/profiles\n' "$root" >&2
   exit 1
 fi
+buckets=("$root"/contract/latency/buckets.v*.json)
+if ((${#buckets[@]} == 0)); then
+  printf 'no latency bucket versions in %s/contract/latency\n' "$root" >&2
+  exit 1
+fi
 
 end=ROLLBACK
 if (($# == 2)); then
@@ -39,6 +44,11 @@ for i in "${!files[@]}"; do
   vars+=(-v "doc$i=$(<"${files[$i]}")")
   sql+=("SELECT format('%s version %s: %s', d ->> 'profile', d -> 'version', admin.load_profile(d))
          FROM (SELECT :'doc$i'::jsonb AS d) f;")
+done
+for i in "${!buckets[@]}"; do
+  vars+=(-v "buckets$i=$(<"${buckets[$i]}")")
+  sql+=("SELECT format('latency buckets version %s: %s', d -> 'version', admin.load_latency_buckets(d))
+         FROM (SELECT :'buckets$i'::jsonb AS d) f;")
 done
 sql+=("$end;")
 

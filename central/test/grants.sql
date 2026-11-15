@@ -192,6 +192,16 @@ FROM unnest(ARRAY[
   'SELECT * FROM store.upload_clock_offsets',
   'SELECT * FROM store.ungrounded_readings',
   'SELECT * FROM store.energy_drops',
+  $q$INSERT INTO store.latency_days (collector_id, endpoint_host, endpoint_port, unit_id, day, poller_started_at, buckets_version, retries, timeouts, max_ms, buckets, batch_id) VALUES ('sqltest_grants', 'h', 1, 1, '2026-11-01', now(), 1, 0, 0, NULL, '{0,0}', gen_random_uuid())$q$,
+  $q$UPDATE store.latency_days SET retries = 0$q$,
+  $q$DELETE FROM store.latency_days$q$,
+  'SELECT * FROM store.latency_days',
+  'SELECT * FROM store.latency_bucket_versions',
+  'SELECT * FROM store.latency_meter_days',
+  'SELECT * FROM store.latency_endpoint_days',
+  'SELECT * FROM health.endpoint_latency',
+  $q$INSERT INTO store.latency_bucket_versions (version, bounds_ms) VALUES (99, '{1}')$q$,
+  $q$SELECT admin.load_latency_buckets('{"version": 99, "bounds_ms": [1]}')$q$,
   $q$SELECT admin.create_collector('sqltest_intruder')$q$,
   $q$SELECT admin.retire_meter('SQLREG-0001', now())$q$,
   $q$SELECT store.check_batch('{}')$q$,
@@ -216,9 +226,10 @@ CREATE TEMP VIEW monitor_roles AS
 SELECT pg_temp.is(
   (SELECT string_agg(c.relname::text, ', ' ORDER BY c.relname)
    FROM pg_class c WHERE c.relnamespace = 'health'::regnamespace AND c.relkind = 'v'),
-  'collector_clocks, collectors, endpoints, energy_drops, meter_firmware, meters, misplaced_serials, '
-  || 'place_serials, problems, thresholds, unregistered_serial_places, unregistered_serials',
-  'health holds the twelve health views');
+  'collector_clocks, collectors, endpoint_latency, endpoints, energy_drops, meter_firmware, meters, '
+  || 'misplaced_serials, place_serials, problems, thresholds, unregistered_serial_places, '
+  || 'unregistered_serials',
+  'health holds the thirteen health views');
 
 SELECT pg_temp.is(
   (SELECT count(*) FROM pg_class c
@@ -308,6 +319,7 @@ FROM unnest(ARRAY[
   'SELECT * FROM health.meter_firmware',
   'SELECT * FROM health.energy_drops',
   'SELECT * FROM health.endpoints',
+  'SELECT * FROM health.endpoint_latency',
   'SELECT * FROM health.thresholds'
 ]) q;
 
@@ -322,6 +334,11 @@ FROM unnest(ARRAY[
   'SELECT * FROM store.upload_clock_offsets',
   'SELECT * FROM store.ungrounded_readings',
   'SELECT * FROM store.energy_drops',
+  'SELECT * FROM store.latency_days',
+  'SELECT * FROM store.latency_bucket_versions',
+  'SELECT * FROM store.latency_meter_days',
+  'SELECT * FROM store.latency_endpoint_days',
+  $q$SELECT admin.load_latency_buckets('{"version": 99, "bounds_ms": [1]}')$q$,
   'SELECT * FROM registry.meter_versions',
   'SELECT * FROM registry.meter_history',
   'SELECT * FROM registry.health_thresholds',
@@ -478,6 +495,9 @@ FROM unnest(ARRAY[
   'SELECT * FROM health.collector_clocks',
   'SELECT * FROM health.energy_drops',
   'SELECT * FROM health.endpoints',
+  'SELECT * FROM health.endpoint_latency',
+  'SELECT * FROM store.latency_days',
+  'SELECT * FROM store.latency_endpoint_days',
   'SELECT * FROM store.clock_checks',
   'SELECT * FROM store.clock_offsets',
   'SELECT * FROM store.ungrounded_readings',

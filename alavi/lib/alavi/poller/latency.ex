@@ -1,6 +1,9 @@
 defmodule Alavi.Poller.Latency do
   @days 7
   # Upper bounds in ms, about 25 % apart: a percentile reads as "at most this".
+  # Version 1 of contract/latency's bounds, which a test holds them to; a
+  # change is a new version there and here.
+  @bucket_version 1
   @bounds [1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, 40, 50, 60, 80, 100, 120, 150] ++
             [200, 250, 300, 400, 500, 600, 800, 1_000, 1_200, 1_500, 2_000, 2_500, 3_000] ++
             [4_000, 5_000, 6_000, 8_000, 10_000, 12_000, 15_000, 20_000, 30_000, 60_000]
@@ -53,8 +56,45 @@ defmodule Alavi.Poller.Latency do
           max: non_neg_integer() | nil
         }
 
+  @typedoc """
+  One day's counts as `batch.v1` carries them: every bucket's count in order,
+  one per bound and one above the last, under `bucket_version/0`.
+  """
+  @type counts :: %{
+          retries: non_neg_integer(),
+          timeouts: non_neg_integer(),
+          max: non_neg_integer() | nil,
+          buckets: [non_neg_integer(), ...]
+        }
+
   @spec new() :: t()
   def new, do: %__MODULE__{days: []}
+
+  @doc "The version of contract/latency's bounds the buckets are counted under."
+  @spec bucket_version() :: pos_integer()
+  def bucket_version, do: @bucket_version
+
+  @doc "The buckets' upper bounds, in ms."
+  @spec bounds() :: [pos_integer(), ...]
+  def bounds, do: @bounds
+
+  # contract: test/alavi/poller/latency_test.exs "counts/2"
+  @doc "One day's counts, every bucket given; nil if that day is not kept."
+  @spec counts(t(), Date.t()) :: counts() | nil
+  def counts(%__MODULE__{days: days}, date) do
+    case List.keyfind(days, date, 0) do
+      nil ->
+        nil
+
+      {^date, day} ->
+        %{
+          retries: day.retries,
+          timeouts: day.timeouts,
+          max: day.max,
+          buckets: Enum.map(0..@over, &Map.get(day.buckets, &1, 0))
+        }
+    end
+  end
 
   # contract: test/alavi/poller/latency_test.exs "record/5"
   @doc """

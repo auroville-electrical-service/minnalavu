@@ -4,7 +4,8 @@ defmodule Alavi.PollerTest do
   import Alavi.PollerCase
   import ExUnit.CaptureLog, only: [with_log: 1]
 
-  alias Alavi.{MissedRead, Reading}
+  alias Alavi.{LatencyDay, MissedRead, Reading}
+  alias Alavi.Poller.Latency
 
   @moduletag :capture_log
   @active ["active_energy_import", "active_energy_export"]
@@ -315,6 +316,39 @@ defmodule Alavi.PollerTest do
 
       refute log =~ "#{prefix}2026-11-14"
     end
+
+    test "each meter's day is recorded to the sink when the UTC day ends, under the poller's start",
+         ctx do
+      {_sim, port} = start_sim!(:tcp)
+      agent = start_supervised!({Agent, fn -> ~U[2026-11-13 23:59:59Z] end})
+      clock = fn -> Agent.get(agent, & &1) end
+      meters = [meter(1, "elite_440"), meter(3, "elite_500")]
+      endpoints = [endpoint(port, "tcp", meters, %{"interval_ms" => 5})]
+
+      start_with_status!(endpoints, clock, ctx.tmp_dir)
+      # Both meters must have a day before it ends: a meter not yet read has none.
+      await_unit!(3, &match?([%Reading{timestamp: ~U[2026-11-13 23:59:59Z]} | _], &1))
+      Agent.update(agent, fn _ -> ~U[2026-11-14 00:00:01Z] end)
+
+      assert_receive {:latency, days}, 2_000
+      assert Enum.map(days, & &1.unit_id) == [1, 3]
+
+      for day <- days do
+        assert %LatencyDay{
+                 endpoint: %{host: "127.0.0.1", port: ^port},
+                 date: ~D[2026-11-13],
+                 poller_started_at: ~U[2026-11-13 23:59:59Z],
+                 buckets_version: 1,
+                 retries: 0,
+                 timeouts: 0
+               } = day
+
+        assert length(day.buckets) == length(Latency.bounds()) + 1
+        assert Enum.sum(day.buckets) > 0 and is_integer(day.max_ms)
+      end
+
+      refute_receive {:latency, _days}, 100
+    end
   end
 
   describe "Pollers.log_latency/2" do
@@ -339,6 +373,10 @@ defmodule Alavi.PollerTest do
       end
 
       refute log =~ "127.0.0.1:#{slow}"
+      assert_receive {:latency, days}
+      assert [%LatencyDay{unit_id: 1}, %LatencyDay{unit_id: 3}] = days
+      assert Enum.all?(days, &match?(%LatencyDay{date: ~D[2026-11-14]}, &1))
+      refute_received {:latency, _days}
     end
   end
 

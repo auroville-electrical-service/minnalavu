@@ -2,7 +2,8 @@ defmodule Alavi.WireTest do
   use ExUnit.Case, async: true
 
   alias Alavi.Buffer.Batch
-  alias Alavi.{Clock, ClockCheck, ClockCheckFixture, FirmwareRead, MissedRead, Reading, Wire}
+  alias Alavi.{Clock, ClockCheck, ClockCheckFixture, FirmwareRead, LatencyDay, LatencyDayFixture}
+  alias Alavi.{MissedRead, Reading, Wire}
 
   doctest Alavi.Clock
   doctest Alavi.Wire
@@ -94,6 +95,14 @@ defmodule Alavi.WireTest do
       assert [%{"value" => "1234.500"}] = wire["readings"]
     end
 
+    test "latency days go in latency, valid in the schema; none, and there is no latency" do
+      days = [LatencyDayFixture.answered(), LatencyDayFixture.timeouts_only()]
+      wire = wire([reading() | days])
+      assert valid?(wire)
+      assert wire["latency"] == Enum.map(days, &LatencyDay.to_wire/1)
+      refute Map.has_key?(wire([reading()]), "latency")
+    end
+
     test "a heartbeat, a batch with no events, still carries the clock and backlog" do
       wire = wire([])
       assert valid?(wire)
@@ -157,6 +166,36 @@ defmodule Alavi.WireTest do
       for check <- clock_checks(), key <- Map.keys(ClockCheck.to_wire(check)) do
         refute key =~ "offset"
       end
+    end
+  end
+
+  describe "LatencyDay.to_wire/1" do
+    test "every bucket's count in order, the max exact, under the poller's start and bucket version" do
+      buckets = List.duplicate(0, 44) |> List.replace_at(2, 1) |> List.replace_at(13, 2)
+      buckets = buckets |> List.replace_at(14, 2) |> List.replace_at(43, 1)
+
+      assert LatencyDay.to_wire(LatencyDayFixture.answered()) == %{
+               "endpoint" => %{"host" => "10.0.0.21", "port" => 502},
+               "unit_id" => 1,
+               "date" => "2026-11-14",
+               "poller_started_at" => "2026-11-13T18:30:00.250000Z",
+               "buckets_version" => 1,
+               "retries" => 1,
+               "timeouts" => 1,
+               "max_ms" => 75_000,
+               "buckets" => buckets
+             }
+    end
+
+    test "a day of timeouts only has a null max and every bucket empty" do
+      wire = LatencyDay.to_wire(LatencyDayFixture.timeouts_only())
+      assert %{"max_ms" => nil, "timeouts" => 1, "retries" => 0} = wire
+      assert wire["buckets"] == List.duplicate(0, 44)
+    end
+
+    test "no percentile and no answered count is sent" do
+      keys = Map.keys(LatencyDay.to_wire(LatencyDayFixture.answered()))
+      refute Enum.any?(keys, &(&1 =~ ~r/^p\d|answered/))
     end
   end
 

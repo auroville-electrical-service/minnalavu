@@ -17,7 +17,8 @@ SELECT pg_temp.is((SELECT answer FROM answers WHERE name = 'first') - 'first_rec
     "readings": {"received": 2, "inserted": 2, "duplicate": 0, "conflicting": 0},
     "missed_reads": {"received": 2, "inserted": 2, "duplicate": 0},
     "firmware_reads": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
-    "clock_checks": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0}}'::jsonb,
+    "clock_checks": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
+    "latency": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0}}'::jsonb,
   'a new batch is stored, and the answer counts what was inserted');
 
 SELECT pg_temp.is(
@@ -69,7 +70,8 @@ SELECT pg_temp.is((SELECT answer FROM answers WHERE name = 'resent') - 'first_re
     "readings": {"received": 2, "inserted": 0, "duplicate": 2, "conflicting": 0},
     "missed_reads": {"received": 2, "inserted": 0, "duplicate": 2},
     "firmware_reads": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
-    "clock_checks": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0}}'::jsonb,
+    "clock_checks": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
+    "latency": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0}}'::jsonb,
   'a resent batch is accepted, and nothing in it is stored twice');
 
 SELECT pg_temp.is(
@@ -208,7 +210,8 @@ SELECT pg_temp.is(
     "readings": {"received": 1, "inserted": 1, "duplicate": 0, "conflicting": 0},
     "missed_reads": {"received": 4, "inserted": 4, "duplicate": 0},
     "firmware_reads": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
-    "clock_checks": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0}}'::jsonb,
+    "clock_checks": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
+    "latency": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0}}'::jsonb,
   'missed reads at different addresses are each stored, with or without the serial read');
 
 SELECT pg_temp.is(

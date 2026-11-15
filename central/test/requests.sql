@@ -241,7 +241,8 @@ SELECT pg_temp.is(
     "readings": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
     "missed_reads": {"received": 0, "inserted": 0, "duplicate": 0},
     "firmware_reads": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
-    "clock_checks": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0}}'::jsonb,
+    "clock_checks": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
+    "latency": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0}}'::jsonb,
   'a heartbeat, a batch with no readings and no missed reads, is accepted');
 
 SELECT pg_temp.is(

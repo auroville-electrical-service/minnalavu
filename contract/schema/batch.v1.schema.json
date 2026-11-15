@@ -76,6 +76,11 @@
       "description": "The collector's clock measured against an NTP server: at start, once a day, and after a step in its clock. Each check is sent once it ends, answered or not. The four SNTP times are stored as measured, never an offset; offset, delay and error bound are the store's to compute. Ingest keys a check on (collector, t1): a resent check is a duplicate, not a conflict. Optional: a batch sent between checks has none.",
       "type": "array",
       "items": { "$ref": "#/$defs/clock_check" }
+    },
+    "latency": {
+      "description": "Each meter's request latency for one UTC date, as one poller counted it: one entry per endpoint, unit, date and poller start, sent once when the date ends by the collector's clock and once when the poller stops, so a restart's part of a day is an entry of its own. Counts, never percentiles: the store computes those. Ingest keys an entry on (collector, endpoint, unit_id, date, poller_started_at): a resent entry is a duplicate, not a conflict. Optional: a batch sent between days has none, and a collector that does not count latency never sends one.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/latency_day" }
     }
   },
   "$defs": {
@@ -347,6 +352,62 @@
           }
         }
       ]
+    },
+    "latency_day": {
+      "description": "One meter's request latency over the part of a UTC date one poller ran. An answer is a sample: a reply with words, or the meter's own exception, timed from send to reply (never the connect). A timeout is censored: counted in timeouts, never a sample; so is exception 0B, the gateway's word that the meter did not answer in time. Anything else (exception 0A, a closed socket, a reply that could not be parsed) is neither. The answers are the sum of buckets.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "endpoint",
+        "unit_id",
+        "date",
+        "poller_started_at",
+        "buckets_version",
+        "retries",
+        "timeouts",
+        "max_ms",
+        "buckets"
+      ],
+      "properties": {
+        "endpoint": { "$ref": "#/$defs/endpoint" },
+        "unit_id": { "$ref": "#/$defs/unit_id" },
+        "date": {
+          "description": "The UTC date the requests were made on, by the collector's clock.",
+          "type": "string",
+          "format": "date",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "poller_started_at": {
+          "description": "When the poller that counted them started, by the collector's clock: before the end of date, and on an earlier date for a poller that ran across midnight.",
+          "$ref": "#/$defs/collector_time"
+        },
+        "buckets_version": {
+          "description": "The version of contract/latency's bucket bounds the answers were counted under. A version never changes once a batch cites it.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "retries": {
+          "description": "Answers that came on a retry, not the first attempt; at most the answers.",
+          "$ref": "#/$defs/count"
+        },
+        "timeouts": {
+          "description": "Requests that timed out, and exception 0B answers.",
+          "$ref": "#/$defs/count"
+        },
+        "max_ms": {
+          "description": "The longest answer, exact, in milliseconds; null when nothing answered. It lies in the last bucket that counts any answer.",
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "buckets": {
+          "description": "The answers in each bucket of the version's bounds, in order, every bucket given: one count per bound and one for answers above the last.",
+          "type": "array",
+          "minItems": 2,
+          "items": { "$ref": "#/$defs/count" }
+        }
+      }
     },
     "ntp_address": {
       "description": "The address the server's name resolved to, which replied.",
