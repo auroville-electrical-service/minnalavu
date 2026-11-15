@@ -20,6 +20,7 @@ export {
   type Check,
   type IdentityRead,
   type IdentityRequest,
+  identityObserved,
   identityReads,
   identityRequests,
   identityVerdict,
@@ -46,6 +47,19 @@ export {
   type Register,
   type WordOrder,
 } from "./profile";
+export {
+  type Action,
+  type Failure,
+  nextRead,
+  type Policy,
+  type Read,
+  type ReadEvent,
+  type Recorded,
+  type Round,
+  type RoundMeter,
+  type RoundStep,
+  startRound,
+} from "./read-round";
 export {
   type Expected,
   type FrameError,

@@ -157,3 +157,58 @@ export const loadFirmwareFixture = () => firmwareFixture.parse(json("fixtures/fi
 export const loadIdentityFixture = () => identityFixture.parse(json("fixtures/identity-checks.v1.json"));
 export const loadDecodeFixture = () => decodeFixture.parse(json("fixtures/register-decode.v1.json"));
 export const loadRequestFixture = () => requestFixture.parse(json("fixtures/modbus-read-requests.v1.json"));
+
+const roundEvent = z.union([
+  z.strictObject({ words }),
+  z.strictObject({ exception: z.int() }),
+  z.strictObject({
+    failed: z.enum(["timeout", "closed", "unexpected_response", "malformed_response", "bad_crc", "malformed_frame"]),
+  }),
+  z.strictObject({ unreachable: z.string() }),
+]);
+
+const roundFixture = z.object({
+  format: z.literal("read-round/1"),
+  policy: z.strictObject({ retries: z.int(), busy_backoff_ms: z.int() }),
+  cases: z.array(
+    z.strictObject({
+      why: z.string(),
+      meters: z.array(z.strictObject({ unit_id: z.int(), profile: z.string() })),
+      steps: z.array(
+        z.strictObject({
+          read: z.tuple([z.int(), z.enum(["holding", "input"]), z.int(), z.int()]),
+          attempt: z.int(),
+          wait_ms: z.int(),
+          event: roundEvent,
+        }),
+      ),
+      events: z.array(
+        z.union([
+          z.strictObject({
+            reading: z.strictObject({
+              unit_id: z.int(),
+              register_key: z.string(),
+              meter_serial: z.string(),
+              product_code: z.string(),
+              value: z.string(),
+            }),
+          }),
+          z.strictObject({
+            missed: z.strictObject({
+              unit_id: z.int(),
+              register_key: z.string(),
+              meter_serial: z.string().nullable(),
+              reason: z.string(),
+              exception_code: z.int().nullable(),
+              detail: z.string().nullable(),
+              attempts: z.int(),
+              raw_words: words.nullable(),
+            }),
+          }),
+        ]),
+      ),
+    }),
+  ),
+});
+
+export const loadRoundFixture = () => roundFixture.parse(json("fixtures/read-round.v1.json"));

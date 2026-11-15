@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   err,
   type IdentityRequest,
+  identityObserved,
   identityReads,
   identityRequests,
   identityVerdict,
@@ -200,5 +201,29 @@ describe("identityVerdict", () => {
     const kinds = (product: number[]) =>
       identityVerdict(id, { product_code: ok(product), serial: ok([0x5331]), energy_unit: failed }).outcome.kind;
     expect([kinds([0x4142]), kinds([0x4343])]).toEqual(["read_failed", "mismatch"]);
+  });
+});
+
+describe("identityObserved", () => {
+  test("reads cut short observe what was read, and null for the rest", () => {
+    const id = identity("elite_440");
+    expect(identityObserved(id, {})).toEqual({ serial: null, product_code: null });
+    expect(identityObserved(id, { serial: ok(words("SIM 1", 4)) })).toEqual({ serial: "SIM 1", product_code: null });
+    expect(identityObserved(id, { serial: err({ kind: "exception", code: 2 }) })).toEqual({
+      serial: null,
+      product_code: null,
+    });
+  });
+
+  test("observes as the verdict does, wherever every read was made", () => {
+    for (const c of fixture.cases) {
+      const results: Results = Object.fromEntries(Object.entries(c.results).map(([check, r]) => [check, result(r)]));
+      const id = identity(c.profile);
+      expect(identityObserved(id, results)).toEqual(identityVerdict(id, results).observed);
+    }
+  });
+
+  test("nothing is observed for checks the profile does not have", () => {
+    expect(identityObserved({}, { serial: ok(words("SIM 1", 4)) })).toEqual({ serial: null, product_code: null });
   });
 });

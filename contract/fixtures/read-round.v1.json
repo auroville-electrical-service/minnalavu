@@ -1,0 +1,1188 @@
+{
+  "format": "read-round/1",
+  "description": "One read round of one endpoint's meters, as a collector makes it, under the profiles in contract/profiles and the policy here (retries: further attempts after a failed one; busy_backoff_ms: the wait before each retry after exception 05 or 06). Per meter, in order: its identity, in the requests and with the fallback of identity-checks.v1.json, judged as there; then, if it passed, each of its profile's registers, in profile order. steps: each request the collector must make, as [unit_id, table, address, count], its attempt (from 1) and the wait before it in ms, then what came of it: words (the reply), an exception code, failed (a transport failure: timeout, closed, malformed_response and the like), or unreachable (no connection could be opened, so nothing was sent; its value is the socket error). Exception 0A or 0B misses the meter at once. 05 or 06 is retried after busy_backoff_ms, up to retries, then misses the meter. Any other exception misses that read alone, with no retry. A transport failure is retried at once, up to retries, then misses the meter. Unreachable misses the meter at once, and every later meter in the round is not tried. A meter missed counts its attempts on the register it stopped at, 0 on every later one; a meter whose identity check failed or did not match is missed in full with 0 attempts. events: each reading and missed read, in the order made, in batch.v1's fields (timestamps and the endpoint left out). Every implementation that reads meters must make each request and record each event.",
+  "policy": {
+    "retries": 2,
+    "busy_backoff_ms": 30
+  },
+  "cases": [
+    {
+      "why": "an Elite 440 that answers: its identity in one request, then each register in profile order",
+      "meters": [
+        {
+          "unit_id": 1,
+          "profile": "elite_440"
+        }
+      ],
+      "steps": [
+        {
+          "read": [1, "holding", 0, 36],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [21321, 19764, 13360, 12337, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 17740, 18772, 17716, 13360, 11572, 13365, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 257]
+          }
+        },
+        {
+          "read": [1, "holding", 199, 2],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [8192, 18417]
+          }
+        },
+        {
+          "read": [1, "holding", 201, 2],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [0, 16624]
+          }
+        }
+      ],
+      "events": [
+        {
+          "reading": {
+            "unit_id": 1,
+            "register_key": "active_energy_import",
+            "meter_serial": "SIM44001",
+            "product_code": "ELITE440-445",
+            "value": "123456"
+          }
+        },
+        {
+          "reading": {
+            "unit_id": 1,
+            "register_key": "active_energy_export",
+            "meter_serial": "SIM44001",
+            "product_code": "ELITE440-445",
+            "value": "7.5"
+          }
+        }
+      ]
+    },
+    {
+      "why": "an Elite 500 that answers: its identity in two requests, then each register",
+      "meters": [
+        {
+          "unit_id": 3,
+          "profile": "elite_500"
+        }
+      ],
+      "steps": [
+        {
+          "read": [3, "holding", 1999, 28],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [21321, 19765, 12336, 12339, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 17717, 12336, 17197, 13617, 12338, 0]
+          }
+        },
+        {
+          "read": [3, "holding", 1957, 1],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [3]
+          }
+        },
+        {
+          "read": [3, "holding", 11149, 4],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [0, 0, 18944, 16531]
+          }
+        },
+        {
+          "read": [3, "holding", 11153, 4],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [0, 0, 18944, 16531]
+          }
+        },
+        {
+          "read": [3, "holding", 11189, 4],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [0, 0, 18944, 16531]
+          }
+        },
+        {
+          "read": [3, "holding", 11193, 4],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [0, 0, 18944, 16531]
+          }
+        }
+      ],
+      "events": [
+        {
+          "reading": {
+            "unit_id": 3,
+            "register_key": "active_energy_import",
+            "meter_serial": "SIM50003",
+            "product_code": "E500C-5102",
+            "value": "1234.5"
+          }
+        },
+        {
+          "reading": {
+            "unit_id": 3,
+            "register_key": "active_energy_export",
+            "meter_serial": "SIM50003",
+            "product_code": "E500C-5102",
+            "value": "1234.5"
+          }
+        },
+        {
+          "reading": {
+            "unit_id": 3,
+            "register_key": "reactive_energy_import",
+            "meter_serial": "SIM50003",
+            "product_code": "E500C-5102",
+            "value": "1234.5"
+          }
+        },
+        {
+          "reading": {
+            "unit_id": 3,
+            "register_key": "reactive_energy_export",
+            "meter_serial": "SIM50003",
+            "product_code": "E500C-5102",
+            "value": "1234.5"
+          }
+        }
+      ]
+    },
+    {
+      "why": "a merged identity request refused with an exception is made again one read per request, in the order the reads are listed; an Elite 440 refusing its unit register with 02 is read in its profile's unit",
+      "meters": [
+        {
+          "unit_id": 1,
+          "profile": "elite_440"
+        }
+      ],
+      "steps": [
+        {
+          "read": [1, "holding", 0, 36],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "exception": 2
+          }
+        },
+        {
+          "read": [1, "holding", 19, 6],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [17740, 18772, 17716, 13360, 11572, 13365]
+          }
+        },
+        {
+          "read": [1, "holding", 0, 4],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [21321, 19764, 13360, 12337]
+          }
+        },
+        {
+          "read": [1, "holding", 35, 1],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "exception": 2
+          }
+        },
+        {
+          "read": [1, "holding", 199, 2],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [8192, 18417]
+          }
+        },
+        {
+          "read": [1, "holding", 201, 2],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [0, 16624]
+          }
+        }
+      ],
+      "events": [
+        {
+          "reading": {
+            "unit_id": 1,
+            "register_key": "active_energy_import",
+            "meter_serial": "SIM44001",
+            "product_code": "ELITE440-445",
+            "value": "123456"
+          }
+        },
+        {
+          "reading": {
+            "unit_id": 1,
+            "register_key": "active_energy_export",
+            "meter_serial": "SIM44001",
+            "product_code": "ELITE440-445",
+            "value": "7.5"
+          }
+        }
+      ]
+    },
+    {
+      "why": "an Elite 500 refusing its unit register with 02 fails its identity check: every register missed with that exception, not tried, under the serial read",
+      "meters": [
+        {
+          "unit_id": 3,
+          "profile": "elite_500"
+        }
+      ],
+      "steps": [
+        {
+          "read": [3, "holding", 1999, 28],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [21321, 19765, 12336, 12339, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 17717, 12336, 17197, 13617, 12338, 0]
+          }
+        },
+        {
+          "read": [3, "holding", 1957, 1],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "exception": 2
+          }
+        }
+      ],
+      "events": [
+        {
+          "missed": {
+            "unit_id": 3,
+            "register_key": "active_energy_import",
+            "meter_serial": "SIM50003",
+            "reason": "exception",
+            "exception_code": 2,
+            "detail": null,
+            "attempts": 0,
+            "raw_words": null
+          }
+        },
+        {
+          "missed": {
+            "unit_id": 3,
+            "register_key": "active_energy_export",
+            "meter_serial": "SIM50003",
+            "reason": "exception",
+            "exception_code": 2,
+            "detail": null,
+            "attempts": 0,
+            "raw_words": null
+          }
+        },
+        {
+          "missed": {
+            "unit_id": 3,
+            "register_key": "reactive_energy_import",
+            "meter_serial": "SIM50003",
+            "reason": "exception",
+            "exception_code": 2,
+            "detail": null,
+            "attempts": 0,
+            "raw_words": null
+          }
+        },
+        {
+          "missed": {
+            "unit_id": 3,
+            "register_key": "reactive_energy_export",
+            "meter_serial": "SIM50003",
+            "reason": "exception",
+            "exception_code": 2,
+            "detail": null,
+            "attempts": 0,
+            "raw_words": null
+          }
+        }
+      ]
+    },
+    {
+      "why": "a product code the profile does not accept: every register missed as profile_mismatch, not tried, under the serial read",
+      "meters": [
+        {
+          "unit_id": 1,
+          "profile": "elite_440"
+        }
+      ],
+      "steps": [
+        {
+          "read": [1, "holding", 0, 36],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [21321, 19764, 13360, 12337, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 17740, 18772, 17716, 13360, 11572, 13367, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 257]
+          }
+        }
+      ],
+      "events": [
+        {
+          "missed": {
+            "unit_id": 1,
+            "register_key": "active_energy_import",
+            "meter_serial": "SIM44001",
+            "reason": "profile_mismatch",
+            "exception_code": null,
+            "detail": "product code \"ELITE440-447\", expected one of ELITE440-445, ELITE440-446",
+            "attempts": 0,
+            "raw_words": null
+          }
+        },
+        {
+          "missed": {
+            "unit_id": 1,
+            "register_key": "active_energy_export",
+            "meter_serial": "SIM44001",
+            "reason": "profile_mismatch",
+            "exception_code": null,
+            "detail": "product code \"ELITE440-447\", expected one of ELITE440-445, ELITE440-446",
+            "attempts": 0,
+            "raw_words": null
+          }
+        }
+      ]
+    },
+    {
+      "why": "a silent meter: each timeout retried at once, up to retries, then the meter missed with every attempt counted on its first register and 0 on the rest; the next meter is read",
+      "meters": [
+        {
+          "unit_id": 1,
+          "profile": "elite_440"
+        },
+        {
+          "unit_id": 2,
+          "profile": "elite_440"
+        }
+      ],
+      "steps": [
+        {
+          "read": [1, "holding", 0, 36],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "failed": "timeout"
+          }
+        },
+        {
+          "read": [1, "holding", 0, 36],
+          "attempt": 2,
+          "wait_ms": 0,
+          "event": {
+            "failed": "timeout"
+          }
+        },
+        {
+          "read": [1, "holding", 0, 36],
+          "attempt": 3,
+          "wait_ms": 0,
+          "event": {
+            "failed": "timeout"
+          }
+        },
+        {
+          "read": [2, "holding", 0, 36],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [21321, 19764, 13360, 12338, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 17740, 18772, 17716, 13360, 11572, 13365, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 257]
+          }
+        },
+        {
+          "read": [2, "holding", 199, 2],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [8192, 18417]
+          }
+        },
+        {
+          "read": [2, "holding", 201, 2],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [0, 16624]
+          }
+        }
+      ],
+      "events": [
+        {
+          "missed": {
+            "unit_id": 1,
+            "register_key": "active_energy_import",
+            "meter_serial": null,
+            "reason": "timeout",
+            "exception_code": null,
+            "detail": null,
+            "attempts": 3,
+            "raw_words": null
+          }
+        },
+        {
+          "missed": {
+            "unit_id": 1,
+            "register_key": "active_energy_export",
+            "meter_serial": null,
+            "reason": "timeout",
+            "exception_code": null,
+            "detail": null,
+            "attempts": 0,
+            "raw_words": null
+          }
+        },
+        {
+          "reading": {
+            "unit_id": 2,
+            "register_key": "active_energy_import",
+            "meter_serial": "SIM44002",
+            "product_code": "ELITE440-445",
+            "value": "123456"
+          }
+        },
+        {
+          "reading": {
+            "unit_id": 2,
+            "register_key": "active_energy_export",
+            "meter_serial": "SIM44002",
+            "product_code": "ELITE440-445",
+            "value": "7.5"
+          }
+        }
+      ]
+    },
+    {
+      "why": "a timeout, a closed connection or a malformed reply is retried at once, and a later answer is a reading",
+      "meters": [
+        {
+          "unit_id": 1,
+          "profile": "elite_440"
+        }
+      ],
+      "steps": [
+        {
+          "read": [1, "holding", 0, 36],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [21321, 19764, 13360, 12337, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 17740, 18772, 17716, 13360, 11572, 13365, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 257]
+          }
+        },
+        {
+          "read": [1, "holding", 199, 2],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "failed": "timeout"
+          }
+        },
+        {
+          "read": [1, "holding", 199, 2],
+          "attempt": 2,
+          "wait_ms": 0,
+          "event": {
+            "failed": "closed"
+          }
+        },
+        {
+          "read": [1, "holding", 199, 2],
+          "attempt": 3,
+          "wait_ms": 0,
+          "event": {
+            "words": [8192, 18417]
+          }
+        },
+        {
+          "read": [1, "holding", 201, 2],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "failed": "malformed_response"
+          }
+        },
+        {
+          "read": [1, "holding", 201, 2],
+          "attempt": 2,
+          "wait_ms": 0,
+          "event": {
+            "words": [0, 16624]
+          }
+        }
+      ],
+      "events": [
+        {
+          "reading": {
+            "unit_id": 1,
+            "register_key": "active_energy_import",
+            "meter_serial": "SIM44001",
+            "product_code": "ELITE440-445",
+            "value": "123456"
+          }
+        },
+        {
+          "reading": {
+            "unit_id": 1,
+            "register_key": "active_energy_export",
+            "meter_serial": "SIM44001",
+            "product_code": "ELITE440-445",
+            "value": "7.5"
+          }
+        }
+      ]
+    },
+    {
+      "why": "busy (06): each retry waits busy_backoff_ms; past the retries the meter is missed from that register on, under the serial read",
+      "meters": [
+        {
+          "unit_id": 1,
+          "profile": "elite_440"
+        }
+      ],
+      "steps": [
+        {
+          "read": [1, "holding", 0, 36],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [21321, 19764, 13360, 12337, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 17740, 18772, 17716, 13360, 11572, 13365, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 257]
+          }
+        },
+        {
+          "read": [1, "holding", 199, 2],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "exception": 6
+          }
+        },
+        {
+          "read": [1, "holding", 199, 2],
+          "attempt": 2,
+          "wait_ms": 30,
+          "event": {
+            "exception": 6
+          }
+        },
+        {
+          "read": [1, "holding", 199, 2],
+          "attempt": 3,
+          "wait_ms": 30,
+          "event": {
+            "exception": 6
+          }
+        }
+      ],
+      "events": [
+        {
+          "missed": {
+            "unit_id": 1,
+            "register_key": "active_energy_import",
+            "meter_serial": "SIM44001",
+            "reason": "exception",
+            "exception_code": 6,
+            "detail": null,
+            "attempts": 3,
+            "raw_words": null
+          }
+        },
+        {
+          "missed": {
+            "unit_id": 1,
+            "register_key": "active_energy_export",
+            "meter_serial": "SIM44001",
+            "reason": "exception",
+            "exception_code": 6,
+            "detail": null,
+            "attempts": 0,
+            "raw_words": null
+          }
+        }
+      ]
+    },
+    {
+      "why": "acknowledge (05) waits and retries like busy, and a later answer is a reading",
+      "meters": [
+        {
+          "unit_id": 1,
+          "profile": "elite_440"
+        }
+      ],
+      "steps": [
+        {
+          "read": [1, "holding", 0, 36],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [21321, 19764, 13360, 12337, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 17740, 18772, 17716, 13360, 11572, 13365, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 257]
+          }
+        },
+        {
+          "read": [1, "holding", 199, 2],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "exception": 5
+          }
+        },
+        {
+          "read": [1, "holding", 199, 2],
+          "attempt": 2,
+          "wait_ms": 30,
+          "event": {
+            "words": [8192, 18417]
+          }
+        },
+        {
+          "read": [1, "holding", 201, 2],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [0, 16624]
+          }
+        }
+      ],
+      "events": [
+        {
+          "reading": {
+            "unit_id": 1,
+            "register_key": "active_energy_import",
+            "meter_serial": "SIM44001",
+            "product_code": "ELITE440-445",
+            "value": "123456"
+          }
+        },
+        {
+          "reading": {
+            "unit_id": 1,
+            "register_key": "active_energy_export",
+            "meter_serial": "SIM44001",
+            "product_code": "ELITE440-445",
+            "value": "7.5"
+          }
+        }
+      ]
+    },
+    {
+      "why": "a gateway exception (0B) misses the meter at once, with no retry; the next meter is read",
+      "meters": [
+        {
+          "unit_id": 1,
+          "profile": "elite_440"
+        },
+        {
+          "unit_id": 2,
+          "profile": "elite_440"
+        }
+      ],
+      "steps": [
+        {
+          "read": [1, "holding", 0, 36],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "exception": 11
+          }
+        },
+        {
+          "read": [2, "holding", 0, 36],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [21321, 19764, 13360, 12338, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 17740, 18772, 17716, 13360, 11572, 13365, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 257]
+          }
+        },
+        {
+          "read": [2, "holding", 199, 2],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [8192, 18417]
+          }
+        },
+        {
+          "read": [2, "holding", 201, 2],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [0, 16624]
+          }
+        }
+      ],
+      "events": [
+        {
+          "missed": {
+            "unit_id": 1,
+            "register_key": "active_energy_import",
+            "meter_serial": null,
+            "reason": "exception",
+            "exception_code": 11,
+            "detail": null,
+            "attempts": 1,
+            "raw_words": null
+          }
+        },
+        {
+          "missed": {
+            "unit_id": 1,
+            "register_key": "active_energy_export",
+            "meter_serial": null,
+            "reason": "exception",
+            "exception_code": 11,
+            "detail": null,
+            "attempts": 0,
+            "raw_words": null
+          }
+        },
+        {
+          "reading": {
+            "unit_id": 2,
+            "register_key": "active_energy_import",
+            "meter_serial": "SIM44002",
+            "product_code": "ELITE440-445",
+            "value": "123456"
+          }
+        },
+        {
+          "reading": {
+            "unit_id": 2,
+            "register_key": "active_energy_export",
+            "meter_serial": "SIM44002",
+            "product_code": "ELITE440-445",
+            "value": "7.5"
+          }
+        }
+      ]
+    },
+    {
+      "why": "a gateway exception (0A) at a register misses the rest of the meter, under the serial read",
+      "meters": [
+        {
+          "unit_id": 1,
+          "profile": "elite_440"
+        }
+      ],
+      "steps": [
+        {
+          "read": [1, "holding", 0, 36],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [21321, 19764, 13360, 12337, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 17740, 18772, 17716, 13360, 11572, 13365, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 257]
+          }
+        },
+        {
+          "read": [1, "holding", 199, 2],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "exception": 10
+          }
+        }
+      ],
+      "events": [
+        {
+          "missed": {
+            "unit_id": 1,
+            "register_key": "active_energy_import",
+            "meter_serial": "SIM44001",
+            "reason": "exception",
+            "exception_code": 10,
+            "detail": null,
+            "attempts": 1,
+            "raw_words": null
+          }
+        },
+        {
+          "missed": {
+            "unit_id": 1,
+            "register_key": "active_energy_export",
+            "meter_serial": "SIM44001",
+            "reason": "exception",
+            "exception_code": 10,
+            "detail": null,
+            "attempts": 0,
+            "raw_words": null
+          }
+        }
+      ]
+    },
+    {
+      "why": "any other exception at a register misses that register alone, with no retry; the next register is read",
+      "meters": [
+        {
+          "unit_id": 1,
+          "profile": "elite_440"
+        }
+      ],
+      "steps": [
+        {
+          "read": [1, "holding", 0, 36],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [21321, 19764, 13360, 12337, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 17740, 18772, 17716, 13360, 11572, 13365, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 257]
+          }
+        },
+        {
+          "read": [1, "holding", 199, 2],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "exception": 2
+          }
+        },
+        {
+          "read": [1, "holding", 201, 2],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [0, 16624]
+          }
+        }
+      ],
+      "events": [
+        {
+          "missed": {
+            "unit_id": 1,
+            "register_key": "active_energy_import",
+            "meter_serial": "SIM44001",
+            "reason": "exception",
+            "exception_code": 2,
+            "detail": null,
+            "attempts": 1,
+            "raw_words": null
+          }
+        },
+        {
+          "reading": {
+            "unit_id": 1,
+            "register_key": "active_energy_export",
+            "meter_serial": "SIM44001",
+            "product_code": "ELITE440-445",
+            "value": "7.5"
+          }
+        }
+      ]
+    },
+    {
+      "why": "an answer that decodes to no value is a missed read with reason decode, the attempts it took and its words; the next register is read",
+      "meters": [
+        {
+          "unit_id": 1,
+          "profile": "elite_440"
+        }
+      ],
+      "steps": [
+        {
+          "read": [1, "holding", 0, 36],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [21321, 19764, 13360, 12337, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 17740, 18772, 17716, 13360, 11572, 13365, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 257]
+          }
+        },
+        {
+          "read": [1, "holding", 199, 2],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [0, 32704]
+          }
+        },
+        {
+          "read": [1, "holding", 201, 2],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [0, 16624]
+          }
+        }
+      ],
+      "events": [
+        {
+          "missed": {
+            "unit_id": 1,
+            "register_key": "active_energy_import",
+            "meter_serial": "SIM44001",
+            "reason": "decode",
+            "exception_code": null,
+            "detail": "not_finite",
+            "attempts": 1,
+            "raw_words": [0, 32704]
+          }
+        },
+        {
+          "reading": {
+            "unit_id": 1,
+            "register_key": "active_energy_export",
+            "meter_serial": "SIM44001",
+            "product_code": "ELITE440-445",
+            "value": "7.5"
+          }
+        }
+      ]
+    },
+    {
+      "why": "an identity read that times out after the merged request was refused: the serial read so far labels the missed reads",
+      "meters": [
+        {
+          "unit_id": 1,
+          "profile": "elite_440"
+        }
+      ],
+      "steps": [
+        {
+          "read": [1, "holding", 0, 36],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "exception": 2
+          }
+        },
+        {
+          "read": [1, "holding", 19, 6],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [17740, 18772, 17716, 13360, 11572, 13365]
+          }
+        },
+        {
+          "read": [1, "holding", 0, 4],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [21321, 19764, 13360, 12337]
+          }
+        },
+        {
+          "read": [1, "holding", 35, 1],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "failed": "timeout"
+          }
+        },
+        {
+          "read": [1, "holding", 35, 1],
+          "attempt": 2,
+          "wait_ms": 0,
+          "event": {
+            "failed": "timeout"
+          }
+        },
+        {
+          "read": [1, "holding", 35, 1],
+          "attempt": 3,
+          "wait_ms": 0,
+          "event": {
+            "failed": "timeout"
+          }
+        }
+      ],
+      "events": [
+        {
+          "missed": {
+            "unit_id": 1,
+            "register_key": "active_energy_import",
+            "meter_serial": "SIM44001",
+            "reason": "timeout",
+            "exception_code": null,
+            "detail": null,
+            "attempts": 3,
+            "raw_words": null
+          }
+        },
+        {
+          "missed": {
+            "unit_id": 1,
+            "register_key": "active_energy_export",
+            "meter_serial": "SIM44001",
+            "reason": "timeout",
+            "exception_code": null,
+            "detail": null,
+            "attempts": 0,
+            "raw_words": null
+          }
+        }
+      ]
+    },
+    {
+      "why": "an endpoint that cannot be reached: the first meter missed as unreachable with one attempt, no retry, and every later meter not tried",
+      "meters": [
+        {
+          "unit_id": 1,
+          "profile": "elite_440"
+        },
+        {
+          "unit_id": 2,
+          "profile": "elite_440"
+        }
+      ],
+      "steps": [
+        {
+          "read": [1, "holding", 0, 36],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "unreachable": "econnrefused"
+          }
+        }
+      ],
+      "events": [
+        {
+          "missed": {
+            "unit_id": 1,
+            "register_key": "active_energy_import",
+            "meter_serial": null,
+            "reason": "unreachable",
+            "exception_code": null,
+            "detail": "econnrefused",
+            "attempts": 1,
+            "raw_words": null
+          }
+        },
+        {
+          "missed": {
+            "unit_id": 1,
+            "register_key": "active_energy_export",
+            "meter_serial": null,
+            "reason": "unreachable",
+            "exception_code": null,
+            "detail": "econnrefused",
+            "attempts": 0,
+            "raw_words": null
+          }
+        },
+        {
+          "missed": {
+            "unit_id": 2,
+            "register_key": "active_energy_import",
+            "meter_serial": null,
+            "reason": "unreachable",
+            "exception_code": null,
+            "detail": "econnrefused",
+            "attempts": 0,
+            "raw_words": null
+          }
+        },
+        {
+          "missed": {
+            "unit_id": 2,
+            "register_key": "active_energy_export",
+            "meter_serial": null,
+            "reason": "unreachable",
+            "exception_code": null,
+            "detail": "econnrefused",
+            "attempts": 0,
+            "raw_words": null
+          }
+        }
+      ]
+    },
+    {
+      "why": "a connection that closes and cannot be opened again: the meter missed as unreachable from that register on, counting the attempt that could not connect, and every later meter not tried",
+      "meters": [
+        {
+          "unit_id": 1,
+          "profile": "elite_440"
+        },
+        {
+          "unit_id": 2,
+          "profile": "elite_440"
+        }
+      ],
+      "steps": [
+        {
+          "read": [1, "holding", 0, 36],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "words": [21321, 19764, 13360, 12337, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 17740, 18772, 17716, 13360, 11572, 13365, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 257]
+          }
+        },
+        {
+          "read": [1, "holding", 199, 2],
+          "attempt": 1,
+          "wait_ms": 0,
+          "event": {
+            "failed": "closed"
+          }
+        },
+        {
+          "read": [1, "holding", 199, 2],
+          "attempt": 2,
+          "wait_ms": 0,
+          "event": {
+            "unreachable": "econnrefused"
+          }
+        }
+      ],
+      "events": [
+        {
+          "missed": {
+            "unit_id": 1,
+            "register_key": "active_energy_import",
+            "meter_serial": "SIM44001",
+            "reason": "unreachable",
+            "exception_code": null,
+            "detail": "econnrefused",
+            "attempts": 2,
+            "raw_words": null
+          }
+        },
+        {
+          "missed": {
+            "unit_id": 1,
+            "register_key": "active_energy_export",
+            "meter_serial": "SIM44001",
+            "reason": "unreachable",
+            "exception_code": null,
+            "detail": "econnrefused",
+            "attempts": 0,
+            "raw_words": null
+          }
+        },
+        {
+          "missed": {
+            "unit_id": 2,
+            "register_key": "active_energy_import",
+            "meter_serial": null,
+            "reason": "unreachable",
+            "exception_code": null,
+            "detail": "econnrefused",
+            "attempts": 0,
+            "raw_words": null
+          }
+        },
+        {
+          "missed": {
+            "unit_id": 2,
+            "register_key": "active_energy_export",
+            "meter_serial": null,
+            "reason": "unreachable",
+            "exception_code": null,
+            "detail": "econnrefused",
+            "attempts": 0,
+            "raw_words": null
+          }
+        }
+      ]
+    }
+  ]
+}

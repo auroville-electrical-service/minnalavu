@@ -44,6 +44,13 @@ What the collector and the server share. Nothing else is shared between them.
   `firmware-names.v1.json` gives, under each profile, what is read for the
   names, and words with the text each must decode to or the reason it must be
   refused. Every implementation that reads names must give each.
+  `read-round.v1.json` gives one round of an endpoint's meters under a
+  retry policy: each request a collector must make (identity first, then
+  the registers), with its attempt and the wait before it, what came of it
+  (a reply, an exception, a transport failure, or no connection), and the
+  readings and missed reads that must result, with their reasons and
+  attempts. Every implementation that reads meters must make each request
+  and record each event.
 
 A batch says nothing about which collector sent it: the server takes that from
 the token the batch is sent with. A batch carries its readings, the reads that

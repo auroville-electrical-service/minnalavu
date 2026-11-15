@@ -132,10 +132,19 @@ const resultFor = (results: Results, check: Check): ReadResult => {
   return result;
 };
 
+// contract: test/identity.test.ts "identityObserved"
+// What the meter reported in reads cut short: null too for a read not made.
+export const identityObserved = (identity: Identity, results: Results): Observed => ({
+  serial: identity.serial && results.serial ? text(results.serial) : null,
+  product_code: identity.product_code && results.product_code ? text(results.product_code) : null,
+});
+
+const text = (result: ReadResult): string | null => (result.ok ? printable(trimmed(bytesOf(result.value))) : null);
+
 const observe = (spec: object | undefined, result: ReadResult | undefined): string | null => {
   if (!spec) return null;
   if (!result) throw new Error("no result for a listed read");
-  return result.ok ? printable(trimmed(bytesOf(result.value))) : null;
+  return text(result);
 };
 
 const judge = (identity: Identity, check: Check, result: ReadResult): Outcome => {
