@@ -8,7 +8,8 @@
 BEGIN;
 
 SELECT admin.set_health_thresholds(collector_silent_after => '1 hour',
-  meter_silent_intervals => 4, backlog_near_capacity => 0.8, lookback => '1 day');
+  meter_silent_intervals => 4, backlog_near_capacity => 0.8, lookback => '1 day',
+  endpoint_error_rate => 0.05);
 
 SELECT admin.create_collector(c) FROM unnest(ARRAY['sqlh_a', 'sqlh_b', 'sqlh_c', 'sqlh_d']) c;
 
@@ -136,7 +137,8 @@ SELECT pg_temp.is(
   (SELECT string_agg(format('%s %s', kind, subject), '; ' ORDER BY kind, subject)
    FROM health.problems),
   'backlog_discarded sqlh_d; backlog_near_capacity sqlh_a; backlog_quarantined sqlh_a; '
-  || 'backlog_refused sqlh_d; collector_silent sqlh_b; meter_silent SQLH-0002; '
+  || 'backlog_refused sqlh_d; collector_silent sqlh_b; endpoint_errors sqlh_a_ep; '
+  || 'meter_silent SQLH-0002; '
   || 'misplaced_serial SQLH-0003; misplaced_serial SQLH-0007; '
   || 'serial_at_several_places SQLH-TWIN; several_serials_at_place 10.0.0.1:502 unit 12 via sqlh_a; '
   || 'several_serials_at_place 10.0.0.1:502 unit 9 via sqlh_a; unregistered_serial SQLH-STRAY; '
@@ -341,7 +343,8 @@ SELECT pg_temp.is(
   'a firmware change''s problem says the names before and after, when each was read, and where');
 
 SELECT admin.set_health_thresholds(collector_silent_after => '3 hours',
-  meter_silent_intervals => 10, backlog_near_capacity => 0.9, lookback => '4 days');
+  meter_silent_intervals => 10, backlog_near_capacity => 0.9, lookback => '4 days',
+  endpoint_error_rate => 0.2);
 
 SELECT pg_temp.is(
   (SELECT string_agg(format('%s %s', kind, subject), '; ' ORDER BY kind, subject)
@@ -366,10 +369,10 @@ SELECT pg_temp.is(
   'a firmware change is judged by the lookback in force');
 
 SELECT pg_temp.is(
-  (SELECT format('%s %s %s %s', collector_silent_after, meter_silent_intervals,
-                 backlog_near_capacity, lookback)
+  (SELECT format('%s %s %s %s %s', collector_silent_after, meter_silent_intervals,
+                 backlog_near_capacity, lookback, endpoint_error_rate)
    FROM health.thresholds),
-  '03:00:00 10 0.9 4 days',
+  '03:00:00 10 0.9 4 days 0.2',
   'health.thresholds shows the thresholds in force');
 
 ROLLBACK;

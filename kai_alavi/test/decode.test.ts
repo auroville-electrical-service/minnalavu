@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { decodeValue, findRegister, type Register } from "../src/index";
+import { decodeValue, findRegister, type Register, wordCount } from "../src/index";
 import { loadDecodeFixture, loadProfiles } from "./contract";
 
 const fixture = loadDecodeFixture();
@@ -112,5 +112,50 @@ describe("decodeValue", () => {
       });
       expect(failures).toEqual([]);
     });
+  });
+});
+
+// A float register has no wrap of its own: past its largest finite value lie infinity and NaN,
+// which are no value.
+describe("each profile's cumulative registers at their largest raw value", () => {
+  const tops: Record<Register["type"], bigint> = {
+    u16: 0xffffn,
+    i16: 0x7fffn,
+    u32: 0xffffffffn,
+    i32: 0x7fffffffn,
+    u64: 0xffffffffffffffffn,
+    f32: 0x7f7fffffn,
+    f64: 0x7fefffffffffffffn,
+  };
+  const pastTop: Record<Width, readonly bigint[]> = {
+    f32: [0x7f800000n, 0xffffffffn],
+    f64: [0x7ff0000000000000n, 0xffffffffffffffffn],
+  };
+  const isFloat = (type: Register["type"]): type is Width => type === "f32" || type === "f64";
+  const inOrder = (r: Register, bits: bigint): number[] => {
+    const count = wordCount(r.type);
+    const words = Array.from({ length: count }, (_, i) => Number((bits >> BigInt(16 * (count - 1 - i))) & 0xffffn));
+    return r.word_order === "low_first" ? words.reverse() : words;
+  };
+  const cumulative = [...profiles.values()].flatMap((p) =>
+    p.registers.filter((r) => r.kind === "cumulative").map((r) => [`${p.profile} ${r.key}`, r] as const),
+  );
+
+  test("there are some", () => {
+    expect(cumulative.length).toBeGreaterThan(0);
+  });
+
+  test.each(cumulative)("%s decodes losslessly, and a float's words past it to no value", (_, r) => {
+    const top = tops[r.type];
+    const decoded = decodeValue(r, inOrder(r, top));
+    if (!decoded.ok) throw new Error(decoded.error);
+    if (isFloat(r.type)) {
+      expect(parsedBits(r.type, decoded.value)).toBe(top);
+      expect(pastTop[r.type].map((bits) => decodeValue(r, inOrder(r, bits)))).toEqual(
+        pastTop[r.type].map(() => ({ ok: false, error: "not_finite" })),
+      );
+    } else {
+      expect(BigInt(decoded.value.replace(".", ""))).toBe(top);
+    }
   });
 });

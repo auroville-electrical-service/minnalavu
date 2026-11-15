@@ -77,3 +77,23 @@ LANGUAGE sql AS $$
   END
   FROM (SELECT ARRAY(SELECT jsonb_array_elements_text(change -> 'path')) AS path) p
 $$;
+
+-- Each scan of readings, missed reads or a hypertable chunk in the plan of a
+-- query that is not a keyed lookup: its node type and relation. Seq scans
+-- priced out, so any left is the only path there.
+CREATE FUNCTION pg_temp.unkeyed_scans(q text) RETURNS text
+LANGUAGE plpgsql AS $$
+DECLARE
+  plan jsonb;
+BEGIN
+  SET LOCAL enable_seqscan = off;
+  EXECUTE 'EXPLAIN (FORMAT JSON) ' || q INTO plan;
+  RESET enable_seqscan;
+  RETURN (SELECT string_agg(format('%s on %s', n ->> 'Node Type', n ->> 'Relation Name'), '; ')
+          FROM jsonb_path_query(plan, 'lax $.**') n
+          WHERE jsonb_typeof(n) = 'object'
+            AND n ->> 'Relation Name' ~ '^(readings|missed_reads|_hyper_)'
+            AND n ->> 'Node Type' <> 'Custom Scan'
+            AND NOT (n ? 'Index Cond' OR n ? 'Recheck Cond'));
+END
+$$;

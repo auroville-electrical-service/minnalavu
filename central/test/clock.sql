@@ -9,7 +9,8 @@
 BEGIN;
 
 SELECT admin.set_health_thresholds(collector_silent_after => '1 hour',
-  meter_silent_intervals => 4, backlog_near_capacity => 0.8, lookback => '1 day');
+  meter_silent_intervals => 4, backlog_near_capacity => 0.8, lookback => '1 day',
+  endpoint_error_rate => 0.05);
 
 -- Collectors registered `ago`, without the roles admin.create_collector makes.
 INSERT INTO store.collectors (id, created_at)

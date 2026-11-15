@@ -102,6 +102,29 @@ defmodule Alavi.DecodeTest do
       end
     end
 
+    # A float register has no wrap of its own: past its largest finite value
+    # lie infinity and NaN, which are no value (a missed read, reason decode).
+    test "each profile's cumulative registers decode their largest raw value losslessly, " <>
+           "and a float's words past it to no value",
+         ctx do
+      registers =
+        for {_name, profile} <- ctx.profiles,
+            r <- profile.registers,
+            r.kind == :cumulative,
+            do: r
+
+      assert registers != []
+
+      for r <- registers do
+        words = in_order(r, top(r.type))
+        assert {:ok, value} = Decode.value(r, words), r.key
+        assert Simulator.Encode.words(spec(r), value) == words, r.key
+
+        for past <- past_top(r.type),
+            do: assert({:error, :not_finite} = Decode.value(r, in_order(r, past)), r.key)
+      end
+    end
+
     test "integers keep exactly decimals places, floats are never rounded" do
       for {words, expected} <- [{[0, 1234], "1.234"}, {[0, 1000], "1.000"}] do
         assert {:ok, exact} = Decode.value(register(:u32, :high_first, 3), words)
@@ -181,6 +204,23 @@ defmodule Alavi.DecodeTest do
       do: [],
       else: Enum.map([:floor, :ceiling], &Decimal.round(value, -(exp + 1), &1))
   end
+
+  # A type's largest raw value, most significant word first.
+  defp top(:u16), do: [0xFFFF]
+  defp top(:i16), do: [0x7FFF]
+  defp top(:u32), do: [0xFFFF, 0xFFFF]
+  defp top(:i32), do: [0x7FFF, 0xFFFF]
+  defp top(:u64), do: [0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF]
+  defp top(:f32), do: [0x7F7F, 0xFFFF]
+  defp top(:f64), do: [0x7FEF, 0xFFFF, 0xFFFF, 0xFFFF]
+
+  # Infinity, then NaN with every bit set.
+  defp past_top(:f32), do: [[0x7F80, 0], [0xFFFF, 0xFFFF]]
+  defp past_top(:f64), do: [[0x7FF0, 0, 0, 0], [0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF]]
+  defp past_top(_integer), do: []
+
+  defp in_order(%Register{word_order: :high_first}, words), do: words
+  defp in_order(%Register{word_order: :low_first}, words), do: Enum.reverse(words)
 
   defp spec(%Register{} = r), do: %{type: r.type, word_order: r.word_order, decimals: r.decimals}
 end

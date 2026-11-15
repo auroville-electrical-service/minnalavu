@@ -9,7 +9,8 @@
 BEGIN;
 
 SELECT admin.set_health_thresholds(collector_silent_after => '1 hour',
-  meter_silent_intervals => 4, backlog_near_capacity => 0.8, lookback => '1 day');
+  meter_silent_intervals => 4, backlog_near_capacity => 0.8, lookback => '1 day',
+  endpoint_error_rate => 0.05);
 
 INSERT INTO store.collectors (id) VALUES ('sqle_a'), ('sqle_b');
 
@@ -130,26 +131,7 @@ SELECT pg_temp.is(
   'the health view finds the drops at or just after a reading that arrived within the lookback, '
   || 'and not those whose readings both arrived before it');
 
--- Each scan of readings in the plan of a query that is not a keyed lookup:
--- its node type and relation. Seq scans priced out, so any left is the only
--- path there.
-CREATE FUNCTION pg_temp.unkeyed_reading_scans(q text) RETURNS text
-LANGUAGE plpgsql AS $$
-DECLARE
-  plan jsonb;
-BEGIN
-  SET LOCAL enable_seqscan = off;
-  EXECUTE 'EXPLAIN (FORMAT JSON) ' || q INTO plan;
-  RESET enable_seqscan;
-  RETURN (SELECT string_agg(format('%s on %s', n ->> 'Node Type', n ->> 'Relation Name'), '; ')
-          FROM jsonb_path_query(plan, 'lax $.**') n
-          WHERE jsonb_typeof(n) = 'object' AND n ->> 'Relation Name' ~ '^(readings|_hyper_)'
-            AND n ->> 'Node Type' <> 'Custom Scan'
-            AND NOT (n ? 'Index Cond' OR n ? 'Recheck Cond'));
-END
-$$;
-
-SELECT pg_temp.is(pg_temp.unkeyed_reading_scans('SELECT * FROM health.energy_drops'), NULL,
+SELECT pg_temp.is(pg_temp.unkeyed_scans('SELECT * FROM health.energy_drops'), NULL,
   'the health view reads readings only by keyed index lookups, never by a scan');
 
 SELECT pg_temp.is(
@@ -172,10 +154,36 @@ SELECT pg_temp.is(
   'each serial with a drop found by the health view is one problem');
 
 SELECT admin.set_health_thresholds(collector_silent_after => '1 hour',
-  meter_silent_intervals => 4, backlog_near_capacity => 0.8, lookback => '4 days');
+  meter_silent_intervals => 4, backlog_near_capacity => 0.8, lookback => '4 days',
+  endpoint_error_rate => 0.05);
 
 SELECT pg_temp.ok(
   (SELECT 'SQLE-OLD' IN (SELECT subject FROM health.problems WHERE kind = 'energy_backwards')),
   'a drop is judged by the lookback in force');
+
+-- A register reaching its largest value and wrapping to a small one: the
+-- 440's energy registers are f32, the 500's f64, and neither profile names a
+-- rollover, so the largest finite float stands for the top.
+SELECT pg_temp.reading('SQLW-440', 'active_energy_import', at, v, batch)
+FROM (VALUES ('0 minutes'::interval, 340282350000000000000000000000000000000, 'a_old'),
+             ('15 minutes', 0.5, 'a_new')) v (at, v, batch);
+SELECT pg_temp.reading('SQLW-500', 'active_energy_import', at, v::numeric, batch, 'elite_500')
+FROM (VALUES ('0 minutes'::interval, '17976931348623157' || repeat('0', 292), 'a_old'),
+             ('15 minutes', '0.5', 'a_new')) v (at, v, batch);
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s %s -> %s %s', meter_serial, length(previous_value::text), value,
+                            suspect), '; ' ORDER BY meter_serial)
+   FROM store.energy_drops WHERE meter_serial LIKE 'SQLW-%'),
+  'SQLW-440 39 -> 0.5 f; SQLW-500 309 -> 0.5 f',
+  'a register wrapping from its largest value to a small one is a drop, reported like a reset: '
+  || 'the views cannot tell a wrap from a reset, a swap or a write');
+
+SELECT pg_temp.is(
+  (SELECT detail FROM health.problems WHERE kind = 'energy_backwards' AND subject = 'SQLW-440'),
+  'active_energy_import 0.5 kWh at 2026-11-01 00:15:00+00 (sqle_a, clock ntp, checked) '
+  || 'after 340282350000000000000000000000000000000 kWh at 2026-11-01 00:00:00+00 '
+  || '(sqle_a, clock ntp, checked)',
+  'and raises energy_backwards with both values exact, as for any drop');
 
 ROLLBACK;

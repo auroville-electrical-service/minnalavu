@@ -37,7 +37,8 @@ sql() { psql "$url" -X -q -v ON_ERROR_STOP=1 "$@" >/dev/null; }
 # roles outlive this database.
 sql <<'SQL'
 SELECT admin.set_health_thresholds(collector_silent_after => '1 hour',
-  meter_silent_intervals => 4, backlog_near_capacity => 0.8, lookback => '1 day');
+  meter_silent_intervals => 4, backlog_near_capacity => 0.8, lookback => '1 day',
+  endpoint_error_rate => 0.05);
 INSERT INTO store.collectors (id) VALUES ('alert_test');
 SELECT admin.register_endpoint(endpoint_id => 'alert_test_ep', valid_from => now() - interval '2 days',
   collector_id => 'alert_test', host => '10.0.0.1', port => 502, framing => 'tcp',

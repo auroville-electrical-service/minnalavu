@@ -171,6 +171,17 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
   service and no other system polls the endpoint. A missed read counts for
   the meter whose serial it carries or, with none, for the meter registered at
   its address now.
+- `health.endpoints`: per registered endpoint, as registered now, the reads
+  due at it within the lookback (one per register: a reading or a missed
+  read), counted at each address it had while in service and by its
+  collector; missed reads by reason; `failed_reads`, the missed reads other
+  than `decode` and `profile_mismatch` (the meter answered); `error_rate`,
+  failed over due, NULL when none was due; and `erroring`, at or above
+  `endpoint_error_rate` while in service and not polled by another system.
+  Counted on an address and time index, so a run costs the lookback's
+  readings, never a scan of all of them. The store holds no request latency:
+  the collector's status page shows it, and its log keeps a line per meter
+  per day.
 - `health.unregistered_serials`: serials with readings within the lookback
   that are not in the registry.
 - `health.unregistered_serial_places`: the same serials, one row per place
@@ -200,10 +211,13 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
   was), `meter_silent` (no reading for
   `meter_silent_intervals` × its interval, counted from when it came into
   service if later; not listed when its collector is silent),
-  `backlog_near_capacity` (bytes at or above `backlog_near_capacity` of the
-  buffer), `backlog_refused`, `backlog_discarded`, `backlog_quarantined` (above
-  zero in the latest upload; `refused` counts since the collector started, so
-  it clears on a restart), `unregistered_serial`, `misplaced_serial` (one
+  `endpoint_errors` (erroring in `health.endpoints`; its detail gives the
+  failed and due reads, the rate, the missed reads by reason and the
+  address), `backlog_near_capacity` (bytes at or above
+  `backlog_near_capacity` of the buffer), `backlog_refused`,
+  `backlog_discarded`, `backlog_quarantined` (above zero in the latest
+  upload; `refused` counts since the collector started, so it clears on a
+  restart), `unregistered_serial`, `misplaced_serial` (one
   per serial, every place it was read in its detail),
   `serial_at_several_places` (an unregistered serial read at more than one
   place: two meters reporting one serial, one meter reachable two ways, or a
@@ -221,7 +235,11 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
   them as the owner:
 
       SELECT admin.set_health_thresholds(collector_silent_after => '1 hour',
-        meter_silent_intervals => 4, backlog_near_capacity => 0.8, lookback => '1 day');
+        meter_silent_intervals => 4, backlog_near_capacity => 0.8, lookback => '1 day',
+        endpoint_error_rate => 0.05);
+
+  `endpoint_error_rate`'s first value, 0.05, is a guess until the pilot's
+  figures say what a healthy chain misses.
 
 The role `monitor` may select from these views and nothing else: no raw
 table, no registry table, nothing in `api` or `admin`, no function, no writes

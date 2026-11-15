@@ -216,9 +216,9 @@ CREATE TEMP VIEW monitor_roles AS
 SELECT pg_temp.is(
   (SELECT string_agg(c.relname::text, ', ' ORDER BY c.relname)
    FROM pg_class c WHERE c.relnamespace = 'health'::regnamespace AND c.relkind = 'v'),
-  'collector_clocks, collectors, energy_drops, meter_firmware, meters, misplaced_serials, '
+  'collector_clocks, collectors, endpoints, energy_drops, meter_firmware, meters, misplaced_serials, '
   || 'place_serials, problems, thresholds, unregistered_serial_places, unregistered_serials',
-  'health holds the eleven health views');
+  'health holds the twelve health views');
 
 SELECT pg_temp.is(
   (SELECT count(*) FROM pg_class c
@@ -307,6 +307,7 @@ FROM unnest(ARRAY[
   'SELECT * FROM health.collector_clocks',
   'SELECT * FROM health.meter_firmware',
   'SELECT * FROM health.energy_drops',
+  'SELECT * FROM health.endpoints',
   'SELECT * FROM health.thresholds'
 ]) q;
 
@@ -325,9 +326,9 @@ FROM unnest(ARRAY[
   'SELECT * FROM registry.meter_history',
   'SELECT * FROM registry.health_thresholds',
   $q$SELECT api.ingest('{}')$q$,
-  $q$SELECT admin.set_health_thresholds('1 hour', 4, 0.8, '1 day')$q$,
+  $q$SELECT admin.set_health_thresholds('1 hour', 4, 0.8, '1 day', 0.05)$q$,
   $q$SELECT admin.retire_meter('SQLREG-0001', now())$q$,
-  $q$INSERT INTO registry.health_thresholds (collector_silent_after, meter_silent_intervals, backlog_near_capacity, lookback) VALUES ('1 hour', 4, 0.8, '1 day')$q$,
+  $q$INSERT INTO registry.health_thresholds (collector_silent_after, meter_silent_intervals, backlog_near_capacity, lookback, endpoint_error_rate) VALUES ('1 hour', 4, 0.8, '1 day', 0.05)$q$,
   'SELECT * FROM store.profile_versions',
   'SELECT * FROM store.profile_registers',
   $q$INSERT INTO store.profile_versions (profile, version) VALUES ('elite_440', 99)$q$,
@@ -476,6 +477,7 @@ FROM unnest(ARRAY[
   'SELECT * FROM health.problems',
   'SELECT * FROM health.collector_clocks',
   'SELECT * FROM health.energy_drops',
+  'SELECT * FROM health.endpoints',
   'SELECT * FROM store.clock_checks',
   'SELECT * FROM store.clock_offsets',
   'SELECT * FROM store.ungrounded_readings',
