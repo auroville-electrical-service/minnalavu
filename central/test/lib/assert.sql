@@ -79,6 +79,20 @@ LANGUAGE sql AS $$
   FROM (SELECT ARRAY(SELECT jsonb_array_elements_text(change -> 'path')) AS path) p
 $$;
 
+-- A case's changes, in order, as config.v1.cases.json's valid entries and
+-- config.v1.digests.json's cases list them.
+CREATE FUNCTION pg_temp.applied(config jsonb, changes jsonb) RETURNS jsonb
+LANGUAGE plpgsql AS $$
+DECLARE
+  c jsonb;
+BEGIN
+  FOR c IN SELECT jsonb_array_elements(changes) LOOP
+    config := pg_temp.changed(config, c);
+  END LOOP;
+  RETURN config;
+END
+$$;
+
 -- Each scan of readings, missed reads or a hypertable chunk in the plan of a
 -- query that is not a keyed lookup: its node type and relation. Seq scans
 -- priced out, so any left is the only path there.

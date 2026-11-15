@@ -56,6 +56,25 @@
         "quarantined": {
           "description": "Batches set aside on the collector because the server rejected them permanently.",
           "$ref": "#/$defs/count"
+        },
+        "config": {
+          "description": "The polling config the collector is applying, by its digest (contract/fixtures/config.v1.digests.json), and the served config it refused since, by its digest, with the reason; both null when it has refused none. Optional: a collector that does not fetch its config sends none.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["digest", "refused_digest", "reason"],
+          "properties": {
+            "digest": { "$ref": "#/$defs/config_digest" },
+            "refused_digest": { "oneOf": [{ "$ref": "#/$defs/config_digest" }, { "type": "null" }] },
+            "reason": {
+              "description": "Why the refused config was not applied, as the collector's parser gave it.",
+              "type": ["string", "null"],
+              "minLength": 1,
+              "maxLength": 1000
+            }
+          },
+          "if": { "properties": { "refused_digest": { "type": "null" } } },
+          "then": { "properties": { "reason": { "type": "null" } } },
+          "else": { "properties": { "reason": { "type": "string" } } }
         }
       }
     },
@@ -84,6 +103,11 @@
     }
   },
   "$defs": {
+    "config_digest": {
+      "description": "SHA-256 of a polling config's canonical encoding, in lowercase hex (contract/fixtures/config.v1.digests.json).",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
     "count": {
       "description": "At most 2^53 - 1, the largest integer every JSON implementation holds exactly.",
       "type": "integer",

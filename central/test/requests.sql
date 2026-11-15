@@ -240,7 +240,7 @@ INSERT INTO answers VALUES ('heartbeat b', pg_temp.ingest_as('collector_sqltest_
 
 SELECT pg_temp.is(
   (SELECT answer FROM answers WHERE name = 'heartbeat a')
-    - 'first_received_at' - 'batch_id' - 'jobs',
+    - 'first_received_at' - 'batch_id' - 'jobs' - 'config_digest',
   '{"resent": false,
     "readings": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
     "missed_reads": {"received": 0, "inserted": 0, "duplicate": 0},

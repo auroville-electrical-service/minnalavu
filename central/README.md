@@ -50,8 +50,10 @@ The directory is not named `minnalavu/`, since that is the repo itself.
   backlog), `reading_conflicts` (a reading whose key was already taken by one
   with other content) and `collectors`. Nothing in `store` can be updated,
   deleted or truncated, by any role (triggers).
-- `api`: what PostgREST exposes. One function, `api.ingest(jsonb)`: `POST
-  /rpc/ingest` with a batch (`contract/schema/batch.v1.schema.json`) as the body.
+- `api`: what PostgREST exposes. Two functions: `api.ingest(jsonb)`, `POST
+  /rpc/ingest` with a batch (`contract/schema/batch.v1.schema.json`) as the
+  body; and `api.collector_config()`, `GET /rpc/collector_config`, the calling
+  collector's polling config (below).
 - `admin`: operator functions, run as the database owner.
 - `registry`: the device registry (below).
 - `health`: views of collection health, the only thing the role `monitor` may read.
@@ -61,8 +63,8 @@ The directory is not named `minnalavu/`, since that is the repo itself.
 Roles: PostgREST logs in as `authenticator` (no privileges of its own) and
 switches to the role the request's token names. Each collector has a role,
 `collector_<id>`, which inherits from `collector` the right to execute
-`api.ingest` and nothing else. The ingest function identifies the caller by
-that role, never by anything in the batch.
+`api.ingest` and `api.collector_config` and nothing else. Both identify the
+caller by that role, never by anything it sends.
 
 ## The profile catalog
 
@@ -273,7 +275,9 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
   `backlog_near_capacity` of the buffer), `backlog_refused`,
   `backlog_discarded`, `backlog_quarantined` (above zero in the latest
   upload; `refused` counts since the collector started, so it clears on a
-  restart), `unregistered_serial`, `misplaced_serial` (one
+  restart), `config_refused` (the latest upload reports a served config the
+  collector refused; its detail gives that digest, the reason and the digest
+  it still applies), `unregistered_serial`, `misplaced_serial` (one
   per serial, every place it was read in its detail),
   `serial_at_several_places` (an unregistered serial read at more than one
   place: two meters reporting one serial, one meter reachable two ways, or a
@@ -385,13 +389,33 @@ batch newly linked); a resend that links nothing new sends nothing. Any role
 may `LISTEN`, and any role with a connection may `NOTIFY` on that channel, so a
 notice says only "look again": read `jobs.request_status`.
 
+## The served polling config
+
+`GET /rpc/collector_config` (or `POST` with `{}`), with a collector's token,
+answers with that collector's polling config as of now, in
+`contract/config/config.v1.schema.json`'s schema version 1: its endpoints in
+service, ordered by host (by its bytes) and port, `polled_by_other_system`
+as registered, each with its targets in service by unit id, each target's
+profile, its interval only when it has its own, and the serial of the meter
+placed there when there is one. It is served as the registry holds it, valid
+or not: a collector with no endpoint in service gets none, and an endpoint
+with no target in service no meters, which the collector refuses. Nor is a
+serial checked against its profile's serial registers here; that is the
+collector's parser's. Any other role gets 403.
+
+Every ingest answer carries `config_digest`, the digest of that document as
+`contract/fixtures/config.v1.digests.json` defines it, so a collector learns
+of a change from its next batch or heartbeat. The backlog's `config` (the
+digest the collector applies, and one it refused with the reason) is kept
+per upload in `store.uploads` and shown in `health.collectors`.
+
 ## Answers from `POST /rpc/ingest`
 
 - 200: stored, or already stored (a resend). The body names the `batch_id` and
   counts readings `received`, `inserted`, `duplicate` and `conflicting`,
   missed reads `received`, `inserted` and `duplicate`, and firmware reads
   `received`, `inserted`, `duplicate` and `conflicting` (a conflicting one is
-  counted, not kept), and clock checks and latency entries the same. `jobs`, when the collector has
+  counted, not kept), and clock checks and latency entries the same, and `config_digest` (above). `jobs`, when the collector has
   pending requests, lists them oldest first, each with its `request_id`, `kind`,
   `meters` (serials), `requested_at` and `expires_at`; a request is listed
   until a reading or missed read for it arrives or it expires, so a collector

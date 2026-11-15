@@ -14,6 +14,7 @@ INSERT INTO answers VALUES ('first', pg_temp.ingest_as('collector_sqltest_a', :'
 
 SELECT pg_temp.is((SELECT answer FROM answers WHERE name = 'first') - 'first_received_at',
   '{"batch_id": "0b6f8d2e-5c1a-4e7b-9a3d-2f4c6e8a0b1c", "resent": false,
+    "config_digest": "9ac24ff085fb90434c2ce98647cce379a3de2df6d941206cead503702fa1d0d0",
     "readings": {"received": 2, "inserted": 2, "duplicate": 0, "conflicting": 0},
     "missed_reads": {"received": 2, "inserted": 2, "duplicate": 0},
     "firmware_reads": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
@@ -63,10 +64,17 @@ SELECT pg_temp.is(
   '2026-11-01 00:05:00+00 4 412 1 2026-11-01 00:00:00+00 2000000000 0 0 0',
   'the upload is recorded with the backlog the collector reported');
 
+SELECT pg_temp.is(
+  (SELECT format('%s %s %s', config_digest, config_refused_digest, config_refusal_reason)
+   FROM store.uploads),
+  '  ',
+  'a backlog without a config, from a collector that does not report one, records none');
+
 INSERT INTO answers VALUES ('resent', pg_temp.ingest_as('collector_sqltest_a', :'basic'));
 
 SELECT pg_temp.is((SELECT answer FROM answers WHERE name = 'resent') - 'first_received_at',
   '{"batch_id": "0b6f8d2e-5c1a-4e7b-9a3d-2f4c6e8a0b1c", "resent": true,
+    "config_digest": "9ac24ff085fb90434c2ce98647cce379a3de2df6d941206cead503702fa1d0d0",
     "readings": {"received": 2, "inserted": 0, "duplicate": 2, "conflicting": 0},
     "missed_reads": {"received": 2, "inserted": 0, "duplicate": 2},
     "firmware_reads": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
@@ -207,6 +215,7 @@ INSERT INTO coded SELECT pg_temp.changed(pg_temp.changed(pg_temp.changed(:'basic
 SELECT pg_temp.is(
   pg_temp.ingest_as('collector_sqltest_a', (SELECT batch FROM coded)) - 'first_received_at',
   '{"batch_id": "66666666-6666-4666-8666-666666666666", "resent": false,
+    "config_digest": "9ac24ff085fb90434c2ce98647cce379a3de2df6d941206cead503702fa1d0d0",
     "readings": {"received": 1, "inserted": 1, "duplicate": 0, "conflicting": 0},
     "missed_reads": {"received": 4, "inserted": 4, "duplicate": 0},
     "firmware_reads": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},

@@ -50,19 +50,6 @@ EXCEPTION
 END
 $$;
 
--- A valid entry's changes, in order.
-CREATE FUNCTION pg_temp.applied(config jsonb, changes jsonb) RETURNS jsonb
-LANGUAGE plpgsql AS $$
-DECLARE
-  c jsonb;
-BEGIN
-  FOR c IN SELECT jsonb_array_elements(changes) LOOP
-    config := pg_temp.changed(config, c);
-  END LOOP;
-  RETURN config;
-END
-$$;
-
 -- A schema node with its $ref (to #/$defs/...) resolved.
 CREATE FUNCTION pg_temp.resolved(schema jsonb, node jsonb) RETURNS jsonb
 LANGUAGE sql AS $$

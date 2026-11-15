@@ -1,4 +1,5 @@
--- What the roles PostgREST uses may do: call api.ingest, and nothing else;
+-- What the roles PostgREST uses may do: call api.ingest and
+-- api.collector_config, and nothing else;
 -- what monitor may do: read the health views, and nothing else; and what
 -- minkanakku_staff may do: request a job and read the requests, and nothing
 -- else. Above all, no such role may read, change or delete raw readings.
@@ -97,9 +98,18 @@ SELECT pg_temp.is(
    JOIN pg_namespace n ON n.oid = f.pronamespace
    WHERE n.nspname IN ('store', 'api', 'admin', 'registry', 'health')
      AND has_function_privilege(r.role, f.oid, 'EXECUTE')),
-  (SELECT string_agg(format('%s may execute api.ingest(jsonb)', role), '; ' ORDER BY role)
-   FROM collector_roles),
-  'the only function a PostgREST role may execute is api.ingest, and authenticator may not');
+  (SELECT string_agg(format('%s may execute %s', role, f), '; ' ORDER BY role)
+   FROM collector_roles
+   CROSS JOIN unnest(ARRAY['api.ingest(jsonb)', 'api.collector_config()']) f),
+  'the only functions a PostgREST role may execute are api.ingest and api.collector_config, '
+  || 'and authenticator may execute neither');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(r.rolname, ', ' ORDER BY r.rolname)
+   FROM pg_roles r
+   WHERE NOT r.rolsuper AND has_function_privilege(r.oid, 'api.collector_config()', 'EXECUTE')),
+  (SELECT string_agg(role, ', ' ORDER BY role) FROM collector_roles),
+  'no role but collector and the collectors may call api.collector_config');
 
 SELECT pg_temp.is(
   (SELECT string_agg(format('%s has %s on schema %s', r.role, p, s.nspname), '; '
@@ -121,10 +131,10 @@ SELECT pg_temp.is(
   'no PostgREST role may create schemas or temporary tables');
 
 SELECT pg_temp.is(
-  (SELECT string_agg(f.oid::regprocedure::text, '; ')
+  (SELECT string_agg(f.oid::regprocedure::text, '; ' ORDER BY f.oid::regprocedure::text)
    FROM pg_proc f WHERE f.pronamespace = 'api'::regnamespace),
-  'api.ingest(jsonb)',
-  'api holds one function, ingest');
+  'api.collector_config(); api.ingest(jsonb)',
+  'api holds two functions, collector_config and ingest');
 
 SELECT pg_temp.is(
   (SELECT count(*) FROM pg_class WHERE relnamespace = 'api'::regnamespace),
@@ -213,13 +223,19 @@ FROM unnest(ARRAY[
   $q$SELECT admin.retire_target('e', 1, now())$q$,
   $q$INSERT INTO registry.target_versions (endpoint_id, unit_id, valid_from, in_service, profile) VALUES ('e', 1, now(), true, 'elite_440')$q$,
   $q$SELECT store.check_batch('{}')$q$,
+  $q$SELECT registry.collector_config('sqltest_grants')$q$,
+  $q$SELECT registry.config_digest('{}')$q$,
   $q$SELECT store.reject('x', 'y')$q$
 ]) q;
+
+SELECT pg_temp.is(pg_temp.sqlstate_as('collector_sqltest_grants', 'SELECT api.collector_config()'),
+                  '00000', 'a collector may call api.collector_config');
 
 SELECT pg_temp.is(pg_temp.sqlstate_as('authenticator', q), '42501',
                   'authenticator is refused: ' || q)
 FROM unnest(ARRAY[
   $q$SELECT api.ingest('{}')$q$,
+  'SELECT api.collector_config()',
   'SELECT * FROM store.readings',
   $q$DELETE FROM store.readings$q$
 ]) q;
@@ -355,6 +371,8 @@ FROM unnest(ARRAY[
   'SELECT * FROM registry.target_history',
   'SELECT * FROM registry.health_thresholds',
   $q$SELECT api.ingest('{}')$q$,
+  'SELECT api.collector_config()',
+  $q$SELECT registry.collector_config('sqltest_grants')$q$,
   $q$SELECT admin.set_health_thresholds('1 hour', 4, 0.8, '1 day', 0.05)$q$,
   $q$SELECT admin.retire_meter('SQLREG-0001', now())$q$,
   $q$SELECT admin.register_target('e', 1, now(), 'elite_440', NULL)$q$,
@@ -524,6 +542,8 @@ FROM unnest(ARRAY[
   $q$INSERT INTO store.profile_versions (profile, version) VALUES ('elite_440', 99)$q$,
   $q$SELECT admin.load_profile('{"profile": "elite_440", "version": 99, "registers": []}')$q$,
   $q$SELECT api.ingest('{}')$q$,
+  'SELECT api.collector_config()',
+  $q$SELECT registry.collector_config('sqltest_grants')$q$,
   $q$SELECT admin.create_collector('sqltest_intruder')$q$,
   $q$SELECT admin.register_meter('S', now(), 'e', 1)$q$,
   $q$SELECT admin.register_target('e', 1, now(), 'elite_440', NULL)$q$,

@@ -30,8 +30,9 @@ What the collector and the server share. Nothing else is shared between them.
   description, and in the cases below.
 - `tools/`: scripts that compute fixtures independently of any collector.
   `register_decode.py` writes `register-decode.v1.json`
-  (`uv run --script contract/tools/register_decode.py`, from the repo root);
-  its output must equal the fixture byte for byte.
+  (`uv run --script contract/tools/register_decode.py`, from the repo root),
+  and `config_digest.py` writes `config.v1.digests.json` the same way; each
+  one's output must equal its fixture byte for byte.
 - `fixtures/`: example messages. Both sides test against them.
   `batch.v1.cases.json` lists changes to the basic batch that the schema must
   reject, and some it must accept; the collector's schema test and the
@@ -39,7 +40,15 @@ What the collector and the server share. Nothing else is shared between them.
   `config.v1.basic.json` is a polling config, and `config.v1.cases.json`
   changes to it that must be refused, and some that must be accepted, each
   naming the sides that must give that verdict: the schema, the collector's
-  parser, and the registry (for a value it stores).
+  parser, and the registry (for a value it stores). The server serves
+  `config.v1.basic.json` itself to a collector whose registry entries hold
+  it (`central/test/collector_config.sql`), so the served document is held
+  to the schema and the parser through this fixture.
+  `config.v1.digests.json` gives configs, as changes to the basic one, with
+  their canonical encoding (RFC 8785) and digest (SHA-256 of its UTF-8 bytes,
+  lowercase hex), as the server's answer carries it in `config_digest` and a
+  collector reports it in its backlog; its description spells the encoding
+  out. Every side that computes a digest must give each.
   `modbus-read-requests.v1.json` gives the exact bytes of sample read
   requests, in both framings, computed independently of any collector, and
   inputs for which no request may be built. Every implementation that talks
@@ -112,6 +121,11 @@ not in its last counted bucket, whose retries outnumber its answers, or
 whose poller started after its date ended.
 Percentiles are the store's to compute, never sent. Ingest keys an entry on
 (collector, endpoint, `unit_id`, `date`, `poller_started_at`).
+
+The backlog may carry `config`: the `digest` of the polling config the
+collector is applying, and the `refused_digest` of a served config it refused
+since, with the `reason`; both null when it has refused none. A collector that
+does not fetch its config sends no `config`.
 
 A reading or missed read taken for a request carries its `request_id`: one
 of the jobs the server's answer to an upload listed (`central/README.md`).
