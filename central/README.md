@@ -140,6 +140,10 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
   that are not in the registry.
 - `health.unregistered_serial_places`: the same serials, one row per place
   (collector, host, port, unit) each was read at within the lookback.
+- `health.place_serials`: places (collector, host, port, unit) whose readings
+  within the lookback carry more than one serial, registered or not; one row
+  per place and serial, with its readings and when the first and last were
+  taken.
 - `health.misplaced_serials`: registered serials read within the lookback at
   a place (collector, host, port, unit) other than where the registry put them
   when each reading was taken; one row per serial and place.
@@ -158,7 +162,10 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
   per serial, every place it was read in its detail),
   `serial_at_several_places` (an unregistered serial read at more than one
   place: two meters reporting one serial, one meter reachable two ways, or a
-  move; every place in its detail) and `firmware_changed` (a serial whose
+  move; every place in its detail), `several_serials_at_place` (a place whose
+  readings carry more than one serial: a swap, or two meters answering one
+  address; each serial's readings and times in its detail, so a handover
+  shows apart from interleaving) and `firmware_changed` (a serial whose
   latest names differ from an earlier record, while the batch that first
   brought the latest names arrived within the lookback, so a weeks-late change
   is flagged when it arrives, and a resend neither hides nor renews it).

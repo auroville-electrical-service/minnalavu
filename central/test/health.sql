@@ -124,6 +124,13 @@ SELECT pg_temp.reading('SQLH-TWIN', (SELECT batch FROM b WHERE collector = 'sqlh
 SELECT pg_temp.reading('SQLH-TWIN', (SELECT batch FROM b WHERE collector = 'sqlh_a'), '40 minutes', 10);
 SELECT pg_temp.reading('SQLH-TWIN', (SELECT batch FROM b WHERE collector = 'sqlh_d'), '20 minutes', 10);
 SELECT pg_temp.reading('SQLH-STRAY', (SELECT batch FROM b WHERE collector = 'sqlh_a'), '3 days', 11);
+-- Unit 12 answering with two serials in turn, as two meters on one address
+-- would; unit 9 already gave SQLH-STRAY and SQLH-0005 (and SQLH-OLD-STRAY,
+-- outside the lookback).
+SELECT pg_temp.reading(s, (SELECT batch FROM b WHERE collector = 'sqlh_a'), i, 12)
+FROM (VALUES ('SQLS-A', '50 minutes'::interval), ('SQLS-B', '40 minutes'),
+             ('SQLS-A', '30 minutes'), ('SQLS-B', '20 minutes'),
+             ('SQLS-A', '10 minutes')) v (s, i);
 
 SELECT pg_temp.is(
   (SELECT string_agg(format('%s %s', kind, subject), '; ' ORDER BY kind, subject)
@@ -131,8 +138,9 @@ SELECT pg_temp.is(
   'backlog_discarded sqlh_d; backlog_near_capacity sqlh_a; backlog_quarantined sqlh_a; '
   || 'backlog_refused sqlh_d; collector_silent sqlh_b; meter_silent SQLH-0002; '
   || 'misplaced_serial SQLH-0003; misplaced_serial SQLH-0007; '
-  || 'serial_at_several_places SQLH-TWIN; unregistered_serial SQLH-STRAY; '
-  || 'unregistered_serial SQLH-TWIN',
+  || 'serial_at_several_places SQLH-TWIN; several_serials_at_place 10.0.0.1:502 unit 12 via sqlh_a; '
+  || 'several_serials_at_place 10.0.0.1:502 unit 9 via sqlh_a; unregistered_serial SQLH-STRAY; '
+  || 'unregistered_serial SQLH-TWIN; unregistered_serial SQLS-A; unregistered_serial SQLS-B',
   'exactly the problems there are are flagged');
 
 SELECT pg_temp.is(
@@ -212,7 +220,7 @@ SELECT pg_temp.is(
 SELECT pg_temp.is(
   (SELECT string_agg(format('%s %s', serial, readings), ', ' ORDER BY serial)
    FROM health.unregistered_serials),
-  'SQLH-STRAY 1, SQLH-TWIN 3',
+  'SQLH-STRAY 1, SQLH-TWIN 3, SQLS-A 3, SQLS-B 2',
   'only serials read within the lookback are listed as unregistered');
 
 SELECT pg_temp.is(
@@ -221,7 +229,8 @@ SELECT pg_temp.is(
                      '; ' ORDER BY serial, collector_id)
    FROM health.unregistered_serial_places),
   'SQLH-STRAY sqlh_a 10.0.0.1:502 9 1; SQLH-TWIN sqlh_a 10.0.0.1:502 10 2; '
-  || 'SQLH-TWIN sqlh_d 10.0.0.1:502 10 1',
+  || 'SQLH-TWIN sqlh_d 10.0.0.1:502 10 1; SQLS-A sqlh_a 10.0.0.1:502 12 3; '
+  || 'SQLS-B sqlh_a 10.0.0.1:502 12 2',
   'an unregistered serial is listed per place read within the lookback');
 
 SELECT pg_temp.is(
@@ -231,6 +240,24 @@ SELECT pg_temp.is(
          || '1 readings, the last at %s, at 10.0.0.1:502 unit 10 via sqlh_d',
          now() - interval '30 minutes', now() - interval '20 minutes'),
   'an unregistered serial read at several places says each place and when it was read there');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s %s:%s %s %s %s', collector_id, endpoint_host, endpoint_port,
+                            unit_id, serial, readings),
+                     '; ' ORDER BY unit_id, serial)
+   FROM health.place_serials),
+  'sqlh_a 10.0.0.1:502 9 SQLH-0005 1; sqlh_a 10.0.0.1:502 9 SQLH-STRAY 1; '
+  || 'sqlh_a 10.0.0.1:502 12 SQLS-A 3; sqlh_a 10.0.0.1:502 12 SQLS-B 2',
+  'a place whose readings within the lookback carry several serials lists each, registered '
+  || 'or not, and a place with one serial, or one more outside the lookback, is not listed');
+
+SELECT pg_temp.is(
+  (SELECT detail FROM health.problems
+   WHERE kind = 'several_serials_at_place' AND subject = '10.0.0.1:502 unit 12 via sqlh_a'),
+  format('SQLS-A: 3 readings, from %s to %s; SQLS-B: 2 readings, from %s to %s',
+         now() - interval '50 minutes', now() - interval '10 minutes',
+         now() - interval '40 minutes', now() - interval '20 minutes'),
+  'several serials at a place say each serial''s readings and when, so interleaving shows');
 
 -- Firmware reads at 10.0.0.1:502, from the batch's collector, with the
 -- software and module 1 names given (module 2 and the version fixed).
@@ -322,8 +349,15 @@ SELECT pg_temp.is(
                                        'unregistered_serial', 'serial_at_several_places')),
   'meter_silent SQLH-0007; serial_at_several_places SQLH-STRAY; '
   || 'serial_at_several_places SQLH-TWIN; unregistered_serial SQLH-OLD-STRAY; '
-  || 'unregistered_serial SQLH-STRAY; unregistered_serial SQLH-TWIN',
+  || 'unregistered_serial SQLH-STRAY; unregistered_serial SQLH-TWIN; '
+  || 'unregistered_serial SQLS-A; unregistered_serial SQLS-B',
   'the latest thresholds set are the ones judged by');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s %s', serial, readings), ', ' ORDER BY serial)
+   FROM health.place_serials WHERE unit_id = 9),
+  'SQLH-0005 1, SQLH-OLD-STRAY 1, SQLH-STRAY 1',
+  'the serials at a place are judged by the lookback in force');
 
 SELECT pg_temp.is(
   (SELECT string_agg(subject, ', ' ORDER BY subject) FROM health.problems
