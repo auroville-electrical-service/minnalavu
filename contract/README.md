@@ -12,9 +12,15 @@ What the collector and the server share. Nothing else is shared between them.
   was checked against a real meter, or null. A profile's `firmware` section
   says where the meter reports its software and firmware names and the Modbus
   protocol version; they are informational, and never gate a read or label a
-  reading.
-- `fixtures/`: example messages. Both sides test against them; a fixture's raw
-  words must decode to its stated value under its profile.
+  reading. Each profile has an integer `version`: once a batch cites it, that
+  version never changes, and a correction is a new version. Each register
+  has a `kind` (`cumulative`, `interval`, `demand` or `instantaneous`), and
+  its unit and kind belong to the version, not to each reading.
+- `tools/`: scripts that compute fixtures independently of any collector.
+  `register_decode.py` writes `register-decode.v1.json`
+  (`uv run --script contract/tools/register_decode.py`, from the repo root);
+  its output must equal the fixture byte for byte.
+- `fixtures/`: example messages. Both sides test against them.
   `batch.v1.cases.json` lists changes to the basic batch that the schema must
   reject, and some it must accept; the collector's schema test and the
   server's ingest tests both run every one.

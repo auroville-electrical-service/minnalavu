@@ -114,14 +114,20 @@ defmodule Alavi.EndToEndTest do
 
     readings =
       rows!("""
-      SELECT meter_serial, product_code, register_key, value::text AS value, unit::text AS unit,
-             unit_id
-      FROM store.readings WHERE collector_id = '#{id}'
+      SELECT r.meter_serial, r.product_code, r.register_key, r.value::text AS value,
+             p.unit::text AS unit, r.unit_id
+      FROM store.readings r
+      JOIN store.profile_registers p
+        ON (p.profile, p.version, p.register_key) = (r.profile, r.profile_version, r.register_key)
+      WHERE r.collector_id = '#{id}'
       """)
 
     by_key = Map.new(readings, &{{&1["meter_serial"], &1["register_key"]}, &1})
-    assert by_key[{"SIM-1", "active_energy_import"}]["value"] == "123456.000"
-    assert by_key[{read_serial, "active_energy_import"}]["value"] == "1234.500"
+    # Floats as the shortest decimal that round-trips at their width (ADR 0020).
+    assert by_key[{"SIM-1", "active_energy_import"}]["value"] == "123456"
+    assert by_key[{read_serial, "active_energy_import"}]["value"] == "1234.5"
+    # The unit comes from the profile version's catalog row, not the reading.
+    assert by_key[{"SIM-1", "active_energy_import"}]["unit"] == "kWh"
 
     assert readings
            |> Enum.map(&{&1["meter_serial"], &1["product_code"]})

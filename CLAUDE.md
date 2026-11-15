@@ -67,7 +67,8 @@ contract or `central/`.
 - **Deployment data never enters git:** it lives in the gitignored `data/` and the database, not in code, fixtures or commit messages.
 - **Collect cumulative energy registers**, the ones billing takes end − start readings from. Never offer integrated instantaneous power as energy.
 - **Import and export are separate quantities everywhere.** Never store or compute only a net figure.
-- **Energy uses `Decimal`**, never floats. Convert register values to Decimal at ingestion with an explicit, documented precision.
+- **Energy uses `Decimal`**, never floats. Convert register values to Decimal at ingestion, losslessly: integer registers as raw ÷ 10^decimals, float registers as the shortest decimal that round-trips at the register's own width. Never round a stored value; rounding is the reader's business.
+- **Store each value once, losslessly.** Nothing that can be computed quickly from what is stored (a difference, an offset, a decoded form, a unit the profile fixes): those are views. Keep raw words only where no lossless decode exists. Profiles are immutable versions, and every stored value names the version it was decoded under.
 - **Raw readings are immutable.** Corrections, estimates and meter swaps are separate records that reference the raw data.
 - **Ingestion is idempotent.** The key is (meter_id, register, timestamp); resent batches must not double-count. Late batches (weeks old) must be accepted, and findable by when they arrived, so that rating can re-rate any open period.
 - **Everything time-varying has effective dates:** endpoints, meter installations, CT/PT ratios.
