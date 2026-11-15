@@ -33,6 +33,13 @@ The directory is not named `minnalavu/`, since that is the repo itself.
   `(collector_id, endpoint_host, endpoint_port, unit_id, read_at)`, a name it
   did not give NULL; a collector sends one when something in it changed, and
   the first after it starts, so the latest record holds until the next.
+  `clock_checks`: each SNTP query a collector made of its clock, keyed on
+  `(collector_id, t1)`, with its trigger, server and outcome; the collector's
+  `t1` and `t4` as `timestamptz` (microseconds), and, when it was answered, the
+  server's `t2_unix` and `t3_unix` as Unix time in `numeric` seconds (exact to
+  the nanosecond, which `timestamptz` cannot hold), the address, stratum, leap
+  indicator and reference id; a kiss-o'-death keeps its address and reference id
+  (the kiss code). The views on it are under *Clock checks* below.
   `batches` (one row per batch, as first received), `uploads` (every arrival of a batch, with the collector's
   backlog), `reading_conflicts` (a reading whose key was already taken by one
   with other content) and `collectors`. Nothing in `store` can be updated,
@@ -72,6 +79,28 @@ it is when its file still names the same registers with the same decode,
 address, unit and kind (a change to `verified_on_device` or a source is no
 change), and refused otherwise, loading nothing: a loaded version never
 changes, so a correction is a new version.
+
+## Clock checks
+
+Views over `store.clock_checks` and `store.uploads`, as the owner (no other
+role may read them). Figures are exact `numeric` seconds; an offset is what to
+add to the collector's clock to get the reference's.
+
+- `store.clock_offsets`: per answered check, the offset
+  ((t2 − t1) + (t3 − t4)) / 2, the delay (t4 − t1) − (t3 − t2) and the error
+  bound delay / 2, with t2 and t3 shown as `timestamptz` too (cut to
+  microseconds) and the reference id decoded.
+- `store.upload_clock_offsets`: per upload, the fallback when NTP does not
+  answer: `received_at − sent_at`, a one-sided bound. The true offset is this
+  less the unknown transit time, so at most this; it is never an NTP-grade
+  offset.
+- `store.clock_check_references`: each reference id decoded: a kiss code
+  (`RATE`, `DENY`) or a stratum 1 source (`GPS`) as text, any other stratum's
+  as a dotted quad.
+- `store.ungrounded_readings`: readings with no answered check by their
+  collector within 48 hours before or after them, by the collector's clock,
+  with the nearest answered checks either side. Nothing is refused for it, and
+  readings carry no such column.
 
 ## The device registry
 
@@ -150,9 +179,16 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
 - `health.meter_firmware`: per serial, the latest names it reported, when
   they were first read and arrived (a resend after a restart does not move
   that), the latest earlier record whose names differ, and whether there is one.
+- `health.collector_clocks`: per collector, its last clock check (by its own
+  clock) and outcome, the server's time, offset and error bound of its last
+  answered one, the offset bound of its latest upload, and whether it is
+  unchecked: in service, not silent, and no answered check within 48 hours by
+  the server's clock (counted from registration when it has none).
 - `health.problems`: one row per problem, `(kind, subject)` naming it and
   `detail` describing it now. Kinds: `collector_silent` (no upload for
-  `collector_silent_after`), `meter_silent` (no reading for
+  `collector_silent_after`), `clock_unchecked` (unchecked in
+  `health.collector_clocks`; its detail says since when and what the last check
+  was), `meter_silent` (no reading for
   `meter_silent_intervals` × its interval, counted from when it came into
   service if later; not listed when its collector is silent),
   `backlog_near_capacity` (bytes at or above `backlog_near_capacity` of the
@@ -270,10 +306,11 @@ notice says only "look again": read `jobs.request_status`.
   counts readings `received`, `inserted`, `duplicate` and `conflicting`,
   missed reads `received`, `inserted` and `duplicate`, and firmware reads
   `received`, `inserted`, `duplicate` and `conflicting` (a conflicting one is
-  counted, not kept). `jobs`, when the collector has pending requests, lists
-  them oldest first, each with its `request_id`, `kind`, `meters` (serials),
-  `requested_at` and `expires_at`; a request is listed until a reading or
-  missed read for it arrives or it expires, so a collector runs each id once.
+  counted, not kept), and clock checks the same. `jobs`, when the collector has
+  pending requests, lists them oldest first, each with its `request_id`, `kind`,
+  `meters` (serials), `requested_at` and `expires_at`; a request is listed
+  until a reading or missed read for it arrives or it expires, so a collector
+  runs each id once.
   `unknown_requests`, when the batch carried request ids that are not the
   collector's requests, lists them. Both are left out when empty. A batch with
   no readings and no missed reads is a heartbeat: it is stored as an upload,

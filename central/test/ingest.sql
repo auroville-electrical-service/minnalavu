@@ -16,7 +16,8 @@ SELECT pg_temp.is((SELECT answer FROM answers WHERE name = 'first') - 'first_rec
   '{"batch_id": "0b6f8d2e-5c1a-4e7b-9a3d-2f4c6e8a0b1c", "resent": false,
     "readings": {"received": 2, "inserted": 2, "duplicate": 0, "conflicting": 0},
     "missed_reads": {"received": 2, "inserted": 2, "duplicate": 0},
-    "firmware_reads": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0}}'::jsonb,
+    "firmware_reads": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
+    "clock_checks": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0}}'::jsonb,
   'a new batch is stored, and the answer counts what was inserted');
 
 SELECT pg_temp.is(
@@ -67,7 +68,8 @@ SELECT pg_temp.is((SELECT answer FROM answers WHERE name = 'resent') - 'first_re
   '{"batch_id": "0b6f8d2e-5c1a-4e7b-9a3d-2f4c6e8a0b1c", "resent": true,
     "readings": {"received": 2, "inserted": 0, "duplicate": 2, "conflicting": 0},
     "missed_reads": {"received": 2, "inserted": 0, "duplicate": 2},
-    "firmware_reads": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0}}'::jsonb,
+    "firmware_reads": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
+    "clock_checks": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0}}'::jsonb,
   'a resent batch is accepted, and nothing in it is stored twice');
 
 SELECT pg_temp.is(
@@ -205,7 +207,8 @@ SELECT pg_temp.is(
   '{"batch_id": "66666666-6666-4666-8666-666666666666", "resent": false,
     "readings": {"received": 1, "inserted": 1, "duplicate": 0, "conflicting": 0},
     "missed_reads": {"received": 4, "inserted": 4, "duplicate": 0},
-    "firmware_reads": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0}}'::jsonb,
+    "firmware_reads": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
+    "clock_checks": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0}}'::jsonb,
   'missed reads at different addresses are each stored, with or without the serial read');
 
 SELECT pg_temp.is(
@@ -477,6 +480,106 @@ SELECT pg_temp.is(
   'reading_conflicts.value numeric; readings.value numeric',
   'values are stored as numeric, never float');
 
+-- Clock checks: an answer (server times at nanoseconds), a kiss-o'-death from
+-- an IPv6 address, and a timeout stamped at +05:30.
+CREATE TEMP TABLE clocked (batch jsonb);
+INSERT INTO clocked SELECT pg_temp.changed(pg_temp.renamed(:'basic', 'c3c3c3c3-c3c3-4c3c-8c3c-c3c3c3c3c3c3'),
+  '{"path": ["clock_checks"], "value": [
+     {"trigger": "daily", "server": "pool.ntp.org", "outcome": "answered",
+      "t1": "2026-11-01T00:00:04.000123Z", "t2": "2026-11-01T00:00:08.215003051Z",
+      "t3": "2026-11-01T00:00:08.215047312Z", "t4": "2026-11-01T00:00:04.031877Z",
+      "address": "192.0.2.123", "stratum": 2, "leap": 0, "reference_id": 3221226115},
+     {"trigger": "step", "server": "ntp.example.invalid", "outcome": "kiss_of_death",
+      "t1": "2026-11-01T06:00:00.5Z", "t4": "2026-11-01T06:00:00.530112Z",
+      "address": "2001:DB8::7B", "reference_id": 1380013125},
+     {"trigger": "start", "server": "pool.ntp.org", "outcome": "timeout",
+      "t1": "2026-11-02T00:00:04.000123+05:30", "t4": "2026-11-02T00:00:09+05:30"}]}');
+
+SELECT pg_temp.is(
+  pg_temp.ingest_as('collector_sqltest_a', (SELECT batch FROM clocked)) -> 'clock_checks',
+  '{"received": 3, "inserted": 3, "duplicate": 0, "conflicting": 0}',
+  'a batch''s clock checks are stored, and the answer counts them');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s %s %s %s %s %s %s %s %s %s %s %s', collector_id, trigger, server,
+                            outcome, t1, t4, coalesce(t2_unix::text, '-'),
+                            coalesce(t3_unix::text, '-'), coalesce(host(address), '-'),
+                            coalesce(stratum::text, '-'), coalesce(leap::text, '-'),
+                            coalesce(reference_id::text, '-')), '; ' ORDER BY t1)
+   FROM store.clock_checks),
+  'sqltest_a daily pool.ntp.org answered 2026-11-01 00:00:04.000123+00 2026-11-01 00:00:04.031877+00 '
+  || '1793491208.215003051 1793491208.215047312 192.0.2.123 2 0 3221226115; '
+  || 'sqltest_a step ntp.example.invalid kiss_of_death 2026-11-01 06:00:00.5+00 '
+  || '2026-11-01 06:00:00.530112+00 - - 2001:db8::7b - - 1380013125; '
+  || 'sqltest_a start pool.ntp.org timeout 2026-11-01 18:30:04.000123+00 2026-11-01 18:30:09+00 '
+  || '- - - - - -',
+  'clock checks keep the collector''s times to the microsecond, the server''s to the nanosecond '
+  || 'as Unix time, and only the fields their outcome carries');
+
+SELECT pg_temp.is(
+  pg_temp.ingest_as('collector_sqltest_a', (SELECT batch FROM clocked)) -> 'clock_checks',
+  '{"received": 3, "inserted": 0, "duplicate": 3, "conflicting": 0}',
+  'a resent batch''s clock checks are not stored twice');
+
+SELECT pg_temp.is(
+  pg_temp.ingest_as('collector_sqltest_a',
+    pg_temp.renamed((SELECT batch FROM clocked), 'c4c4c4c4-c4c4-4c4c-8c4c-c4c4c4c4c4c4'))
+    -> 'clock_checks',
+  '{"received": 3, "inserted": 0, "duplicate": 3, "conflicting": 0}',
+  'a clock check already stored is not stored again from another batch: the key is its '
+  || 'collector and t1');
+
+SELECT pg_temp.is(
+  pg_temp.ingest_as('collector_sqltest_a',
+    pg_temp.changed(pg_temp.renamed((SELECT batch FROM clocked), 'c5c5c5c5-c5c5-4c5c-8c5c-c5c5c5c5c5c5'),
+      '{"path": ["clock_checks", 0, "t2"], "value": "2026-11-01T00:00:08.215003052Z"}'))
+    -> 'clock_checks',
+  '{"received": 3, "inserted": 0, "duplicate": 2, "conflicting": 1}',
+  'a clock check that differs from the stored one at its t1, by a nanosecond, is conflicting');
+
+SELECT pg_temp.is(
+  (SELECT t2_unix::text FROM store.clock_checks WHERE outcome = 'answered'),
+  '1793491208.215003051',
+  'and the stored clock check is unchanged');
+
+SELECT pg_temp.is(
+  pg_temp.ingest_as('collector_sqltest_b',
+    pg_temp.renamed((SELECT batch FROM clocked), 'c6c6c6c6-c6c6-4c6c-8c6c-c6c6c6c6c6c6'))
+    -> 'clock_checks',
+  '{"received": 3, "inserted": 3, "duplicate": 0, "conflicting": 0}',
+  'the same t1 from another collector is another clock check');
+
+SELECT pg_temp.is(
+  pg_temp.ingest_error('collector_sqltest_a',
+    pg_temp.changed(pg_temp.renamed((SELECT batch FROM clocked), 'c7c7c7c7-c7c7-4c7c-8c7c-c7c7c7c7c7c7'),
+      '{"path": ["clock_checks", 0, "t3"], "value": "2026-11-01T00:00:08.2150473120Z"}')),
+  'PT422: batch rejected: batch.clock_checks[0].t3 must be a date-time to at most nanoseconds',
+  'a clock check with a malformed time is rejected, naming the field');
+
+SELECT pg_temp.is(
+  pg_temp.ingest_error('collector_sqltest_a',
+    pg_temp.changed(pg_temp.renamed((SELECT batch FROM clocked), 'c7c7c7c7-c7c7-4c7c-8c7c-c7c7c7c7c7c7'),
+      '{"path": ["clock_checks", 2, "stratum"], "value": 2}')),
+  'PT422: batch rejected: batch.clock_checks[2] has unknown field(s) stratum',
+  'a timed-out clock check with a server field is rejected');
+
+SELECT pg_temp.is(pg_temp.sqlstate_as('postgres', q), '23514', 'the store refuses: ' || q)
+FROM unnest(ARRAY[
+  $q$INSERT INTO store.clock_checks (collector_id, t1, t4, trigger, server, outcome, stratum, batch_id)
+     SELECT collector_id, t1 + interval '1 day', t4, trigger, server, 'timeout', 2, batch_id
+     FROM store.clock_checks LIMIT 1$q$,
+  $q$INSERT INTO store.clock_checks (collector_id, t1, t4, trigger, server, outcome, batch_id)
+     SELECT collector_id, t1 + interval '1 day', t4, trigger, server, 'answered', batch_id
+     FROM store.clock_checks LIMIT 1$q$,
+  $q$INSERT INTO store.clock_checks (collector_id, t1, t4, trigger, server, outcome, address, reference_id, t2_unix, batch_id)
+     SELECT collector_id, t1 + interval '1 day', t4, trigger, server, 'kiss_of_death', address, 1, 1, batch_id
+     FROM store.clock_checks LIMIT 1$q$,
+  $q$INSERT INTO store.clock_checks
+     SELECT collector_id, t1 + interval '1 day', t4, trigger, server, outcome, t2_unix + 0.0000000001,
+            t3_unix, address, stratum, leap, reference_id, batch_id
+     FROM store.clock_checks WHERE outcome = 'answered' LIMIT 1$q$
+]) q;
+
 SELECT pg_temp.ok(
   pg_temp.ingest_error('collector', :'basic') LIKE 'PT403: %',
   'the collector group role itself is refused with 403');
@@ -498,7 +601,10 @@ FROM unnest(ARRAY[
   'DELETE FROM store.uploads',
   $q$UPDATE store.firmware_reads SET software = 'SIM-SW99'$q$,
   'DELETE FROM store.firmware_reads',
-  'TRUNCATE store.firmware_reads'
+  'TRUNCATE store.firmware_reads',
+  $q$UPDATE store.clock_checks SET server = 'x'$q$,
+  'DELETE FROM store.clock_checks',
+  'TRUNCATE store.clock_checks'
 ]) q;
 
 ROLLBACK;
