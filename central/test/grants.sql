@@ -172,6 +172,10 @@ FROM unnest(ARRAY[
   'SELECT * FROM store.collectors',
   'SELECT * FROM registry.meter_versions',
   'SELECT * FROM registry.endpoint_history',
+  'SELECT * FROM registry.targets',
+  'SELECT * FROM registry.target_versions',
+  'SELECT * FROM registry.target_history',
+  'SELECT * FROM health.targets',
   $q$INSERT INTO store.readings VALUES ('S', 'r', now(), 1, 'p', 'h', 1, 1, 'c', gen_random_uuid(), 'P', 1)$q$,
   $q$UPDATE store.readings SET value = 0$q$,
   $q$DELETE FROM store.readings$q$,
@@ -204,6 +208,10 @@ FROM unnest(ARRAY[
   $q$SELECT admin.load_latency_buckets('{"version": 99, "bounds_ms": [1]}')$q$,
   $q$SELECT admin.create_collector('sqltest_intruder')$q$,
   $q$SELECT admin.retire_meter('SQLREG-0001', now())$q$,
+  $q$SELECT admin.register_target('e', 1, now(), 'elite_440', NULL)$q$,
+  $q$SELECT admin.change_target('e', 1, now(), 'elite_440', NULL)$q$,
+  $q$SELECT admin.retire_target('e', 1, now())$q$,
+  $q$INSERT INTO registry.target_versions (endpoint_id, unit_id, valid_from, in_service, profile) VALUES ('e', 1, now(), true, 'elite_440')$q$,
   $q$SELECT store.check_batch('{}')$q$,
   $q$SELECT store.reject('x', 'y')$q$
 ]) q;
@@ -227,9 +235,9 @@ SELECT pg_temp.is(
   (SELECT string_agg(c.relname::text, ', ' ORDER BY c.relname)
    FROM pg_class c WHERE c.relnamespace = 'health'::regnamespace AND c.relkind = 'v'),
   'collector_clocks, collectors, endpoint_latency, endpoints, energy_drops, meter_firmware, meters, '
-  || 'misplaced_serials, place_serials, problems, thresholds, unregistered_serial_places, '
+  || 'misplaced_serials, place_serials, problems, targets, thresholds, unregistered_serial_places, '
   || 'unregistered_serials',
-  'health holds the thirteen health views');
+  'health holds the fourteen health views');
 
 SELECT pg_temp.is(
   (SELECT count(*) FROM pg_class c
@@ -320,6 +328,7 @@ FROM unnest(ARRAY[
   'SELECT * FROM health.energy_drops',
   'SELECT * FROM health.endpoints',
   'SELECT * FROM health.endpoint_latency',
+  'SELECT * FROM health.targets',
   'SELECT * FROM health.thresholds'
 ]) q;
 
@@ -341,10 +350,15 @@ FROM unnest(ARRAY[
   $q$SELECT admin.load_latency_buckets('{"version": 99, "bounds_ms": [1]}')$q$,
   'SELECT * FROM registry.meter_versions',
   'SELECT * FROM registry.meter_history',
+  'SELECT * FROM registry.targets',
+  'SELECT * FROM registry.target_versions',
+  'SELECT * FROM registry.target_history',
   'SELECT * FROM registry.health_thresholds',
   $q$SELECT api.ingest('{}')$q$,
   $q$SELECT admin.set_health_thresholds('1 hour', 4, 0.8, '1 day', 0.05)$q$,
   $q$SELECT admin.retire_meter('SQLREG-0001', now())$q$,
+  $q$SELECT admin.register_target('e', 1, now(), 'elite_440', NULL)$q$,
+  $q$SELECT admin.retire_target('e', 1, now())$q$,
   $q$INSERT INTO registry.health_thresholds (collector_silent_after, meter_silent_intervals, backlog_near_capacity, lookback, endpoint_error_rate) VALUES ('1 hour', 4, 0.8, '1 day', 0.05)$q$,
   'SELECT * FROM store.profile_versions',
   'SELECT * FROM store.profile_registers',
@@ -491,7 +505,9 @@ FROM unnest(ARRAY[
   'SELECT * FROM store.readings',
   'SELECT * FROM store.batches',
   'SELECT * FROM registry.meter_history',
+  'SELECT * FROM registry.target_history',
   'SELECT * FROM health.problems',
+  'SELECT * FROM health.targets',
   'SELECT * FROM health.collector_clocks',
   'SELECT * FROM health.energy_drops',
   'SELECT * FROM health.endpoints',
@@ -509,7 +525,8 @@ FROM unnest(ARRAY[
   $q$SELECT admin.load_profile('{"profile": "elite_440", "version": 99, "registers": []}')$q$,
   $q$SELECT api.ingest('{}')$q$,
   $q$SELECT admin.create_collector('sqltest_intruder')$q$,
-  $q$SELECT admin.register_meter('S', now(), 'e', 1, 'elite_440', NULL)$q$,
+  $q$SELECT admin.register_meter('S', now(), 'e', 1)$q$,
+  $q$SELECT admin.register_target('e', 1, now(), 'elite_440', NULL)$q$,
   'CREATE TABLE jobs.x (i int)',
   'CREATE TEMP TABLE x (i int)'
 ]) q;

@@ -210,7 +210,8 @@ defmodule Alavi.EndToEndTest do
     serial = String.upcase(id)
     :ok = Simulator.identify(sim, 3, :serial, serial)
 
-    # The registry knows the meter by the serial it reports; the polling config expects none.
+    # The registry knows the unit as a target and the meter there by the serial it reports;
+    # the polling config expects none.
     sql!("""
     SELECT to_json(admin.register_endpoint(
       endpoint_id => '#{id}_ep', valid_from => '2026-01-01Z', collector_id => '#{id}',
@@ -220,8 +221,13 @@ defmodule Alavi.EndToEndTest do
     """)
 
     sql!("""
+    SELECT to_json(admin.register_target(endpoint_id => '#{id}_ep', unit_id => 3,
+      valid_from => '2026-01-01Z', profile => 'elite_500', interval_ms => NULL))
+    """)
+
+    sql!("""
     SELECT to_json(admin.register_meter(serial => '#{serial}', valid_from => '2026-01-01Z',
-      endpoint_id => '#{id}_ep', unit_id => 3, profile => 'elite_500', interval_ms => NULL))
+      endpoint_id => '#{id}_ep', unit_id => 3))
     """)
 
     meters = [meter(1, "elite_440"), Map.delete(meter(3, "elite_500"), "serial")]

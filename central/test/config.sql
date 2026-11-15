@@ -12,8 +12,10 @@ BEGIN;
 
 SELECT admin.create_collector('sqltest_cfg');
 
--- Register the config's first endpoint and its first meter, as the polling
--- config would be held here, and undo it; the SQLSTATE, '00000' if it held.
+-- Register the config's first endpoint, its first meter's unit as a target,
+-- and the serial there as a meter placed at it when the config names one, as
+-- the polling config would be held here, and undo it; the SQLSTATE, '00000'
+-- if it held.
 CREATE FUNCTION pg_temp.register(config jsonb) RETURNS text
 LANGUAGE plpgsql AS $$
 DECLARE
@@ -30,10 +32,15 @@ BEGIN
     reconnect_backoff_min_ms => (e #>> '{reconnect_backoff_ms,min}')::integer,
     reconnect_backoff_max_ms => (e #>> '{reconnect_backoff_ms,max}')::integer,
     interval_ms => (e ->> 'interval_ms')::integer);
-  PERFORM admin.register_meter(
-    serial => m ->> 'serial', valid_from => '2026-01-01Z', endpoint_id => 'sqltest_cfg_ep',
-    unit_id => (m ->> 'unit_id')::integer, profile => m ->> 'profile',
+  PERFORM admin.register_target(
+    endpoint_id => 'sqltest_cfg_ep', unit_id => (m ->> 'unit_id')::integer,
+    valid_from => '2026-01-01Z', profile => m ->> 'profile',
     interval_ms => (m ->> 'interval_ms')::integer);
+  IF m ? 'serial' THEN
+    PERFORM admin.register_meter(
+      serial => m ->> 'serial', valid_from => '2026-01-01Z', endpoint_id => 'sqltest_cfg_ep',
+      unit_id => (m ->> 'unit_id')::integer);
+  END IF;
   RAISE SQLSTATE 'TT000';
 EXCEPTION
   WHEN SQLSTATE 'TT000' THEN

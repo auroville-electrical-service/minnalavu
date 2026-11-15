@@ -62,12 +62,21 @@ LANGUAGE sql AS $$
     reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000, interval_ms => 900000)
 $$;
 
+CREATE FUNCTION pg_temp.target(endpoint text, unit integer, ago interval, interval_ms integer)
+RETURNS bigint
+LANGUAGE sql AS $$
+  SELECT admin.register_target(endpoint_id => endpoint, unit_id => unit, valid_from => now() - ago,
+    profile => 'elite_440', interval_ms => interval_ms)
+$$;
+
+-- A meter at a target of its own, registered with it.
 CREATE FUNCTION pg_temp.meter(serial text, endpoint text, unit integer, ago interval,
                               interval_ms integer)
 RETURNS bigint
 LANGUAGE sql AS $$
+  SELECT pg_temp.target(endpoint, unit, ago, interval_ms);
   SELECT admin.register_meter(serial => serial, valid_from => now() - ago, endpoint_id => endpoint,
-    unit_id => unit, profile => 'elite_440', interval_ms => interval_ms)
+    unit_id => unit)
 $$;
 
 SELECT pg_temp.endpoint('sqlh_a_ep', 'sqlh_a', '10.0.0.1', false);
@@ -81,12 +90,30 @@ SELECT pg_temp.meter('SQLH-0002', 'sqlh_a_ep', 2, '2 days', NULL);      -- read 
 SELECT pg_temp.meter('SQLH-0003', 'sqlh_a_ep', 3, '2 days', 86400000);  -- daily, read 2 hours ago
 SELECT pg_temp.meter('SQLH-0004', 'sqlh_a_ep', 4, '2 days', NULL);      -- retired, never read
 SELECT admin.retire_meter('SQLH-0004', now() - interval '1 day');
+SELECT admin.retire_target('sqlh_a_ep', 4, now() - interval '1 day');
 SELECT pg_temp.meter('SQLH-0005', 'sqlh_a_ep', 5, '10 minutes', NULL);  -- new, not read yet
 SELECT pg_temp.meter('SQLH-0008', 'sqlh_a_ep', 8, '2 days', NULL);      -- back in service 30 min ago
 SELECT admin.retire_meter('SQLH-0008', now() - interval '1 day');
-SELECT admin.change_meter('SQLH-0008', now() - interval '30 minutes', 'sqlh_a_ep', 8, 'elite_440', NULL);
+SELECT admin.retire_target('sqlh_a_ep', 8, now() - interval '1 day');
+SELECT admin.change_target('sqlh_a_ep', 8, now() - interval '30 minutes', 'elite_440', NULL);
+SELECT admin.change_meter('SQLH-0008', now() - interval '30 minutes', 'sqlh_a_ep', 8);
 SELECT pg_temp.meter('SQLH-0006', 'sqlh_a_other', 1, '2 days', NULL);   -- polled by the other system
 SELECT pg_temp.meter('SQLH-0007', 'sqlh_b_ep', 1, '2 days', NULL);      -- behind a silent collector
+
+-- Targets judged whatever serial answers, on sqlh_d's endpoint: unit 13 never
+-- read; unit 10 read with an unregistered serial (SQLH-TWIN, below); unit 14
+-- with a missed read only; unit 15 holds a meter never read. sqlh_m_ep moved
+-- from 10.0.0.2 to 10.0.0.3 30 minutes ago: its unit 1 had a missed read at
+-- the old address before the move, its unit 2 only after it.
+SELECT pg_temp.target('sqlh_d_ep', u, '2 days', NULL) FROM unnest(ARRAY[10, 13, 14]) u;
+SELECT pg_temp.meter('SQLT-0001', 'sqlh_d_ep', 15, '2 days', NULL);
+SELECT pg_temp.endpoint('sqlh_m_ep', 'sqlh_d', '10.0.0.2', false);
+SELECT admin.change_endpoint(endpoint_id => 'sqlh_m_ep', valid_from => now() - interval '30 minutes',
+  collector_id => 'sqlh_d', host => '10.0.0.3', port => 502, framing => 'tcp',
+  polled_by_other_system => false, timeout_ms => 1000, max_timeouts => 3, retries => 2,
+  busy_backoff_ms => 500, reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000,
+  interval_ms => 900000);
+SELECT pg_temp.target('sqlh_m_ep', u, '2 days', NULL) FROM unnest(ARRAY[1, 2]) u;
 
 CREATE TEMP TABLE b (collector text PRIMARY KEY, batch uuid);
 INSERT INTO b VALUES
@@ -111,6 +138,13 @@ FROM (VALUES ('SQLH-0002', '10 minutes'::interval, 'timeout'::store.missed_reaso
 -- With no serial read, at an address with no meter registered: no meter's.
 SELECT pg_temp.missed(NULL, (SELECT batch FROM b WHERE collector = 'sqlh_a'), '10 minutes',
                       'timeout', 9);
+
+SELECT pg_temp.missed(NULL, (SELECT batch FROM b WHERE collector = 'sqlh_d'), '10 minutes',
+                      'decode', 14);
+INSERT INTO store.missed_reads
+SELECT NULL, 'active_energy_import', now() - ago, 'decode', NULL, NULL, 3, NULL, 'elite_440',
+       '10.0.0.2', 502, unit, 'sqlh_d', (SELECT batch FROM b WHERE collector = 'sqlh_d'), 1
+FROM (VALUES (1, '40 minutes'::interval), (2, '20 minutes')) v (unit, ago);
 
 -- SQLH-0003 read at unit 7 of its own endpoint; SQLH-0007 read through
 -- sqlh_d at the host and port its endpoint has under sqlh_b; SQLH-0005 read
@@ -141,7 +175,9 @@ SELECT pg_temp.is(
   || 'meter_silent SQLH-0002; '
   || 'misplaced_serial SQLH-0003; misplaced_serial SQLH-0007; '
   || 'serial_at_several_places SQLH-TWIN; several_serials_at_place 10.0.0.1:502 unit 12 via sqlh_a; '
-  || 'several_serials_at_place 10.0.0.1:502 unit 9 via sqlh_a; unregistered_serial SQLH-STRAY; '
+  || 'several_serials_at_place 10.0.0.1:502 unit 9 via sqlh_a; '
+  || 'target_silent sqlh_d_ep unit 13; target_silent sqlh_d_ep unit 15; '
+  || 'target_silent sqlh_m_ep unit 2; unregistered_serial SQLH-STRAY; '
   || 'unregistered_serial SQLH-TWIN; unregistered_serial SQLS-A; unregistered_serial SQLS-B',
   'exactly the problems there are are flagged');
 
@@ -158,6 +194,78 @@ SELECT pg_temp.is(
   || 'SQLH-0006 f, SQLH-0007 t, SQLH-0008 f',
   'a meter is silent after its own interval times the threshold, not when retired, new, '
   || 'just back in service or polled by another system');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s/%s %s', endpoint_id, unit_id, silent), ', '
+                     ORDER BY endpoint_id, unit_id)
+   FROM health.targets WHERE endpoint_id LIKE 'sqlh_%'),
+  'sqlh_a_ep/1 f, sqlh_a_ep/2 f, sqlh_a_ep/3 f, sqlh_a_ep/4 f, sqlh_a_ep/5 f, sqlh_a_ep/8 f, '
+  || 'sqlh_a_other/1 f, sqlh_b_ep/1 t, sqlh_d_ep/10 f, sqlh_d_ep/13 t, sqlh_d_ep/14 f, '
+  || 'sqlh_d_ep/15 t, sqlh_m_ep/1 f, sqlh_m_ep/2 t',
+  'a target is silent with no reading or missed read at its unit, whatever serial, at any '
+  || 'address its endpoint had then, for its interval times the threshold; not when retired, '
+  || 'new, just back in service or polled by another system');
+
+SELECT pg_temp.is(
+  (SELECT format('%s %s %s %s %s %s', profile, coalesce(serial, '-'), expected_interval,
+                 last_reading_at IS NULL, last_missed_read_at = now() - interval '10 minutes',
+                 in_service_since = now() - interval '2 days')
+   FROM health.targets WHERE endpoint_id = 'sqlh_d_ep' AND unit_id = 14),
+  'elite_440 - 00:15:00 t t t',
+  'a target shows its profile, the meter placed there, its interval and its last reading and '
+  || 'missed read');
+
+SELECT pg_temp.is(
+  (SELECT detail FROM health.problems WHERE kind = 'target_silent'
+   AND subject = 'sqlh_d_ep unit 15'),
+  'no reading or missed read since it came into service (expected every 00:15:00), '
+  || 'at 10.0.0.1:502 unit 15 via sqlh_d, profile elite_440, meter SQLT-0001',
+  'a silent target''s problem says since when, how often it is due, where it is and its meter');
+
+SELECT pg_temp.ok(
+  (SELECT silent FROM health.meters WHERE serial = 'SQLT-0001')
+  AND NOT EXISTS (SELECT FROM health.problems WHERE kind = 'meter_silent'
+                  AND subject = 'SQLT-0001'),
+  'a silent meter at a silent target is listed as the target alone');
+
+SELECT pg_temp.is(pg_temp.unkeyed_scans('SELECT * FROM health.targets'), NULL,
+  'health.targets finds the last reading and missed read at each address by index');
+
+-- Each index lookup on readings or missed reads in the plan of q, by table,
+-- and whether the unit id is in its index condition.
+CREATE FUNCTION pg_temp.unit_lookups(q text) RETURNS text
+LANGUAGE plpgsql AS $$
+DECLARE
+  plan jsonb;
+BEGIN
+  SET LOCAL enable_seqscan = off;
+  EXECUTE 'EXPLAIN (FORMAT JSON) ' || q INTO plan;
+  RESET enable_seqscan;
+  RETURN (SELECT string_agg(DISTINCT format('%s %s',
+                                            regexp_replace(n ->> 'Index Name',
+                                                           '^(_hyper_[0-9]+_[0-9]+_chunk_)?(readings|missed_reads)_.*$',
+                                                           '\2'),
+                                            (n ->> 'Index Cond' ~ 'unit_id')::text), ', ')
+          FROM jsonb_path_query(plan, 'lax $.**') n
+          WHERE jsonb_typeof(n) = 'object'
+            AND n ->> 'Index Name' ~ '^(_hyper_[0-9]+_[0-9]+_chunk_)?(readings|missed_reads)_');
+END
+$$;
+
+SELECT pg_temp.is(pg_temp.unit_lookups('SELECT * FROM health.targets'),
+  'missed_reads true, readings true',
+  'health.targets looks readings and missed reads up by their unit''s address, not the endpoint''s');
+
+SAVEPOINT old_address;
+-- A reading at sqlh_m_ep's old address after it moved is not its unit's.
+INSERT INTO store.readings
+SELECT 'SQLS-A', 'active_energy_import', now() - interval '11 minutes', 1.0, 'elite_440',
+       '10.0.0.2', 502, 2, 'sqlh_d', (SELECT batch FROM b WHERE collector = 'sqlh_d'),
+       'ELITE440-445', 1;
+SELECT pg_temp.ok(
+  (SELECT silent FROM health.targets WHERE endpoint_id = 'sqlh_m_ep' AND unit_id = 2),
+  'a reading at an address the endpoint no longer had does not count for its target');
+ROLLBACK TO SAVEPOINT old_address;
 
 SELECT pg_temp.is(
   (SELECT format('%s %s %s %s', last_reading_at = now() - interval '2 hours', missed_reads,
@@ -189,8 +297,8 @@ SELECT pg_temp.is(
          now() - interval '5 hours'),
   'a misplaced serial''s problem says where it was read and where it is registered');
 
-SELECT admin.change_meter('SQLH-0003', now() - interval '5 hours', 'sqlh_a_ep', 7, 'elite_440',
-                          86400000);
+SELECT pg_temp.target('sqlh_a_ep', 7, '5 hours', 86400000);
+SELECT admin.change_meter('SQLH-0003', now() - interval '5 hours', 'sqlh_a_ep', 7);
 
 SELECT pg_temp.is(
   (SELECT string_agg(serial, ', ' ORDER BY serial) FROM health.misplaced_serials),
@@ -349,9 +457,13 @@ SELECT admin.set_health_thresholds(collector_silent_after => '3 hours',
 SELECT pg_temp.is(
   (SELECT string_agg(format('%s %s', kind, subject), '; ' ORDER BY kind, subject)
    FROM health.problems WHERE kind IN ('collector_silent', 'meter_silent', 'backlog_near_capacity',
-                                       'unregistered_serial', 'serial_at_several_places')),
-  'meter_silent SQLH-0007; serial_at_several_places SQLH-STRAY; '
-  || 'serial_at_several_places SQLH-TWIN; unregistered_serial SQLH-OLD-STRAY; '
+                                       'unregistered_serial', 'serial_at_several_places',
+                                       'target_silent')),
+  'serial_at_several_places SQLH-STRAY; '
+  || 'serial_at_several_places SQLH-TWIN; '
+  || 'target_silent sqlh_b_ep unit 1; target_silent sqlh_d_ep unit 13; '
+  || 'target_silent sqlh_d_ep unit 15; target_silent sqlh_m_ep unit 2; '
+  || 'unregistered_serial SQLH-OLD-STRAY; '
   || 'unregistered_serial SQLH-STRAY; unregistered_serial SQLH-TWIN; '
   || 'unregistered_serial SQLS-A; unregistered_serial SQLS-B',
   'the latest thresholds set are the ones judged by');

@@ -51,7 +51,7 @@
     {
       "name": "a meter without a serial",
       "changes": [{ "path": ["endpoints", 0, "meters", 0, "serial"], "delete": true }],
-      "by": ["schema", "parser"]
+      "by": ["schema", "parser", "registry"]
     },
     {
       "name": "a serial with a space inside",

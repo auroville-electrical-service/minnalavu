@@ -135,32 +135,39 @@ add to the collector's clock to get the reference's.
 
 ## The device registry
 
-Which endpoints and meters exist, where each sits and how it is polled, from
-when, in the shape of the collector's polling config
+Which endpoints, polling targets and meters exist, where each sits and how it
+is polled, from when, in the shape of the collector's polling config
 (`contract/config/config.v1.schema.json`), so that config can later be served
 from here. `test/config.sql` holds the registry's checks to that schema and to
 `contract/fixtures/config.v1.cases.json`: the same ranges, framings, host,
 profile name and serial rules.
 Collectors are `store.collectors`.
 
-- `registry.endpoints` and `registry.meters` hold identities only: an endpoint
-  by an operator-chosen id (so it survives a new address or a move to another
-  collector), a meter by its serial (as readings carry it).
-- `registry.endpoint_versions` and `registry.meter_versions` hold their state.
+- `registry.endpoints`, `registry.targets` and `registry.meters` hold
+  identities only: an endpoint by an operator-chosen id (so it survives a new
+  address or a move to another collector), a target by its endpoint and unit
+  id (a place to poll, whatever meter answers there, so a unit is polled
+  before its serial is known), a meter by its serial (as readings carry it).
+- `registry.endpoint_versions`, `registry.target_versions` and
+  `registry.meter_versions` hold their state: a target's profile and interval
+  (NULL: its endpoint's), and the target a meter is placed at; each value
+  stored once.
   Each row is the whole state from `valid_from` until the next row's: a move,
   a new interval, a retirement or a swap adds a row. Nothing in `registry` is
   ever updated or deleted (triggers refuse it, even for the owner). A mistake
   is corrected by a row with the same `valid_from`; the one recorded last
   holds, and the mistaken row is kept.
-- `registry.endpoint_history` and `registry.meter_history` give the state that
+- `registry.endpoint_history`, `registry.target_history` and
+  `registry.meter_history` give the state that
   holds over each period `[valid_from, valid_to)`; `valid_to` is NULL while
   open.
 - `registry.meter_swaps`: a meter replaced by another in the same place.
 
 After every change, the whole history is checked, so a back-dated change is
 judged against what came after it too: an endpoint's host and port appear once
-per collector, a unit id once per endpoint, and a meter is in service only
-while its endpoint is. A change that breaks one is refused (SQLSTATE 23P01).
+per collector, one meter in service at a target at a time, a target in
+service only while its endpoint is, and a meter only while its target is. A
+change that breaks one is refused (SQLSTATE 23P01).
 
 Admin functions, as the owner, with named arguments; each takes the time it
 holds from, which may be in the past:
@@ -170,15 +177,20 @@ holds from, which may be in the past:
       polled_by_other_system => false, timeout_ms => 1000, max_timeouts => 3, retries => 2,
       busy_backoff_ms => 500, reconnect_backoff_min_ms => 1000,
       reconnect_backoff_max_ms => 60000, interval_ms => 900000);
+    SELECT admin.register_target(endpoint_id => 'site_a_chain_1', unit_id => 1,
+      valid_from => '…', profile => 'elite_440', interval_ms => NULL);   -- NULL: the endpoint's
     SELECT admin.register_meter(serial => '…', valid_from => '…', endpoint_id => 'site_a_chain_1',
-      unit_id => 1, profile => 'elite_440', interval_ms => NULL);   -- NULL: the endpoint's
+      unit_id => 1);
 
-- `admin.change_endpoint(…)`, `admin.change_meter(…)`: the same arguments as
-  register; the whole new state (readdress, move, retime, correct).
-- `admin.retire_endpoint(endpoint_id, valid_from)` (its meters must be moved or
-  retired first), `admin.retire_meter(serial, valid_from)`.
-- `admin.swap_meter(old_serial, new_serial, swapped_at, profile)`: the old
-  meter retires and the new one takes its endpoint, unit id and interval.
+- `admin.change_endpoint(…)`, `admin.change_target(…)`, `admin.change_meter(…)`:
+  the same arguments as register; the whole new state (readdress, move,
+  reprofile, retime, correct).
+- `admin.retire_endpoint(endpoint_id, valid_from)` (its targets must be
+  retired first), `admin.retire_target(endpoint_id, unit_id, valid_from)` (its
+  meter must be moved or retired first), `admin.retire_meter(serial, valid_from)`.
+- `admin.swap_meter(old_serial, new_serial, swapped_at)`: the old meter
+  retires and the new one takes its target; a new meter of another model is
+  `admin.change_target` from the same time.
 
 Hierarchy edges and meter-to-account assignments are not kept here. They
 belong to `minkanakku`, which maps meters to accounts and refers to meters by
@@ -193,12 +205,19 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
   latest upload (events, bytes, batches, oldest, capacity, share used,
   refused, discarded files, quarantined), and missed reads within the lookback,
   by reason. A collector is judged only while it has an endpoint in service.
-- `health.meters`: per registered meter, where it is, its expected interval,
+- `health.meters`: per registered meter, where it is, its target's profile and
+  expected interval,
   last reading, missed reads within the lookback by reason, and whether it is
   silent. A meter is expected to be read while it and its endpoint are in
   service and no other system polls the endpoint. A missed read counts for
   the meter whose serial it carries or, with none, for the meter registered at
   its address now.
+- `health.targets`: per registered target, as registered now: its profile,
+  the meter placed there now (if any), its expected interval, the last
+  reading and the last missed read at its unit whatever serial they carry, at
+  each address its endpoint had while in service, and whether it is silent.
+  A target is expected to be read while it and its endpoint are in service
+  and no other system polls the endpoint.
 - `health.endpoints`: per registered endpoint, as registered now, the reads
   due at it within the lookback (one per register: a reading or a missed
   read), counted at each address it had while in service and by its
@@ -243,7 +262,11 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
   `health.collector_clocks`; its detail says since when and what the last check
   was), `meter_silent` (no reading for
   `meter_silent_intervals` × its interval, counted from when it came into
-  service if later; not listed when its collector is silent),
+  service if later; not listed when its collector or its target is silent),
+  `target_silent` (neither a reading nor a missed read at the unit for
+  `meter_silent_intervals` × its interval, counted from when it came into
+  service if later; not listed when its collector is silent; its subject is
+  `<endpoint> unit <n>`, its detail the address, profile and meter placed),
   `endpoint_errors` (erroring in `health.endpoints`; its detail gives the
   failed and due reads, the rate, the missed reads by reason and the
   address), `backlog_near_capacity` (bytes at or above

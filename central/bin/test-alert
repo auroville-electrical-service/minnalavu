@@ -45,8 +45,14 @@ SELECT admin.register_endpoint(endpoint_id => 'alert_test_ep', valid_from => now
   polled_by_other_system => false, timeout_ms => 1000, max_timeouts => 3, retries => 2,
   busy_backoff_ms => 500, reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000,
   interval_ms => 900000);
-SELECT admin.register_meter(serial => 'ALERT-0001', valid_from => now() - interval '2 days',
-  endpoint_id => 'alert_test_ep', unit_id => 1, profile => 'elite_440', interval_ms => NULL);
+CREATE FUNCTION public.alert_test_meter(serial text, unit integer, since timestamptz) RETURNS bigint
+LANGUAGE sql AS $$
+  SELECT admin.register_target(endpoint_id => 'alert_test_ep', unit_id => unit,
+    valid_from => since, profile => 'elite_440', interval_ms => NULL);
+  SELECT admin.register_meter(serial => serial, valid_from => since,
+    endpoint_id => 'alert_test_ep', unit_id => unit)
+$$;
+SELECT alert_test_meter('ALERT-0001', 1, now() - interval '2 days');
 CREATE FUNCTION public.alert_test_reading(serial text, unit integer) RETURNS void
 LANGUAGE plpgsql AS $$
 DECLARE
@@ -99,11 +105,11 @@ alert() {
 is 'a clean state: the run succeeds' "$(alert --apply)" 0
 is 'a clean state sends no mail' "$(mails)" 0
 
-sql -c "SELECT admin.register_meter(serial => 'ALERT-0002', valid_from => now() - interval '1 day',
-  endpoint_id => 'alert_test_ep', unit_id => 2, profile => 'elite_440', interval_ms => NULL)"
+sql -c "SELECT alert_test_meter('ALERT-0002', 2, now() - interval '1 day')"
 
 is 'a dry run succeeds' "$(alert)" 0
-is 'a dry run prints the mail' "$(grep -c '^  meter_silent ALERT-0002: no reading since' "$tmp/out")" 1
+is 'a dry run prints the mail' \
+  "$(grep -c '^  target_silent alert_test_ep unit 2: no reading or missed read since' "$tmp/out")" 1
 is 'a dry run sends nothing' "$(mails)" 0
 is 'a dry run keeps no state' "$([[ -e $ALERT_STATE_FILE ]] && echo kept || echo none)" none
 
@@ -124,8 +130,7 @@ is 'a second problem sends one more mail' "$(mails)" 2
 is 'listing both' "$(subject)" 'minnalavu health: 2 open, 1 new, 0 cleared'
 
 sql -c "SELECT alert_test_reading('ALERT-0002', 2)"
-sql -c "SELECT admin.register_meter(serial => 'ALERT-STRAY', valid_from => now() - interval '1 day',
-  endpoint_id => 'alert_test_ep', unit_id => 3, profile => 'elite_440', interval_ms => NULL)"
+sql -c "SELECT alert_test_meter('ALERT-STRAY', 3, now() - interval '1 day')"
 alert --apply >/dev/null
 is 'recovery sends one mail' "$(mails)" 3
 is 'saying what cleared' "$(subject)" 'minnalavu health: 0 open, 0 new, 2 cleared'

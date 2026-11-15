@@ -131,8 +131,9 @@ SELECT pg_temp.is(
 SELECT pg_temp.is(pg_temp.unkeyed_scans('SELECT * FROM health.endpoints'), NULL,
   'the view reads readings and missed reads only by index lookups, never by a scan');
 
--- Each index lookup in the plan of q on an index over the endpoint's address,
--- by index name, and whether read_at is bounded in its index condition.
+-- Each index lookup in the plan of q on an index over the endpoint's address
+-- (the address and time, or the address, unit and time), by table, and
+-- whether read_at is bounded in its index condition.
 CREATE FUNCTION pg_temp.address_lookups(q text) RETURNS text
 LANGUAGE plpgsql AS $$
 DECLARE
@@ -141,16 +142,18 @@ BEGIN
   SET LOCAL enable_seqscan = off;
   EXECUTE 'EXPLAIN (FORMAT JSON) ' || q INTO plan;
   RESET enable_seqscan;
-  RETURN (SELECT string_agg(DISTINCT format('%s %s', regexp_replace(n ->> 'Index Name',
-                                                                     '^_hyper_[0-9]+_[0-9]+_chunk_', ''),
+  RETURN (SELECT string_agg(DISTINCT format('%s %s',
+                                            regexp_replace(n ->> 'Index Name',
+                                                           '^(_hyper_[0-9]+_[0-9]+_chunk_)?(.*)_(address|place)_time$',
+                                                           '\2'),
                                             (n ->> 'Index Cond' ~ 'read_at')::text), ', ')
           FROM jsonb_path_query(plan, 'lax $.**') n
-          WHERE jsonb_typeof(n) = 'object' AND n ->> 'Index Name' ~ '_address_time$');
+          WHERE jsonb_typeof(n) = 'object' AND n ->> 'Index Name' ~ '_(address|place)_time$');
 END
 $$;
 
 SELECT pg_temp.is(pg_temp.address_lookups('SELECT * FROM health.endpoints'),
-  'missed_reads_address_time true, readings_address_time true',
+  'missed_reads true, readings true',
   'readings and missed reads are looked up by address and time, read_at bounded in the index');
 
 SELECT admin.set_health_thresholds(collector_silent_after => '1 hour',

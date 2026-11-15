@@ -23,8 +23,10 @@ $$;
 CREATE FUNCTION pg_temp.meter(serial text, valid_from timestamptz, endpoint text, unit integer)
 RETURNS bigint
 LANGUAGE sql AS $$
+  SELECT admin.register_target(endpoint_id => endpoint, unit_id => unit, valid_from => valid_from,
+    profile => 'elite_440', interval_ms => NULL);
   SELECT admin.register_meter(serial => serial, valid_from => valid_from,
-    endpoint_id => endpoint, unit_id => unit, profile => 'elite_440', interval_ms => NULL)
+    endpoint_id => endpoint, unit_id => unit)
 $$;
 
 -- Call jobs.request_job as role, as minkanakku does.
@@ -134,8 +136,10 @@ SELECT pg_temp.meter('SQLREQ-A4', now() + interval '1 day', 'sqltest_req_ep_a', 
 SELECT pg_temp.meter('SQLREQ-B1', '2026-01-01Z', 'sqltest_req_ep_b', 1);
 SELECT pg_temp.meter('SQLREQ-O1', '2026-01-01Z', 'sqltest_req_ep_o', 1);
 SELECT pg_temp.meter('SQLREQ-M1', '2026-01-01Z', 'sqltest_req_ep_b', 2);
+SELECT admin.register_target(endpoint_id => 'sqltest_req_ep_a', unit_id => 5,
+  valid_from => '2026-03-01Z', profile => 'elite_440', interval_ms => NULL);
 SELECT admin.change_meter(serial => 'SQLREQ-M1', valid_from => '2026-03-01Z',
-  endpoint_id => 'sqltest_req_ep_a', unit_id => 5, profile => 'elite_440', interval_ms => NULL);
+  endpoint_id => 'sqltest_req_ep_a', unit_id => 5);
 
 CREATE TEMP TABLE ids (name text PRIMARY KEY, id uuid);
 CREATE TEMP TABLE snapshots (name text PRIMARY KEY, counts jsonb);
@@ -457,9 +461,10 @@ SELECT sqltest_dblink.dblink_exec('writer', $w$
       polled_by_other_system => false, timeout_ms => 1000, max_timeouts => 3, retries => 2,
       busy_backoff_ms => 500, reconnect_backoff_min_ms => 1000,
       reconnect_backoff_max_ms => 60000, interval_ms => 900000);
+    PERFORM admin.register_target(endpoint_id => 'sqltest_notify_ep', unit_id => 1,
+      valid_from => '2026-01-01Z', profile => 'elite_440', interval_ms => NULL);
     PERFORM admin.register_meter(serial => 'SQLNOTIFY-1', valid_from => '2026-01-01Z',
-      endpoint_id => 'sqltest_notify_ep', unit_id => 1, profile => 'elite_440',
-      interval_ms => NULL);
+      endpoint_id => 'sqltest_notify_ep', unit_id => 1);
   END
   $d$
 $w$);
