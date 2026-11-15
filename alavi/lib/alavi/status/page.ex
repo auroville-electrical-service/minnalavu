@@ -91,6 +91,8 @@ defmodule Alavi.Status.Page do
         {"Clock source", clock_source(s.clock.source)},
         {"Clock last synced", or_none(s.clock.last_sync_at, "never")}
       ]),
+      "<h3>Clock check</h3>",
+      clock_check(s.clock_check),
       "<h3>Uplink</h3>",
       uplink(s.uplink),
       "<h3>Buffer</h3>",
@@ -100,6 +102,24 @@ defmodule Alavi.Status.Page do
 
   defp clock_source("unsynced"), do: bad("unsynced")
   defp clock_source(source), do: text(source)
+
+  defp clock_check(nil), do: ~s|<p class="note">No check yet, or none configured.</p>|
+
+  defp clock_check(c) do
+    pairs([
+      {"Last check", [text(c.at), " (", text(c.trigger), ")"]},
+      {"Server", [text(c.server), address(c.address)]},
+      {"Outcome", check_outcome(c.outcome)},
+      {"Stratum", or_none(c.stratum)},
+      {"Offset (server minus collector, ms; display only)", or_none(c.offset_ms)}
+    ])
+  end
+
+  defp address(nil), do: []
+  defp address(ip), do: [" at ", text(ip)]
+
+  defp check_outcome("answered"), do: ok("answered")
+  defp check_outcome(outcome), do: bad(outcome)
 
   defp uplink(nil), do: ~s|<p class="note">No attempt yet.</p>|
 

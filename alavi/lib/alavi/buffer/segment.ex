@@ -10,7 +10,7 @@ defmodule Alavi.Buffer.Segment do
   require Logger
 
   alias Alavi.Buffer.Codec
-  alias Alavi.{Clock, Sink}
+  alias Alavi.{Clock, ClockCheck, Sink}
 
   @enforce_keys [:seq, :id, :clock, :path, :events, :bytes, :oldest]
   defstruct @enforce_keys
@@ -120,9 +120,12 @@ defmodule Alavi.Buffer.Segment do
   def delete(%__MODULE__{path: path}), do: File.rm(path)
 
   defp count(segment, events) do
-    oldest = events |> Enum.map(& &1.timestamp) |> Enum.min(DateTime, fn -> nil end)
+    oldest = events |> Enum.map(&at/1) |> Enum.min(DateTime, fn -> nil end)
     %{segment | events: segment.events + length(events), oldest: older(segment.oldest, oldest)}
   end
+
+  defp at(%ClockCheck{t1: t1}), do: t1
+  defp at(event), do: event.timestamp
 
   defp older(nil, b), do: b
   defp older(a, b), do: Enum.min([a, b], DateTime)

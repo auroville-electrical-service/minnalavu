@@ -6,7 +6,7 @@ defmodule Alavi.Status do
   Holds the `Alavi.Status.Snapshot` of what the collector is doing, for the
   status page and `status.json`.
 
-  The poller, uplink and clock watch feed it with casts only, so they never
+  The poller, uplink, clock watch and clock check feed it with casts only, so they never
   wait on it, and a cast to it while it is down is dropped. Every `tick_ms` it
   asks the buffer for its backlog (a buffer that does not answer within
   #{@backlog_timeout_ms} ms is shown as not answering), then writes the snapshot to `file`,
@@ -22,7 +22,7 @@ defmodule Alavi.Status do
 
   require Logger
 
-  alias Alavi.{Clock, Config, FirmwareRead, MissedRead, Reading, Settings}
+  alias Alavi.{Clock, ClockCheck, Config, FirmwareRead, MissedRead, Reading, Settings}
   alias Alavi.Poller.Latency
   alias Alavi.Status.Snapshot
 
@@ -110,6 +110,12 @@ defmodule Alavi.Status do
   @spec clock(GenServer.server(), Clock.status()) :: :ok
   def clock(server, status), do: GenServer.cast(server, {:clock, status})
 
+  # contract: test/alavi/status_test.exs "feeds"
+  @doc "The last query of each clock check."
+  @spec clock_check(GenServer.server(), ClockCheck.t()) :: :ok
+  def clock_check(server, %ClockCheck{} = check),
+    do: GenServer.cast(server, {:clock_check, check})
+
   @impl true
   def init(opts) do
     clock = Keyword.fetch!(opts, :clock)
@@ -168,6 +174,9 @@ defmodule Alavi.Status do
 
   def handle_cast({:clock, status}, state),
     do: {:noreply, update(state, &Snapshot.clock(&1, status))}
+
+  def handle_cast({:clock_check, check}, state),
+    do: {:noreply, update(state, &Snapshot.clock_check(&1, check))}
 
   defp update(state, change), do: %{state | snapshot: change.(state.snapshot)}
 

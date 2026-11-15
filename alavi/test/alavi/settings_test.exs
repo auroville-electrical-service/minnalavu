@@ -91,18 +91,39 @@ defmodule Alavi.SettingsTest do
     end
 
     test "a document that is not an object, or of another version, is rejected" do
-      assert {:error, "expected a JSON object with schema_version 2"} = Settings.parse([])
+      assert {:error, "expected a JSON object with schema_version 3"} = Settings.parse([])
 
-      assert {:error, "unsupported settings schema_version 3"} =
-               Settings.parse(%{example() | "schema_version" => 3})
+      assert {:error, "unsupported settings schema_version 4"} =
+               Settings.parse(%{example() | "schema_version" => 4})
     end
 
-    test "a version-1 file is refused with what version 2 added" do
+    test "a file of an earlier version is refused with what each later version added" do
       {_, v1} = pop_in(%{example() | "schema_version" => 1}, ["status"])
       assert {:error, message} = Settings.parse(v1)
       assert message =~ "schema_version 1"
       assert message =~ ~s("status": {"port")
-      assert message =~ "set schema_version to 2"
+      assert message =~ ~s("ntp_servers")
+      assert message =~ "set schema_version to 3"
+
+      {_, v2} = pop_in(%{example() | "schema_version" => 2}, ["clock", "ntp_servers"])
+      assert {:error, message} = Settings.parse(v2)
+      assert message =~ "schema_version 2"
+      refute message =~ ~s("status")
+      assert message =~ ~s("ntp_servers")
+    end
+
+    test "the NTP servers are a list of names or addresses, which may be empty" do
+      assert {:ok, %Settings{clock: %{ntp_servers: ["pool.ntp.org"]}}} = Settings.parse(example())
+
+      for servers <- [[], ["192.0.2.1", "ntp.example", "2001:db8::1"]] do
+        json = put_in(example(), ["clock", "ntp_servers"], servers)
+        assert {:ok, %Settings{clock: %{ntp_servers: ^servers}}} = Settings.parse(json)
+      end
+
+      for bad <- ["pool.ntp.org", [""], ["two words"], [1], [String.duplicate("a", 254)], nil] do
+        json = put_in(example(), ["clock", "ntp_servers"], bad)
+        assert {:error, "clock.ntp_servers must be a list" <> _} = Settings.parse(json)
+      end
     end
 
     test "the status port is a TCP port" do
@@ -121,6 +142,7 @@ defmodule Alavi.SettingsTest do
       shown = Settings.shown(settings)
 
       assert {"status.port", 8502} in shown
+      assert {"clock.ntp_servers", "pool.ntp.org"} in shown
       assert {"buffer.dir", "C:\\alavi\\buffer"} in shown
       refute Enum.any?(shown, fn {key, _value} -> key == "server.token" end)
       refute Enum.any?(shown, fn {_key, value} -> value == settings.server.token end)

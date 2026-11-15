@@ -4,7 +4,7 @@ defmodule Alavi.BufferTest do
 
   import ExUnit.CaptureLog
 
-  alias Alavi.{Buffer, Clock, FirmwareRead, MissedRead, Reading}
+  alias Alavi.{Buffer, Clock, ClockCheckFixture, FirmwareRead, MissedRead, Reading}
   alias Alavi.Buffer.Batch
 
   @moduletag :tmp_dir
@@ -476,6 +476,19 @@ defmodule Alavi.BufferTest do
       assert {:ok, %Batch{events: events}} = Buffer.take(buffer)
       assert List.last(events) == names
       assert Enum.drop(events, -1) == meter(1)
+    end
+
+    test "clock checks of every outcome are kept, across a restart", %{tmp_dir: dir} do
+      checks =
+        [ClockCheckFixture.answered(), ClockCheckFixture.kiss_of_death()] ++
+          Enum.map([:timeout, :unreachable, :invalid], &ClockCheckFixture.failed/1)
+
+      buffer = start!(dir)
+      :ok = Buffer.record(buffer, checks)
+      buffer = restart!(dir)
+
+      assert {:ok, %Batch{events: ^checks}} = Buffer.take(buffer)
+      assert Buffer.backlog(buffer).oldest == ~U[2026-11-01 00:00:04.000123Z]
     end
   end
 

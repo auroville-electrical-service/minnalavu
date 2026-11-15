@@ -4,7 +4,7 @@ defmodule Alavi.StatusTest do
   import Alavi.PollerCase
   import ExUnit.CaptureLog
 
-  alias Alavi.{Buffer, Clock, FirmwareRead, MissedRead, Reading, Status}
+  alias Alavi.{Buffer, Clock, ClockCheckFixture, FirmwareRead, MissedRead, Reading, Status}
   alias Alavi.Status.Snapshot
 
   @moduletag :tmp_dir
@@ -314,6 +314,39 @@ defmodule Alavi.StatusTest do
     end
   end
 
+  describe "Snapshot.clock_check/2" do
+    test "none until a check; then its query, and the offset an answer implies" do
+      assert snapshot().clock_check == nil
+
+      # ((t2 - t1) + (t3 - t4)) / 2 = (4214.880051 + 4183.170312) / 2 s, toward zero.
+      assert Snapshot.clock_check(snapshot(), ClockCheckFixture.answered()).clock_check == %{
+               at: "2026-11-01T00:00:04.000123Z",
+               trigger: "daily",
+               server: "pool.ntp.org",
+               outcome: "answered",
+               address: "192.0.2.123",
+               stratum: 2,
+               offset_ms: 4199
+             }
+    end
+
+    test "a failed check shows no offset; a kiss-o'-death its address" do
+      timeout = Snapshot.clock_check(snapshot(), ClockCheckFixture.failed(:timeout)).clock_check
+      assert %{outcome: "timeout", address: nil, stratum: nil, offset_ms: nil} = timeout
+
+      kiss = Snapshot.clock_check(snapshot(), ClockCheckFixture.kiss_of_death()).clock_check
+      assert %{outcome: "kiss_of_death", address: "2001:db8::7b", offset_ms: nil} = kiss
+    end
+
+    test "the offset rounds toward zero, negative too" do
+      %{outcome: {:answered, a}} = check = ClockCheckFixture.answered()
+      t1 = DateTime.to_unix(check.t1, :nanosecond)
+      t4 = DateTime.to_unix(check.t4, :nanosecond)
+      behind = %{check | outcome: {:answered, %{a | t2: t1 - 1_999_999, t3: t4 - 1_999_999}}}
+      assert Snapshot.clock_check(snapshot(), behind).clock_check.offset_ms == -1
+    end
+  end
+
   describe "Snapshot.backlog/3" do
     test "the buffer's backlog as on the wire, or nil when the buffer did not answer" do
       backlog = %{
@@ -442,6 +475,7 @@ defmodule Alavi.StatusTest do
       Status.raw_lines(status, ["alavi poller 127.0.0.1:5020 unit 1: reply rejected"])
       Status.uplink(status, {:stored, "b-1"}, 0)
       Status.clock(status, %{source: :rtc, last_sync_at: nil})
+      Status.clock_check(status, ClockCheckFixture.failed(:timeout))
       Status.latency(status, %{host: "127.0.0.1", port: 5020}, %{3 => @summary})
       Status.selectors(status, %{host: "127.0.0.1", port: 5020}, {:owed, "found at start", 0})
       snapshot = Status.read(status)
@@ -450,6 +484,7 @@ defmodule Alavi.StatusTest do
       assert [%{line: "alavi poller " <> _}] = snapshot.raw_lines
       assert %{result: "stored", batch_id: "b-1"} = snapshot.uplink
       assert snapshot.clock.source == "rtc"
+      assert snapshot.clock_check.outcome == "timeout"
       assert meter_view(snapshot, 3).latency.p99 == 80
       assert hd(snapshot.endpoints).selectors.state == "owed"
     end

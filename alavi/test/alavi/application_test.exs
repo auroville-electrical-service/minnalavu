@@ -16,7 +16,7 @@ defmodule Alavi.ApplicationTest do
     log = dir |> Path.join("log") |> tap(&File.mkdir_p!/1)
 
     json = %{
-      "schema_version" => 2,
+      "schema_version" => 3,
       "polling_config" => polling,
       "profiles_dir" => Simulator.Profile.dir(),
       "buffer" => %{
@@ -32,7 +32,7 @@ defmodule Alavi.ApplicationTest do
       },
       "log" => %{"dir" => log, "max_file_bytes" => 1_000_000, "max_files" => 2},
       "raw_bytes_log" => %{"max_frame_bytes" => 64, "max_lines" => 10, "window_ms" => 60_000},
-      "clock" => %{"refresh_ms" => 300_000},
+      "clock" => %{"refresh_ms" => 300_000, "ntp_servers" => []},
       "status" => %{"port" => status_port}
     }
 

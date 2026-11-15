@@ -2,7 +2,7 @@ defmodule Alavi.WireTest do
   use ExUnit.Case, async: true
 
   alias Alavi.Buffer.Batch
-  alias Alavi.{Clock, FirmwareRead, MissedRead, Reading, Wire}
+  alias Alavi.{Clock, ClockCheck, ClockCheckFixture, FirmwareRead, MissedRead, Reading, Wire}
 
   doctest Alavi.Clock
   doctest Alavi.Wire
@@ -79,10 +79,19 @@ defmodule Alavi.WireTest do
                wire["firmware_reads"]
     end
 
-    test "a batch with no firmware reads has no firmware_reads" do
+    test "a batch with no firmware reads or clock checks has neither field" do
       wire = wire([reading()])
       assert valid?(wire)
       refute Map.has_key?(wire, "firmware_reads")
+      refute Map.has_key?(wire, "clock_checks")
+    end
+
+    test "clock checks of every outcome go in clock_checks, valid in the schema" do
+      checks = clock_checks()
+      wire = wire([reading() | checks])
+      assert valid?(wire)
+      assert wire["clock_checks"] == Enum.map(checks, &ClockCheck.to_wire/1)
+      assert [%{"value" => "1234.500"}] = wire["readings"]
     end
 
     test "a heartbeat, a batch with no events, still carries the clock and backlog" do
@@ -102,6 +111,52 @@ defmodule Alavi.WireTest do
       assert [%{"request_id" => ^id}] = wire["readings"]
       assert [%{"request_id" => ^id}] = wire["missed_reads"]
       refute Map.has_key?(hd(wire["firmware_reads"]), "request_id")
+    end
+  end
+
+  defp clock_checks do
+    [ClockCheckFixture.answered(), ClockCheckFixture.kiss_of_death()] ++
+      Enum.map([:timeout, :unreachable, :invalid], &ClockCheckFixture.failed/1)
+  end
+
+  describe "ClockCheck.to_wire/1" do
+    test "an answer: the four times as measured, server times at nanoseconds, and its fields" do
+      assert ClockCheck.to_wire(ClockCheckFixture.answered()) == %{
+               "trigger" => "daily",
+               "server" => "pool.ntp.org",
+               "outcome" => "answered",
+               "t1" => "2026-11-01T00:00:04.000123Z",
+               "t2" => "2026-11-01T00:00:08.215003051Z",
+               "t3" => "2026-11-01T00:00:08.215047312Z",
+               "t4" => "2026-11-01T00:00:04.031877Z",
+               "address" => "192.0.2.123",
+               "stratum" => 2,
+               "leap" => 0,
+               "reference_id" => 3_221_226_115
+             }
+    end
+
+    test "a kiss-o'-death carries only the address and its code; other failures neither" do
+      assert %{
+               "outcome" => "kiss_of_death",
+               "address" => "2001:db8::7b",
+               "reference_id" => 0x52415445
+             } =
+               kiss = ClockCheck.to_wire(ClockCheckFixture.kiss_of_death())
+
+      refute Enum.any?(["t2", "t3", "stratum", "leap"], &Map.has_key?(kiss, &1))
+
+      for outcome <- [:timeout, :unreachable, :invalid] do
+        wire = ClockCheck.to_wire(ClockCheckFixture.failed(outcome))
+        assert Map.keys(wire) |> Enum.sort() == ~w(outcome server t1 t4 trigger)
+        assert wire["outcome"] == Atom.to_string(outcome)
+      end
+    end
+
+    test "no offset is sent" do
+      for check <- clock_checks(), key <- Map.keys(ClockCheck.to_wire(check)) do
+        refute key =~ "offset"
+      end
     end
   end
 

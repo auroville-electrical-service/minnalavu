@@ -5,7 +5,7 @@ defmodule Alavi.Modbus.ReadOnlyTest do
   `Alavi.Modbus.Selector` (its own tests pin what it can build), only
   `Alavi.Selectors.Session` builds one or has it sent (its tests pin that it
   saves what to put back first), and only the client touches a socket a meter
-  could be on.
+  could be on (the clock check's UDP socket sends only SNTP).
   """
   use ExUnit.Case, async: true
   use ExUnitProperties
@@ -15,9 +15,14 @@ defmodule Alavi.Modbus.ReadOnlyTest do
   @contract Path.expand("../../../../contract", __DIR__)
   @lib Path.expand("../../../lib", __DIR__)
 
-  # The only module that may call a raw socket module. The uplink reaches the
-  # server through :httpc over TLS, which no meter speaks, so :ssl is not here.
-  @socket_owners ["alavi/modbus/client.ex"]
+  # The modules that may call a raw socket module, and which. The uplink
+  # reaches the server through :httpc over TLS, which no meter speaks, so :ssl
+  # is not here. The clock check sends SNTP over UDP only: Modbus here is TCP
+  # or RTU over TCP, never UDP.
+  @socket_owners %{
+    "alavi/modbus/client.ex" => [:gen_tcp, :gen_udp, :gen_sctp, :socket],
+    "alavi/clock/check.ex" => [:gen_udp]
+  }
   @socket_modules [:gen_tcp, :gen_udp, :gen_sctp, :socket]
 
   # The one module allowed to build a write request.
@@ -85,12 +90,12 @@ defmodule Alavi.Modbus.ReadOnlyTest do
       assert Enum.sort(callers) == [{@session, :request}, {@session, :write_selector}]
     end
 
-    test "no module but the client calls a socket module" do
+    test "no module but the client calls a socket module, and the clock check only UDP" do
       offenders =
         for file <- lib_files(),
-            relative(file) not in @socket_owners,
             module <- called_modules(file),
             module in @socket_modules,
+            module not in Map.get(@socket_owners, relative(file), []),
             do: {relative(file), module}
 
       assert offenders == []

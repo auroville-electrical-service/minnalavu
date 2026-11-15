@@ -9,9 +9,10 @@ defmodule Alavi.Buffer.Codec do
   # The header payload is `{id, clock}`; each record payload is the events of
   # one `Alavi.Buffer.record/2` call. Payloads are plain tuples, not structs, so
   # a struct's change does not silently change the format. Only this version is
-  # read: a segment in any other is set aside, not decoded.
+  # read: a segment in any other is set aside, not decoded. An event kind added
+  # within a version is read by this release, not by an older one.
 
-  alias Alavi.{Clock, FirmwareRead, MissedRead, Reading, Sink}
+  alias Alavi.{Clock, ClockCheck, FirmwareRead, MissedRead, Reading, Sink}
 
   @version 5
   @magic <<"ALAVIBUF", @version>>
@@ -102,6 +103,9 @@ defmodule Alavi.Buffer.Codec do
      iso(f.timestamp), f.software, f.firmware_1, f.firmware_2, f.modbus_version}
   end
 
+  defp encode_event(%ClockCheck{} = c),
+    do: {:clock_check, c.trigger, c.server, iso(c.t1), iso(c.t4), c.outcome}
+
   defp decode_event(
          {:reading, host, port, unit_id, serial, product_code, profile, version, key, ts,
           {sign, coef, exp}, request_id}
@@ -155,6 +159,16 @@ defmodule Alavi.Buffer.Codec do
       modbus_version: modbus_version
     }
   end
+
+  # An outcome is atoms, an address tuple and integers (`ClockCheck.outcome/0`), already plain.
+  defp decode_event({:clock_check, trigger, server, t1, t4, outcome}),
+    do: %ClockCheck{
+      trigger: trigger,
+      server: server,
+      t1: datetime(t1),
+      t4: datetime(t4),
+      outcome: outcome
+    }
 
   defp iso(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
 

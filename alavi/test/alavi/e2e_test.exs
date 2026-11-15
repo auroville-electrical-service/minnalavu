@@ -68,6 +68,7 @@ defmodule Alavi.EndToEndTest do
       uplink: uplink,
       raw_log: raw_log(),
       clock_status: :none,
+      clock_check: :none,
       status: no_status()
     ]
 

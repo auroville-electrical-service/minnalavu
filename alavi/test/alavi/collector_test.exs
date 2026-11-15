@@ -6,7 +6,9 @@ defmodule Alavi.CollectorTest do
   alias Alavi.{
     Buffer,
     Clock,
+    ClockCheck,
     Collector,
+    FakeNtp,
     FirmwareRead,
     MissedRead,
     Reading,
@@ -48,10 +50,11 @@ defmodule Alavi.CollectorTest do
       uplink: uplink,
       raw_log: raw_log(),
       clock_status: :none,
+      clock_check: :none,
       status: status
     ]
 
-    {start_supervised!({Collector, opts ++ named}, id: :collector), name}
+    {start_supervised!({Collector, Keyword.merge(opts, named)}, id: :collector), name}
   end
 
   defp await_events!(buffer, n, tries \\ 100) do
@@ -322,6 +325,33 @@ defmodule Alavi.CollectorTest do
     end
   end
 
+  describe "start_link/1, with a clock check" do
+    test "the check records into the buffer beside the readings, sent in the schema's shape",
+         ctx do
+      {_sim, port} = start_sim!(:tcp)
+      endpoints = [endpoint(port, "tcp", [meter(1, "elite_440")])]
+      ntp = FakeNtp.start!(fn request -> {:reply, FakeNtp.reply(request)} end)
+
+      check =
+        ["127.0.0.1"]
+        |> Clock.Check.options()
+        |> Keyword.merge(port: ntp, name: :"check_#{System.unique_integer([:positive])}")
+
+      {_collector, buffer} =
+        start_collector!(ctx.tmp_dir, endpoints, :none, no_status(), fixed_clock(),
+          clock_check: check
+        )
+
+      :ok = await_events!(buffer, 4)
+      {:ok, batch} = Buffer.take(buffer)
+
+      assert [%ClockCheck{trigger: :start, outcome: {:answered, _}}] =
+               Enum.filter(batch.events, &match?(%ClockCheck{}, &1))
+
+      assert valid_batch?(buffer, batch)
+    end
+  end
+
   defp fixed_clock, do: fn -> ~U[2026-11-01 00:00:00Z] end
 
   defp uplink_to(port) do
@@ -437,7 +467,7 @@ defmodule Alavi.CollectorTest do
       File.write!(path, JSON.encode!(config))
 
       json = %{
-        "schema_version" => 2,
+        "schema_version" => 3,
         "polling_config" => path,
         "profiles_dir" => Simulator.Profile.dir(),
         "buffer" => %{
@@ -457,7 +487,7 @@ defmodule Alavi.CollectorTest do
           "max_files" => 2
         },
         "raw_bytes_log" => %{"max_frame_bytes" => 64, "max_lines" => 10, "window_ms" => 60_000},
-        "clock" => %{"refresh_ms" => 300_000},
+        "clock" => %{"refresh_ms" => 300_000, "ntp_servers" => []},
         "status" => %{"port" => 8502}
       }
 
@@ -504,6 +534,18 @@ defmodule Alavi.CollectorTest do
       assert %{query: query, refresh_ms: 300_000, name: Clock.Windows} = watch
       assert query == (&Clock.Windows.w32tm/0)
       refute opts[:buffer][:clock_status] == (&Clock.unsynced/0)
+    end
+
+    test "no NTP servers, no clock check; with some, a check of them in order",
+         %{settings: settings} do
+      assert {:ok, opts} = Collector.load(settings, @linux)
+      assert opts[:clock_check] == :none
+
+      settings = put_in(settings.clock.ntp_servers, ["ntp.example", "192.0.2.1"])
+      assert {:ok, opts} = Collector.load(settings, @linux)
+
+      assert %{servers: ["ntp.example", "192.0.2.1"], port: 123, name: Clock.Check} =
+               Map.new(opts[:clock_check])
     end
 
     test "refuses a plain http server URL", %{settings: settings} do

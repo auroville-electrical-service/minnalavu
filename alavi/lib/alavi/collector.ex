@@ -1,8 +1,9 @@
 defmodule Alavi.Collector do
   @moduledoc """
   The running collector: on Windows the clock's status, then the buffer, then
-  one poller per endpoint writing into it, then the uplink. Each of them casts
-  what it did to `status` (an `Alavi.Status`, started elsewhere).
+  one poller per endpoint writing into it, then the uplink, then the clock
+  check, also writing into the buffer. Each of them casts what it did to
+  `status` (an `Alavi.Status`, started elsewhere).
   """
 
   use Supervisor
@@ -21,7 +22,9 @@ defmodule Alavi.Collector do
   uplink's `idle_ms`. Its intake runs the jobs the server lists only if
   `pollers` is given, for it reaches them by that name. `clock_status` is the
   options of an `Alavi.Clock.Windows` to start first, or `:none`; the buffer's
-  `clock_status` must read it if there is one. `pollers` is the name to
+  `clock_status` must read it if there is one. `clock_check` is the options
+  of an `Alavi.Clock.Check` but `sink` and `status`, or `:none` for no
+  checks (no NTP servers configured). `pollers` is the name to
   register the `Alavi.Pollers` under; without it they are unnamed (tests that
   start several collectors). The pollers keep their selector records
   (`Alavi.Selectors.Store`) in `selectors` under the buffer's `dir`, the
@@ -34,6 +37,7 @@ defmodule Alavi.Collector do
           | {:uplink, [Uplink.option()] | :none}
           | {:raw_log, RawLog.limits()}
           | {:clock_status, [Clock.Windows.option()] | :none}
+          | {:clock_check, [Clock.Check.option()] | :none}
           | {:status, GenServer.server()}
           | {:pollers, atom()}
           | {:name, atom()}
@@ -66,6 +70,7 @@ defmodule Alavi.Collector do
          uplink: uplink,
          raw_log: settings.raw_bytes_log,
          clock_status: watch,
+         clock_check: check(settings.clock.ntp_servers),
          status: Status,
          pollers: Pollers
        ]}
@@ -113,10 +118,19 @@ defmodule Alavi.Collector do
         watch -> [{Clock.Windows, Keyword.put(watch, :status, status)}]
       end
 
-    Supervisor.init(watch ++ [{Buffer, buffer}, {Pollers, pollers}] ++ uplink,
+    check =
+      case Keyword.fetch!(opts, :clock_check) do
+        :none -> []
+        check -> [{Clock.Check, check ++ [sink: sink, status: status]}]
+      end
+
+    Supervisor.init(watch ++ [{Buffer, buffer}, {Pollers, pollers}] ++ uplink ++ check,
       strategy: :rest_for_one
     )
   end
+
+  defp check([]), do: :none
+  defp check(servers), do: Clock.Check.options(servers)
 
   defp heartbeat_ms(%Config{endpoints: endpoints}, idle_ms) do
     endpoints

@@ -16,7 +16,7 @@ defmodule Alavi.Status.Snapshot do
   as read, never a difference between two of them.
   """
 
-  alias Alavi.{Buffer, Clock, Config, FirmwareRead, MissedRead, Reading, Wire}
+  alias Alavi.{Buffer, Clock, ClockCheck, Config, FirmwareRead, MissedRead, Reading, Wire}
   alias Alavi.Config.{Endpoint, Meter}
   alias Alavi.Poller.Latency
   alias Alavi.Profile.Register
@@ -26,6 +26,7 @@ defmodule Alavi.Status.Snapshot do
     :started_at,
     :settings,
     :clock,
+    :clock_check,
     :buffer,
     :uplink,
     :endpoints,
@@ -139,6 +140,22 @@ defmodule Alavi.Status.Snapshot do
           next_attempt_at: time()
         }
 
+  @typedoc """
+  The last query of the last clock check, as on the wire, with the offset it
+  implies (`Alavi.ClockCheck.offset_ms/1`: the server's clock minus the
+  collector's), for display and never sent. `address` and `stratum` are nil
+  where no server's reply named them, `offset_ms` unless it answered.
+  """
+  @type clock_check :: %{
+          at: time(),
+          trigger: String.t(),
+          server: String.t(),
+          outcome: String.t(),
+          address: String.t() | nil,
+          stratum: 1..15 | nil,
+          offset_ms: integer() | nil
+        }
+
   @typedoc "As on the wire's `backlog`, with when it was asked; `nil` if the buffer did not answer."
   @type buffer :: %{as_of: time(), backlog: %{String.t() => term()} | nil}
 
@@ -154,6 +171,7 @@ defmodule Alavi.Status.Snapshot do
           started_at: time(),
           settings: [%{key: String.t(), value: String.t() | integer()}],
           clock: %{source: String.t(), last_sync_at: time() | nil},
+          clock_check: clock_check() | nil,
           buffer: buffer() | nil,
           uplink: uplink() | nil,
           endpoints: [endpoint()],
@@ -169,6 +187,7 @@ defmodule Alavi.Status.Snapshot do
       started_at: iso(now),
       settings: Enum.map(settings, fn {key, value} -> %{key: key, value: value} end),
       clock: clock_view(Clock.unsynced()),
+      clock_check: nil,
       buffer: nil,
       uplink: nil,
       endpoints: Enum.map(endpoints, &endpoint/1),
@@ -291,6 +310,24 @@ defmodule Alavi.Status.Snapshot do
   # contract: test/alavi/status_test.exs "Snapshot.clock/2"
   @spec clock(t(), Clock.status()) :: t()
   def clock(%__MODULE__{} = snapshot, status), do: %{snapshot | clock: clock_view(status)}
+
+  # contract: test/alavi/status_test.exs "Snapshot.clock_check/2"
+  @spec clock_check(t(), ClockCheck.t()) :: t()
+  def clock_check(%__MODULE__{} = snapshot, %ClockCheck{} = check) do
+    wire = ClockCheck.to_wire(check)
+
+    view = %{
+      at: wire["t1"],
+      trigger: wire["trigger"],
+      server: wire["server"],
+      outcome: wire["outcome"],
+      address: wire["address"],
+      stratum: wire["stratum"],
+      offset_ms: ClockCheck.offset_ms(check)
+    }
+
+    %{snapshot | clock_check: view}
+  end
 
   # contract: test/alavi/status_test.exs "Snapshot.backlog/3"
   @spec backlog(t(), Buffer.backlog() | :unavailable, DateTime.t()) :: t()

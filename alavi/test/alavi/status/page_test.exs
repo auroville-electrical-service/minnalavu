@@ -1,8 +1,8 @@
 defmodule Alavi.Status.PageTest do
   use ExUnit.Case, async: true
 
+  alias Alavi.{ClockCheckFixture, StatusFixture}
   alias Alavi.Status.{Page, Snapshot}
-  alias Alavi.StatusFixture
 
   # The summary's budget at 1,500 meters, whatever their state; see `render/2`'s tests.
   @budget 64 * 1024
@@ -75,6 +75,26 @@ defmodule Alavi.Status.PageTest do
 
       assert section(html, "Endpoints and meters") =~ ~s|<td><span class="bad">1</span></td></tr>|
       refute section(html, "Endpoints OK or not polled yet") =~ ~s|href="/endpoint/3"|
+    end
+
+    test "shows the last clock check: its outcome, and an answer's offset" do
+      assert section(summary(5), "Summary") =~ "No check yet"
+
+      answered =
+        5 |> StatusFixture.snapshot() |> Snapshot.clock_check(ClockCheckFixture.answered())
+
+      summary = answered |> Page.render(5) |> section("Summary")
+      assert summary =~ ~s|<span class="ok">answered</span>|
+      assert summary =~ "pool.ntp.org at 192.0.2.123"
+      assert summary =~ "<td>4199</td>"
+
+      failed =
+        5
+        |> StatusFixture.snapshot()
+        |> Snapshot.clock_check(ClockCheckFixture.failed(:timeout))
+        |> Page.render(5)
+
+      assert section(failed, "Summary") =~ ~s|<span class="bad">timeout</span>|
     end
 
     test "says so when nothing is wrong" do

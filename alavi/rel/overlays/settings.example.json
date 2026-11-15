@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "polling_config": "C:\\alavi\\polling.json",
   "profiles_dir": "C:\\alavi\\profiles",
   "buffer": {
@@ -27,7 +27,8 @@
     "window_ms": 60000
   },
   "clock": {
-    "refresh_ms": 300000
+    "refresh_ms": 300000,
+    "ntp_servers": ["pool.ntp.org"]
   },
   "status": {
     "port": 8502

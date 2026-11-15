@@ -3,10 +3,10 @@ defmodule Alavi.Settings do
   A release's settings: one JSON file, `settings.json` in the release root,
   read once at startup by `config/runtime.exs`.
 
-  ## Document, schema version 2
+  ## Document, schema version 3
 
       {
-        "schema_version": 2,
+        "schema_version": 3,
         "polling_config": "C:\\\\alavi\\\\polling.json",
         "profiles_dir": "C:\\\\alavi\\\\profiles",
         "buffer": {"dir": "C:\\\\alavi\\\\buffer", "max_bytes": 2000000000, "max_batch_events": 1000},
@@ -14,7 +14,7 @@ defmodule Alavi.Settings do
         "uplink": {"idle_ms": 60000, "timeout_ms": 30000, "backoff_ms": {"min": 1000, "max": 300000}},
         "log": {"dir": "C:\\\\alavi\\\\log", "max_file_bytes": 10000000, "max_files": 10},
         "raw_bytes_log": {"max_frame_bytes": 64, "max_lines": 10, "window_ms": 60000},
-        "clock": {"refresh_ms": 300000},
+        "clock": {"refresh_ms": 300000, "ntp_servers": ["pool.ntp.org"]},
         "status": {"port": 8502}
       }
 
@@ -30,10 +30,14 @@ defmodule Alavi.Settings do
     replies;
   - `clock.refresh_ms`: on Windows, how often the Windows Time service is
     asked for the clock's status. Required everywhere;
+  - `clock.ntp_servers`: the NTP servers the clock is measured against
+    (`Alavi.Clock.Check`), names or addresses, asked in this order; an empty
+    list turns the checks off;
   - `status.port`: the port of the status page, which listens on 127.0.0.1
     only, whatever this says.
 
-  Version 2 added `status`; a version-1 file is refused with a message saying so.
+  Version 2 added `status`, version 3 `clock.ntp_servers`; a file of an
+  earlier version is refused with a message saying what to add.
 
   Paths are taken as written; in JSON a backslash is written `\\\\`, or use
   `/`. Whether the files exist is checked by `Alavi.Collector.load/2`, not here.
@@ -71,9 +75,15 @@ defmodule Alavi.Settings do
           uplink: uplink(),
           log: log(),
           raw_bytes_log: Alavi.Poller.RawLog.limits(),
-          clock: %{refresh_ms: pos_integer()},
+          clock: %{refresh_ms: pos_integer(), ntp_servers: [String.t()]},
           status: %{port: :inet.port_number()}
         }
+
+  # What each version after the first added, for a file of an earlier one.
+  @added [
+    ~s|the "status": {"port": ...} section (the status page's port, on 127.0.0.1)|,
+    ~s|"clock": {"ntp_servers": [...]} (the NTP servers to check the clock against; [] for none)|
+  ]
 
   @keys ~w(schema_version polling_config profiles_dir
            buffer.dir buffer.max_bytes buffer.max_batch_events
@@ -81,7 +91,7 @@ defmodule Alavi.Settings do
            uplink.idle_ms uplink.timeout_ms uplink.backoff_ms.min uplink.backoff_ms.max
            log.dir log.max_file_bytes log.max_files
            raw_bytes_log.max_frame_bytes raw_bytes_log.max_lines raw_bytes_log.window_ms
-           clock.refresh_ms status.port)
+           clock.refresh_ms clock.ntp_servers status.port)
 
   # contract: test/alavi/settings_test.exs "load/1"
   @spec load(Path.t()) :: {:ok, t()} | {:error, String.t()}
@@ -97,7 +107,7 @@ defmodule Alavi.Settings do
 
   # contract: test/alavi/settings_test.exs "parse/1"
   @spec parse(term()) :: {:ok, t()} | {:error, String.t()}
-  def parse(%{"schema_version" => 2} = json) do
+  def parse(%{"schema_version" => 3} = json) do
     flat = flatten(json)
 
     with {:ok, fields} <- parse_all(flat),
@@ -106,17 +116,16 @@ defmodule Alavi.Settings do
     end
   end
 
-  def parse(%{"schema_version" => 1}),
+  def parse(%{"schema_version" => version}) when version in [1, 2],
     do:
       {:error,
-       "settings schema_version 1 is no longer read: version 2 adds the required " <>
-         ~s|"status": {"port": ...} section (the status page's port, on 127.0.0.1); | <>
-         "add it and set schema_version to 2"}
+       "settings schema_version #{version} is no longer read: add " <>
+         Enum.join(Enum.drop(@added, version - 1), " and ") <> ", and set schema_version to 3"}
 
   def parse(%{"schema_version" => version}),
     do: {:error, "unsupported settings schema_version #{inspect(version)}"}
 
-  def parse(_json), do: {:error, "expected a JSON object with schema_version 2"}
+  def parse(_json), do: {:error, "expected a JSON object with schema_version 3"}
 
   # The settings the status page may show, listed rather than the secrets
   # left out, so a setting added later stays off the page until it is named
@@ -128,7 +137,7 @@ defmodule Alavi.Settings do
     uplink.idle_ms uplink.timeout_ms uplink.backoff_ms.min uplink.backoff_ms.max
     log.dir log.max_file_bytes log.max_files
     raw_bytes_log.max_frame_bytes raw_bytes_log.max_lines raw_bytes_log.window_ms
-    clock.refresh_ms
+    clock.refresh_ms clock.ntp_servers
     status.port
   )
 
@@ -142,8 +151,12 @@ defmodule Alavi.Settings do
     settings
     |> Map.from_struct()
     |> flatten()
-    |> Map.put("schema_version", 2)
+    |> Map.put("schema_version", 3)
     |> Map.take(@shown)
+    |> Enum.map(fn
+      {key, list} when is_list(list) -> {key, Enum.join(list, ", ")}
+      pair -> pair
+    end)
     |> Enum.sort()
   end
 
@@ -223,8 +236,28 @@ defmodule Alavi.Settings do
   end
 
   defp clock(flat) do
-    with {:ok, ms} <- Fields.positive(flat, "clock.refresh_ms"), do: {:ok, %{refresh_ms: ms}}
+    with {:ok, ms} <- Fields.positive(flat, "clock.refresh_ms"),
+         {:ok, servers} <- servers(flat, "clock.ntp_servers") do
+      {:ok, %{refresh_ms: ms, ntp_servers: servers}}
+    end
   end
+
+  # A DNS name is at most 253 characters, and neither it nor an address has a space.
+  defp servers(flat, key) do
+    case Map.fetch(flat, key) do
+      {:ok, list} when is_list(list) ->
+        if Enum.all?(list, &server?/1), do: {:ok, list}, else: servers_error(key)
+
+      _ ->
+        servers_error(key)
+    end
+  end
+
+  defp server?(name),
+    do: is_binary(name) and name != "" and String.length(name) <= 253 and not (name =~ ~r/\s/)
+
+  defp servers_error(key),
+    do: {:error, "#{key} must be a list of NTP server names or addresses (empty for no checks)"}
 
   defp status(flat) do
     with {:ok, port} <- Fields.integer(flat, "status.port", 1..65_535),

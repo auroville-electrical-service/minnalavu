@@ -118,6 +118,17 @@ failure, or output not recognised is `unsynced`, logged once as a warning with
 the raw output. Only English output is recognised: the labels change with the
 display language. Elsewhere the status is always `unsynced`.
 
+That is what the OS claims. What the clock *is* gets measured: the collector
+sends one SNTP query to each of `clock.ntp_servers` in turn (UDP port 123,
+outbound only), stopping at the first that answers, at start, every 24 h of
+monotonic time, and after the clock steps (the OS clock and monotonic time
+disagreeing by more than 2 s across a 60 s watch; at most one such check per
+10 min). Each query, answered or not (timed out, unreachable, kiss-o'-death,
+invalid), goes to the server in the batch's `clock_checks` with its four
+times as measured; offsets are the store's to compute. An empty
+`clock.ntp_servers` turns the checks off. The status page shows the last
+check and the offset it implies, for display only.
+
 ## Status
 
 What the collector is doing is kept in memory and written, every few seconds
@@ -127,14 +138,15 @@ read, its firmware names as last read and its register values as read, the
 raw-bytes lines, the buffer's backlog, the uplink's last and next attempt, the
 clock, the release version and the settings (never the token). It is replaced whole (a temporary file renamed
 over it), and the recent history in it is lost on restart: the log and the
-buffer are the record. Settings `schema_version` 1 files are refused: version 2
-added `status`.
+buffer are the record. Settings files of `schema_version` 1 or 2 are refused,
+saying what to add: version 2 added `status`, version 3 `clock.ntp_servers`.
 
 The same is shown as a page, on the collector's own PC only: open
 `http://127.0.0.1:8502/` (or `http://localhost:8502/`; the port is
 `status.port` in the settings) in a browser there. It refreshes itself every
 few seconds; `/status.json` is the same data as the file. The page is a
-summary, kept small however many meters there are: the clock, uplink, buffer
+summary, kept small however many meters there are: the clock and its last
+check, uplink, buffer
 backlog (refused, discarded or quarantined batches marked), version and start
 time; endpoints and meters counted by the state of their last round; in full,
 only what is not OK (each endpoint down, or with units that missed or read
