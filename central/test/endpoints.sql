@@ -91,6 +91,7 @@ SELECT pg_temp.missed('sqlp_a', '10.0.1.4', 1, '30 minutes', 'decode');
 SELECT pg_temp.readings('sqlp_a', '10.0.1.5', 3, '2 hours');
 SELECT pg_temp.missed('sqlp_a', '10.0.1.5', 1, '2 hours', 'timeout');
 SELECT pg_temp.missed('sqlp_a', '10.0.1.5', 20, '5 minutes', 'timeout');
+SELECT pg_temp.readings('sqlp_a', '10.0.1.5', 20, '5 minutes');
 SELECT pg_temp.readings('sqlp_a', '10.0.1.6', 4, '5 minutes');
 -- other and retired: failing, but not ours to judge, or not in service now.
 SELECT pg_temp.missed('sqlp_a', '10.0.1.7', 5, '5 minutes', 'timeout');

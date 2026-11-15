@@ -331,6 +331,12 @@ SELECT pg_temp.latency_on('10.0.9.1', 2, 0, 39);
 SELECT pg_temp.latency_on('10.0.9.1', 1, 1, 35);
 SELECT pg_temp.latency_on('10.0.9.1', 1, 3, 38);
 SELECT pg_temp.latency_on('10.0.9.2', 1, 0, 31);
+-- An endpoint that took its address at today's UTC midnight, within the
+-- lookback: the day before at that address is not its.
+SELECT pg_temp.endpoint('sqllat_new', '10.0.9.3',
+                        date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC', 900000);
+SELECT pg_temp.latency_on('10.0.9.3', 1, 0, 34);
+SELECT pg_temp.latency_on('10.0.9.3', 1, 1, 36);
 
 SELECT pg_temp.is(
   (SELECT string_agg(format('%s %s:%s day -%s v%s: %s meters, %s answered; p50 %s, p99 %s, max %s',
@@ -342,6 +348,13 @@ SELECT pg_temp.is(
   || 'sqllat_chain 10.0.9.1:502 day -1 v1: 1 meters, 2 answered; p50 35, p99 35, max 35',
   'an endpoint''s days within the lookback, once each though its address spans two periods; '
   || 'days before it, and an unregistered address, are left out');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s day -%s: max %s', endpoint_id,
+                            (now() AT TIME ZONE 'UTC')::date - day, max_ms), '; ')
+   FROM health.endpoint_latency WHERE endpoint_id = 'sqllat_new'),
+  'sqllat_new day -0: max 34',
+  'a day within the lookback but before the endpoint had its address is not its');
 
 -- Found by index on the day, from the lookback's days only.
 CREATE FUNCTION pg_temp.day_lookups(q text) RETURNS text

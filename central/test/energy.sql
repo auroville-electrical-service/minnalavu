@@ -14,12 +14,15 @@ SELECT admin.set_health_thresholds(collector_silent_after => '1 hour',
 
 INSERT INTO store.collectors (id) VALUES ('sqle_a'), ('sqle_b');
 
--- A profile with a register in kWh, then in Wh, and a demand register.
+-- A profile with a register in kWh, then in Wh, one in kvarh, then in varh, and a
+-- demand register.
 INSERT INTO store.profile_versions (profile, version) VALUES ('sqle_test', 1), ('sqle_test', 2);
 INSERT INTO store.profile_registers
   (profile, version, register_key, register_table, address, type, word_order, decimals, unit, kind)
 VALUES ('sqle_test', 1, 'energy', 'holding', 0, 'u32', 'high_first', 3, 'kWh', 'cumulative'),
        ('sqle_test', 2, 'energy', 'holding', 0, 'u32', 'high_first', 0, 'Wh', 'cumulative'),
+       ('sqle_test', 1, 'reactive', 'holding', 4, 'u32', 'high_first', 3, 'kvarh', 'cumulative'),
+       ('sqle_test', 2, 'reactive', 'holding', 4, 'u32', 'high_first', 0, 'varh', 'cumulative'),
        ('sqle_test', 1, 'demand', 'holding', 2, 'u32', 'high_first', 0, 'kWh', 'demand');
 
 -- Batches received `ago`: sqle_a's clock claims NTP, sqle_b's unsynced.
@@ -85,6 +88,10 @@ SELECT pg_temp.reading('SQLE-UNIT', 'energy', at, v, batch, 'sqle_test', version
 FROM (VALUES ('0 minutes'::interval, 1.5, 'a_old', 1::bigint),
              ('15 minutes', 1499, 'a_new', 2),
              ('30 minutes', 1.499, 'a_new', 1)) v (at, v, batch, version);
+SELECT pg_temp.reading('SQLE-VARH', 'reactive', at, v, batch, 'sqle_test', version)
+FROM (VALUES ('0 minutes'::interval, 2.5, 'a_old', 1::bigint),
+             ('15 minutes', 2499, 'a_new', 2),
+             ('30 minutes', 2.499, 'a_new', 1)) v (at, v, batch, version);
 SELECT pg_temp.reading('SQLE-DEMAND', 'demand', at, v, 'a_new', 'sqle_test', 1)
 FROM (VALUES ('0 minutes'::interval, 5), ('15 minutes', 3)) v (at, v);
 
@@ -101,9 +108,10 @@ SELECT pg_temp.is(
   || 'SQLE-LATE active_energy_import 00:15:00 13 kWh -> 00:30:00 12; '
   || 'SQLE-OLD active_energy_import 00:00:00 5 kWh -> 00:15:00 4; '
   || 'SQLE-SUSPECT active_energy_import 00:00:00 20 kWh -> 00:15:00 19; '
-  || 'SQLE-UNIT energy 00:00:00 1.5 kWh -> 00:15:00 1499',
+  || 'SQLE-UNIT energy 00:00:00 1.5 kWh -> 00:15:00 1499; '
+  || 'SQLE-VARH reactive 00:00:00 2.5 kvarh -> 00:15:00 2499',
   'a cumulative reading lower than the one before it by read_at, for the same serial and '
-  || 'register, is a drop, compared exactly and Wh against kWh; an equal one, another '
+  || 'register, is a drop, compared exactly, Wh against kWh and varh against kvarh; an equal one, another '
   || 'register''s, or a demand register''s is not');
 
 SELECT pg_temp.is(
@@ -119,7 +127,8 @@ SELECT pg_temp.is(
 SELECT pg_temp.is(
   (SELECT string_agg(format('%s %s', meter_serial, suspect), ', ' ORDER BY meter_serial)
    FROM store.energy_drops WHERE meter_serial LIKE 'SQLE-%'),
-  'SQLE-DROP f, SQLE-EXACT f, SQLE-HALF f, SQLE-LATE t, SQLE-OLD f, SQLE-SUSPECT t, SQLE-UNIT f',
+  'SQLE-DROP f, SQLE-EXACT f, SQLE-HALF f, SQLE-LATE t, SQLE-OLD f, SQLE-SUSPECT t, SQLE-UNIT f, '
+  || 'SQLE-VARH f',
   'a drop is suspect only where no clock check grounds either reading, whatever the OS claims');
 
 SELECT pg_temp.is(
@@ -127,7 +136,7 @@ SELECT pg_temp.is(
                      ORDER BY serial)
    FROM health.energy_drops WHERE serial LIKE 'SQLE-%'),
   'SQLE-DROP 00:15:00, SQLE-EXACT 00:15:00, SQLE-HALF 00:15:00, SQLE-LATE 00:30:00, '
-  || 'SQLE-SUSPECT 00:15:00, SQLE-UNIT 00:15:00',
+  || 'SQLE-SUSPECT 00:15:00, SQLE-UNIT 00:15:00, SQLE-VARH 00:15:00',
   'the health view finds the drops at or just after a reading that arrived within the lookback, '
   || 'and not those whose readings both arrived before it');
 
@@ -150,7 +159,7 @@ SELECT pg_temp.is(
 SELECT pg_temp.is(
   (SELECT string_agg(subject, ', ' ORDER BY subject) FROM health.problems
    WHERE kind = 'energy_backwards'),
-  'SQLE-DROP, SQLE-EXACT, SQLE-HALF, SQLE-LATE, SQLE-SUSPECT, SQLE-UNIT',
+  'SQLE-DROP, SQLE-EXACT, SQLE-HALF, SQLE-LATE, SQLE-SUSPECT, SQLE-UNIT, SQLE-VARH',
   'each serial with a drop found by the health view is one problem');
 
 SELECT admin.set_health_thresholds(collector_silent_after => '1 hour',
