@@ -331,7 +331,10 @@ defmodule Alavi.PollerTest do
             "polled_by_other_system" => true,
             "interval_ms" => 1
           }),
-          endpoint(port, "tcp", [meter(1, "elite_440")], %{"interval_ms" => 5})
+          endpoint(port, "tcp", [meter(1, "elite_440")], %{
+            "interval_ms" => 5,
+            "timeout_ms" => 1_000
+          })
         ])
 
       for _ <- 1..5, do: assert([%Reading{endpoint: %{port: ^port}} | _] = recorded!())

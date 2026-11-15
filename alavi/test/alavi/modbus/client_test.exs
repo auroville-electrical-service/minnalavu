@@ -80,7 +80,9 @@ defmodule Alavi.Modbus.ClientTest do
         {:ok, first} = connect(ctx)
         {:ok, second} = connect(ctx)
         assert {:error, reason, _} = Client.read(second, 1, :holding, 199, 2)
-        assert reason in [:closed, {:socket, :econnreset}]
+        # Windows can report the endpoint closing the second connection as
+        # an aborted connection.
+        assert reason in [:closed, {:socket, :econnreset}, {:socket, :econnaborted}]
         assert {:ok, _, _} = Client.read(first, 1, :holding, 199, 2)
       end
 

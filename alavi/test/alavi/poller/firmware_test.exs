@@ -22,15 +22,16 @@ defmodule Alavi.Poller.FirmwareTest do
 
   # The test process stands in for the status, so it sees each names read
   # (`Status.firmware/2`) and each round's end (`Status.round/2`). Options:
-  # `sink`, `faults` set before the first round, and `clock`, which replaces
-  # the agent's.
+  # `sink`, `faults` set before the first round, `clock`, which replaces
+  # the agent's, and `endpoint`, fields merged into the endpoint's config.
   defp poll!(sim_meters, meters, opts \\ []) do
     {sim, port} = start_chain!(:tcp, sim_meters)
     :ok = Simulator.faults(sim, Keyword.get(opts, :faults, []))
     {:ok, clock} = Agent.start_link(fn -> @start end)
+    changes = Map.merge(%{"interval_ms" => 10}, Keyword.get(opts, :endpoint, %{}))
 
     opts = [
-      config: config!([endpoint(port, "tcp", meters, %{"interval_ms" => 10})]),
+      config: config!([endpoint(port, "tcp", meters, changes)]),
       sink: {Keyword.get(opts, :sink, Alavi.TestSink), self()},
       clock: Keyword.get(opts, :clock, fn -> Agent.get(clock, & &1) end),
       raw_log: raw_log(),
@@ -224,7 +225,11 @@ defmodule Alavi.Poller.FirmwareTest do
 
     test "names the sink refused are read and sent again next round" do
       capture_log(fn ->
-        poll!([sim_meter(1, "elite_440")], [meter(1, "elite_440")], sink: Alavi.RefusingSink)
+        poll!([sim_meter(1, "elite_440")], [meter(1, "elite_440")],
+          sink: Alavi.RefusingSink,
+          endpoint: %{"timeout_ms" => 1_000}
+        )
+
         for _ <- 1..2, do: assert([{:recorded, _}, {:names_read, _}, {:sent, _}] = round!())
       end)
     end

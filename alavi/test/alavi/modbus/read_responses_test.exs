@@ -8,15 +8,17 @@ defmodule Alavi.Modbus.ReadResponsesTest do
   alias Alavi.Modbus.{Framing, PDU}
 
   @fixture Path.expand("../../../../contract/fixtures/modbus-read-responses.v1.json", __DIR__)
+  @framings %{"tcp" => :tcp, "rtu_over_tcp" => :rtu_over_tcp}
+  @tables %{"holding" => :holding, "input" => :input}
 
   test "every case gives the fixture's skips, result and rest" do
     %{"format" => "modbus-read-responses/1", "cases" => cases} =
       @fixture |> File.read!() |> JSON.decode!()
 
     for c <- cases do
-      framing = String.to_existing_atom(c["framing"])
+      framing = Map.fetch!(@framings, c["framing"])
       e = c["expected"]
-      table = String.to_existing_atom(e["table"])
+      table = Map.fetch!(@tables, e["table"])
 
       expected = %{
         transaction_id: e["transaction_id"],
