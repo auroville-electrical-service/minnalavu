@@ -443,17 +443,21 @@ defmodule Alavi.EndToEndTest do
     assert sql!("SELECT count(*) FROM store.clock_offsets WHERE collector_id = '#{id}'") == 0
   end
 
-  # Every reply 41 ms late: each answer lands in the (40, 50] ms bucket, so
+  # Every reply 301 ms late: each answer lands in the (300, 400] ms bucket,
+  # with 99 ms to spare for a loaded machine and far inside the timeout, so
   # every percentile is that bucket's bound cut to the exact max.
   test "a meter's latency for a day is stored when the day ends, and its percentiles computed exactly",
        ctx do
     {id, token} = new_collector!()
     {sim, port} = start_sim!(:tcp)
-    Simulator.faults(sim, delay_ms: 41)
+    Simulator.faults(sim, delay_ms: 301)
     # The dev database keeps earlier runs' readings, which a fixed clock would repeat.
     :ok = Simulator.identify(sim, 1, :serial, String.upcase(id))
     {:ok, clock} = Agent.start_link(fn -> ~U[2026-11-13 23:59:59Z] end)
-    endpoints = [endpoint(port, "tcp", [meter(1, "elite_440")], %{"interval_ms" => 5})]
+    endpoints = [
+      endpoint(port, "tcp", [meter(1, "elite_440")], %{"interval_ms" => 5, "timeout_ms" => 2_000})
+    ]
+
     start_collector!(ctx.tmp_dir, endpoints, token, [], fn -> Agent.get(clock, & &1) end)
 
     readings = fn ->
@@ -491,8 +495,8 @@ defmodule Alavi.EndToEndTest do
 
     answered = Enum.sum(buckets)
     assert length(buckets) == 44 and answered > 0
-    assert Enum.at(buckets, 14) == answered, "every answer in the (40, 50] ms bucket"
-    assert max > 40 and max <= 50
+    assert Enum.at(buckets, 23) == answered, "every answer in the (300, 400] ms bucket"
+    assert max > 300 and max <= 400
 
     assert [
              %{
