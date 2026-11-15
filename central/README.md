@@ -101,6 +101,12 @@ add to the collector's clock to get the reference's.
   collector within 48 hours before or after them, by the collector's clock,
   with the nearest answered checks either side. Nothing is refused for it, and
   readings carry no such column.
+- `store.energy_drops`: per cumulative reading lower than the one before it
+  of the same serial and register by `read_at` (a reset, a swap, a write, or
+  the clock stepping back), both readings with their batch's clock claim
+  (`clock_source`, `clock_last_sync_at`) and whether an answered check grounds
+  each. Compared exactly, Wh against kWh. `suspect` where neither reading is
+  grounded: the drop may be the clock, not the meter.
 
 ## The device registry
 
@@ -184,6 +190,9 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
   answered one, the offset bound of its latest upload, and whether it is
   unchecked: in service, not silent, and no answered check within 48 hours by
   the server's clock (counted from registration when it has none).
+- `health.energy_drops`: the drops in `store.energy_drops` at or just after
+  a reading whose batch arrived within the lookback, found by index from those
+  batches, never by a scan of the readings.
 - `health.problems`: one row per problem, `(kind, subject)` naming it and
   `detail` describing it now. Kinds: `collector_silent` (no upload for
   `collector_silent_after`), `clock_unchecked` (unchecked in
@@ -201,10 +210,12 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
   move; every place in its detail), `several_serials_at_place` (a place whose
   readings carry more than one serial: a swap, or two meters answering one
   address; each serial's readings and times in its detail, so a handover
-  shows apart from interleaving) and `firmware_changed` (a serial whose
+  shows apart from interleaving), `firmware_changed` (a serial whose
   latest names differ from an earlier record, while the batch that first
   brought the latest names arrived within the lookback, so a weeks-late change
-  is flagged when it arrives, and a resend neither hides nor renews it).
+  is flagged when it arrives, and a resend neither hides nor renews it) and
+  `energy_backwards` (a serial with a drop in `health.energy_drops`; each drop,
+  both readings' clock signals and whether it is suspect in its detail).
 - `health.thresholds`: the thresholds in force, from
   `registry.health_thresholds` (append-only; the last row set holds). Change
   them as the owner:

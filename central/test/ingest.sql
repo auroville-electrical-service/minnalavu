@@ -476,7 +476,8 @@ SELECT pg_temp.is(
   (SELECT string_agg(format('%s.%s %s', table_name, column_name, data_type), '; '
                      ORDER BY table_name)
    FROM information_schema.columns
-   WHERE table_schema = 'store' AND column_name = 'value'),
+   JOIN information_schema.tables USING (table_schema, table_name)
+   WHERE table_schema = 'store' AND column_name = 'value' AND table_type = 'BASE TABLE'),
   'reading_conflicts.value numeric; readings.value numeric',
   'values are stored as numeric, never float');
 

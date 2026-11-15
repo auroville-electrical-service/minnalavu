@@ -191,6 +191,7 @@ FROM unnest(ARRAY[
   'SELECT * FROM store.clock_check_references',
   'SELECT * FROM store.upload_clock_offsets',
   'SELECT * FROM store.ungrounded_readings',
+  'SELECT * FROM store.energy_drops',
   $q$SELECT admin.create_collector('sqltest_intruder')$q$,
   $q$SELECT admin.retire_meter('SQLREG-0001', now())$q$,
   $q$SELECT store.check_batch('{}')$q$,
@@ -215,9 +216,9 @@ CREATE TEMP VIEW monitor_roles AS
 SELECT pg_temp.is(
   (SELECT string_agg(c.relname::text, ', ' ORDER BY c.relname)
    FROM pg_class c WHERE c.relnamespace = 'health'::regnamespace AND c.relkind = 'v'),
-  'collector_clocks, collectors, meter_firmware, meters, misplaced_serials, place_serials, problems, '
-  || 'thresholds, unregistered_serial_places, unregistered_serials',
-  'health holds the ten health views');
+  'collector_clocks, collectors, energy_drops, meter_firmware, meters, misplaced_serials, '
+  || 'place_serials, problems, thresholds, unregistered_serial_places, unregistered_serials',
+  'health holds the eleven health views');
 
 SELECT pg_temp.is(
   (SELECT count(*) FROM pg_class c
@@ -305,6 +306,7 @@ FROM unnest(ARRAY[
   'SELECT * FROM health.place_serials',
   'SELECT * FROM health.collector_clocks',
   'SELECT * FROM health.meter_firmware',
+  'SELECT * FROM health.energy_drops',
   'SELECT * FROM health.thresholds'
 ]) q;
 
@@ -318,6 +320,7 @@ FROM unnest(ARRAY[
   'SELECT * FROM store.clock_check_references',
   'SELECT * FROM store.upload_clock_offsets',
   'SELECT * FROM store.ungrounded_readings',
+  'SELECT * FROM store.energy_drops',
   'SELECT * FROM registry.meter_versions',
   'SELECT * FROM registry.meter_history',
   'SELECT * FROM registry.health_thresholds',
@@ -472,9 +475,11 @@ FROM unnest(ARRAY[
   'SELECT * FROM registry.meter_history',
   'SELECT * FROM health.problems',
   'SELECT * FROM health.collector_clocks',
+  'SELECT * FROM health.energy_drops',
   'SELECT * FROM store.clock_checks',
   'SELECT * FROM store.clock_offsets',
   'SELECT * FROM store.ungrounded_readings',
+  'SELECT * FROM store.energy_drops',
   $q$INSERT INTO store.readings VALUES ('S', 'r', now(), 1, 'p', 'h', 1, 1, 'c', gen_random_uuid(), 'P', 1)$q$,
   'SELECT * FROM store.profile_versions',
   'SELECT * FROM store.profile_registers',
