@@ -95,6 +95,8 @@ defmodule Alavi.Status.Page do
       clock_check(s.clock_check),
       "<h3>Uplink</h3>",
       uplink(s.uplink),
+      "<h3>Polling config</h3>",
+      config(s.config),
       "<h3>Buffer</h3>",
       buffer(s.buffer)
     ]
@@ -135,6 +137,20 @@ defmodule Alavi.Status.Page do
 
   defp uplink_result(result) when result in ["stored", "empty"], do: ok(result)
   defp uplink_result(result), do: bad(result)
+
+  defp config(nil),
+    do: ~s|<p class="note">Not reported: this collector does not fetch its config.</p>|
+
+  defp config(%{"digest" => digest, "refused_digest" => nil}),
+    do: pairs([{"Applied (digest)", text(digest)}, {"Refused", ok("none")}])
+
+  defp config(%{"digest" => digest, "refused_digest" => refused, "reason" => reason}),
+    do:
+      pairs([
+        {"Applied (digest)", text(digest)},
+        {"Refused (digest)", bad(refused)},
+        {"Why refused", text(reason)}
+      ])
 
   defp buffer(nil), do: ~s|<p class="note">Not asked yet.</p>|
 

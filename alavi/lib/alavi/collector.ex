@@ -1,16 +1,32 @@
 defmodule Alavi.Collector do
   @moduledoc """
   The running collector: on Windows the clock's status, then the buffer, then
-  one poller per endpoint writing into it, then the uplink, then the clock
-  check, also writing into the buffer. Each of them casts what it did to
-  `status` (an `Alavi.Status`, started elsewhere).
+  the config keeper, then one poller per endpoint writing into the buffer,
+  then the uplink, then the clock check, also writing into the buffer. Each of
+  them casts what it did to `status` (an `Alavi.Status`, started elsewhere).
   """
 
   use Supervisor
 
-  alias Alavi.{Buffer, Clock, Config, Intake, Poller, Pollers, Profile, Settings, Status, Uplink}
+  alias Alavi.{
+    Buffer,
+    Clock,
+    Config,
+    ConfigKeeper,
+    Intake,
+    Poller,
+    Pollers,
+    Profile,
+    Settings,
+    Status,
+    Uplink
+  }
+
+  alias Alavi.Config.{Digest, Saved}
   alias Alavi.Poller.RawLog
-  alias Alavi.Uplink.Target
+  alias Alavi.Uplink.{HTTP, Response, Target}
+
+  require Logger
 
   @typedoc """
   `uplink` is the uplink's options but `buffer`, `status`, `heartbeat_ms` and
@@ -28,13 +44,17 @@ defmodule Alavi.Collector do
   register the `Alavi.Pollers` under; without it they are unnamed (tests that
   start several collectors). The pollers keep their selector records
   (`Alavi.Selectors.Store`) in `selectors` under the buffer's `dir`, the
-  collector's durable state.
+  collector's durable state. `config_keeper` is an `Alavi.ConfigKeeper`'s
+  `digest` (of `config`), `profiles` and `name`, the collector supplying the
+  rest and fetching through the uplink's target; `:none` for a collector that
+  does not fetch its config, and always without an uplink.
   """
   @type option ::
           {:config, Config.t()}
           | {:buffer, [Buffer.option()]}
           | {:clock, Poller.clock()}
           | {:uplink, [Uplink.option()] | :none}
+          | {:config_keeper, [ConfigKeeper.option()] | :none}
           | {:raw_log, RawLog.limits()}
           | {:clock_status, [Clock.Windows.option()] | :none}
           | {:clock_check, [Clock.Check.option()] | :none}
@@ -47,13 +67,17 @@ defmodule Alavi.Collector do
   def start_link(opts), do: Supervisor.start_link(__MODULE__, opts, Keyword.take(opts, [:name]))
 
   # contract: test/alavi/collector_test.exs "load/2"
+  @doc """
+  The polling config is the one last served and saved under the buffer's
+  `dir` (`Alavi.Config.Saved`) if there is one, else the local file.
+  """
   @spec load(Settings.t(), {atom(), atom()}) :: {:ok, [option()]} | {:error, String.t()}
   def load(%Settings{} = settings, os) do
     {clock_status, watch} = clock(os, settings.clock.refresh_ms)
 
     with {:ok, uplink} <- uplink(settings),
          {:ok, profiles} <- Profile.load_dir(settings.profiles_dir),
-         {:ok, config} <- Config.load(settings.polling_config, profiles) do
+         {:ok, config, digest} <- polling_config(settings, profiles) do
       buffer = [
         dir: settings.buffer.dir,
         max_bytes: settings.buffer.max_bytes,
@@ -68,6 +92,7 @@ defmodule Alavi.Collector do
          buffer: buffer,
          clock: &DateTime.utc_now/0,
          uplink: uplink,
+         config_keeper: [digest: digest, profiles: profiles, name: ConfigKeeper],
          raw_log: settings.raw_bytes_log,
          clock_status: watch,
          clock_check: check(settings.clock.ntp_servers),
@@ -84,6 +109,13 @@ defmodule Alavi.Collector do
     status = Keyword.fetch!(opts, :status)
     config = Keyword.fetch!(opts, :config)
 
+    {keeper, keeper_name} =
+      keeper(Keyword.fetch!(opts, :config_keeper), Keyword.fetch!(opts, :uplink),
+        config: config,
+        dir: Keyword.fetch!(buffer, :dir),
+        status: status
+      )
+
     {uplink, nudge} =
       case Keyword.fetch!(opts, :uplink) do
         :none ->
@@ -94,7 +126,8 @@ defmodule Alavi.Collector do
             buffer: Keyword.fetch!(buffer, :name),
             status: status,
             heartbeat_ms: heartbeat_ms(config, Keyword.fetch!(uplink, :idle_ms)),
-            intake: intake(Keyword.get(opts, :pollers), config)
+            intake: intake(Keyword.get(opts, :pollers), config),
+            config: keeper_name
           ]
 
           {[{Uplink, uplink ++ supplied}], Keyword.get(uplink, :name, :none)}
@@ -124,9 +157,67 @@ defmodule Alavi.Collector do
         check -> [{Clock.Check, check ++ [sink: sink, status: status]}]
       end
 
-    Supervisor.init(watch ++ [{Buffer, buffer}, {Pollers, pollers}] ++ uplink ++ check,
+    Supervisor.init(
+      watch ++ [{Buffer, buffer}] ++ keeper ++ [{Pollers, pollers}] ++ uplink ++ check,
       strategy: :rest_for_one
     )
+  end
+
+  defp keeper(:none, _uplink, _supplied), do: {[], :none}
+
+  defp keeper(_keeper, :none, _supplied),
+    do: raise(ArgumentError, "a config keeper fetches through the uplink, and there is none")
+
+  defp keeper(keeper, uplink, supplied) do
+    target = Keyword.fetch!(uplink, :target)
+    timeout = Keyword.fetch!(uplink, :timeout_ms)
+    fetch = fn -> target |> HTTP.get_config(timeout) |> Response.config() end
+    opts = keeper ++ supplied ++ [fetch: fetch, applied: &applied/2]
+    {[{ConfigKeeper, opts}], Keyword.fetch!(keeper, :name)}
+  end
+
+  # Where a served config reaches the running pollers. Until it does, it is
+  # saved, and the collector starts from it.
+  defp applied(%Config{}, digest),
+    do:
+      Logger.info(
+        "alavi config: #{digest} is not applied to the running pollers; it is the config the collector starts from"
+      )
+
+  defp polling_config(settings, profiles) do
+    case Saved.read(settings.buffer.dir) do
+      {:ok, path, document} -> served(path, document, profiles, settings.polling_config)
+      :none -> local(settings.polling_config, profiles)
+      {:error, reason} -> {:error, "the config last served: #{reason}"}
+    end
+  end
+
+  defp served(path, document, profiles, local) do
+    case parsed(document, profiles) do
+      {:ok, config, digest} ->
+        {:ok, config, digest}
+
+      {:error, reason} ->
+        {:error,
+         "#{path}, the config last served, does not parse with the profiles loaded: " <>
+           "#{reason}; fix the profiles, or remove the file to start from #{local} " <>
+           "until the server serves a config again"}
+    end
+  end
+
+  defp local(path, profiles) do
+    with {:ok, document} <- Config.read(path) do
+      case parsed(document, profiles) do
+        {:ok, config, digest} -> {:ok, config, digest}
+        {:error, reason} -> {:error, "#{path}: #{reason}"}
+      end
+    end
+  end
+
+  defp parsed(document, profiles) do
+    with {:ok, config} <- Config.parse(document, profiles),
+         {:ok, digest} <- Digest.digest(document),
+         do: {:ok, config, digest}
   end
 
   defp check([]), do: :none

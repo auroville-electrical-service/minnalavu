@@ -29,6 +29,15 @@ A batch the server rejects for good is moved to `<buffer dir>/quarantine/`
 with the server's reason beside it, and never deleted; see `Alavi.Uplink.Response`
 for which answers count as that.
 
+The polling config the server serves is fetched whenever an answer names a
+digest other than the collector's, and once it parses against the loaded
+profiles it is saved as `<buffer dir>/config/served.json`
+(`Alavi.Config.Saved`); the collector starts from that file whenever there is
+one, and from `polling_config` only before the first. One that does not parse
+is refused: the collector keeps its config, logs why, and reports the refusal
+in each batch until the server serves another. The status page shows both
+digests.
+
 Selector values to put back are kept in `<buffer dir>/selectors/`
 (`Alavi.Selectors.Store`). A `.restore` file there is a restore owed: the
 endpoint shows as faulted until the collector has put the selectors back and

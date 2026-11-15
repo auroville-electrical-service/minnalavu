@@ -305,6 +305,16 @@ defmodule Alavi.StatusTest do
     end
   end
 
+  describe "Snapshot.config/2" do
+    test "none until the keeper reports; then as a batch's backlog carries it" do
+      assert snapshot().config == nil
+      report = %{digest: String.duplicate("a", 64), refused: nil}
+
+      assert Snapshot.config(snapshot(), report).config ==
+               %{"digest" => report.digest, "refused_digest" => nil, "reason" => nil}
+    end
+  end
+
   describe "Snapshot.clock/2" do
     test "the clock's source and last sync" do
       status = %{source: :ntp, last_sync_at: ~U[2026-11-14 09:00:00Z]}
@@ -475,6 +485,7 @@ defmodule Alavi.StatusTest do
       Status.raw_lines(status, ["alavi poller 127.0.0.1:5020 unit 1: reply rejected"])
       Status.uplink(status, {:stored, "b-1"}, 0)
       Status.clock(status, %{source: :rtc, last_sync_at: nil})
+      Status.config(status, %{digest: String.duplicate("a", 64), refused: nil})
       Status.clock_check(status, ClockCheckFixture.failed(:timeout))
       Status.latency(status, %{host: "127.0.0.1", port: 5020}, %{3 => @summary})
       Status.selectors(status, %{host: "127.0.0.1", port: 5020}, {:owed, "found at start", 0})
@@ -484,6 +495,7 @@ defmodule Alavi.StatusTest do
       assert [%{line: "alavi poller " <> _}] = snapshot.raw_lines
       assert %{result: "stored", batch_id: "b-1"} = snapshot.uplink
       assert snapshot.clock.source == "rtc"
+      assert snapshot.config["digest"] == String.duplicate("a", 64)
       assert snapshot.clock_check.outcome == "timeout"
       assert meter_view(snapshot, 3).latency.p99 == 80
       assert hd(snapshot.endpoints).selectors.state == "owed"

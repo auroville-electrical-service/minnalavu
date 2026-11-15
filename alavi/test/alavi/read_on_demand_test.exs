@@ -199,6 +199,7 @@ defmodule Alavi.ReadOnDemandTest do
          idle_ms: 60_000,
          heartbeat_ms: 60_000,
          intake: :none,
+         config: :none,
          backoff_ms: %{min: 10, max: 40},
          timeout_ms: 2_000,
          status: no_status(),

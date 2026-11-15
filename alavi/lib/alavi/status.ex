@@ -6,8 +6,8 @@ defmodule Alavi.Status do
   Holds the `Alavi.Status.Snapshot` of what the collector is doing, for the
   status page and `status.json`.
 
-  The poller, uplink, clock watch and clock check feed it with casts only, so they never
-  wait on it, and a cast to it while it is down is dropped. Every `tick_ms` it
+  The poller, uplink, config keeper, clock watch and clock check feed it with
+  casts only, so they never wait on it, and a cast to it while it is down is dropped. Every `tick_ms` it
   asks the buffer for its backlog (a buffer that does not answer within
   #{@backlog_timeout_ms} ms is shown as not answering), then writes the snapshot to `file`,
   if anything changed since the last write: a temporary file renamed over it,
@@ -107,6 +107,11 @@ defmodule Alavi.Status do
   def uplink(server, result, next_ms), do: GenServer.cast(server, {:uplink, result, next_ms})
 
   # contract: test/alavi/status_test.exs "feeds"
+  @doc "The polling config applied, and the served config refused, as `Alavi.ConfigKeeper` holds them."
+  @spec config(GenServer.server(), Alavi.ConfigKeeper.report()) :: :ok
+  def config(server, report), do: GenServer.cast(server, {:config, report})
+
+  # contract: test/alavi/status_test.exs "feeds"
   @spec clock(GenServer.server(), Clock.status()) :: :ok
   def clock(server, status), do: GenServer.cast(server, {:clock, status})
 
@@ -171,6 +176,9 @@ defmodule Alavi.Status do
 
   def handle_cast({:uplink, result, next_ms}, state),
     do: {:noreply, update(state, &Snapshot.uplink(&1, result, next_ms, state.clock.()))}
+
+  def handle_cast({:config, report}, state),
+    do: {:noreply, update(state, &Snapshot.config(&1, report))}
 
   def handle_cast({:clock, status}, state),
     do: {:noreply, update(state, &Snapshot.clock(&1, status))}

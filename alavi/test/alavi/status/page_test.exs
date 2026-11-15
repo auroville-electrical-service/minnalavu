@@ -97,6 +97,34 @@ defmodule Alavi.Status.PageTest do
       assert section(failed, "Summary") =~ ~s|<span class="bad">timeout</span>|
     end
 
+    test "shows the polling config applied by its digest, and a refusal with its reason" do
+      assert section(summary(5), "Summary") =~ "this collector does not fetch its config"
+      applied = String.duplicate("a", 64)
+      refused = String.duplicate("b", 64)
+
+      fine =
+        5
+        |> StatusFixture.snapshot()
+        |> Snapshot.config(%{digest: applied, refused: nil})
+        |> Page.render(5)
+        |> section("Summary")
+
+      assert fine =~ applied
+      assert fine =~ ~s|<span class="ok">none</span>|
+
+      report = %{digest: applied, refused: %{digest: refused, reason: "serial <too> long"}}
+
+      refusing =
+        5
+        |> StatusFixture.snapshot()
+        |> Snapshot.config(report)
+        |> Page.render(5)
+        |> section("Summary")
+
+      assert refusing =~ ~s|<span class="bad">#{refused}</span>|
+      assert refusing =~ "serial &lt;too&gt; long"
+    end
+
     test "says so when nothing is wrong" do
       assert section(summary(10), "Not OK") =~ "Every endpoint polled so far read every meter"
     end

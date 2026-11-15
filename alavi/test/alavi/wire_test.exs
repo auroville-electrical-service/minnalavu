@@ -59,7 +59,7 @@ defmodule Alavi.WireTest do
       events: events
     }
 
-    Wire.batch(batch, ~U[2026-11-01 00:05:00Z], backlog())
+    Wire.batch(batch, ~U[2026-11-01 00:05:00Z], backlog(), :none)
   end
 
   defp valid?(wire) do
@@ -69,7 +69,7 @@ defmodule Alavi.WireTest do
     match?({:ok, _}, JSV.validate(wire, JSV.build!(schema, formats: true)))
   end
 
-  describe "batch/3" do
+  describe "batch/4" do
     test "firmware reads go in firmware_reads, in the schema's shape, beside the readings" do
       wire = wire([reading(), names()])
       assert valid?(wire)
@@ -126,6 +126,78 @@ defmodule Alavi.WireTest do
   defp clock_checks do
     [ClockCheckFixture.answered(), ClockCheckFixture.kiss_of_death()] ++
       Enum.map([:timeout, :unreachable, :invalid], &ClockCheckFixture.failed/1)
+  end
+
+  describe "batch/4, with a config report" do
+    @applied String.duplicate("a", 64)
+    @refused String.duplicate("b", 64)
+
+    defp with_config(report) do
+      batch = %Batch{
+        id: "0b6f8d2e-5c1a-4e7b-9a3d-2f4c6e8a0b1c",
+        clock: Clock.unsynced(),
+        events: []
+      }
+
+      Wire.batch(batch, ~U[2026-11-01 00:05:00Z], backlog(), report)
+    end
+
+    test "none refused: all three keys, the refusal's null, valid in the schema" do
+      wire = with_config(%{digest: @applied, refused: nil})
+      assert valid?(wire)
+
+      assert wire["backlog"]["config"] ==
+               %{"digest" => @applied, "refused_digest" => nil, "reason" => nil}
+    end
+
+    test "a refusal with its reason, valid in the schema" do
+      wire =
+        with_config(%{digest: @applied, refused: %{digest: @refused, reason: "no endpoints"}})
+
+      assert valid?(wire)
+
+      assert wire["backlog"]["config"] ==
+               %{"digest" => @applied, "refused_digest" => @refused, "reason" => "no endpoints"}
+    end
+
+    test "a collector that does not fetch its config sends none" do
+      refute Map.has_key?(wire([reading()])["backlog"], "config")
+    end
+  end
+
+  describe "config/1" do
+    test "gives each of the contract's valid config reports from the report it encodes" do
+      cases =
+        @contract
+        |> Path.join("fixtures/batch.v1.cases.json")
+        |> File.read!()
+        |> JSON.decode!()
+        |> Map.fetch!("valid")
+        |> Enum.flat_map(& &1["changes"])
+        |> Enum.filter(&(&1["path"] == ["backlog", "config"]))
+
+      assert length(cases) >= 3
+
+      for %{"value" => value} <- cases do
+        refused =
+          value["refused_digest"] && %{digest: value["refused_digest"], reason: value["reason"]}
+
+        assert Wire.config(%{digest: value["digest"], refused: refused}) == value
+      end
+    end
+
+    test "a reason is cut to the 1000 characters the schema allows, counted as code points" do
+      reason = String.duplicate("é", 999) <> "e\u0301" <> "more"
+
+      %{"reason" => cut} =
+        Wire.config(%{digest: @applied, refused: %{digest: @refused, reason: reason}})
+
+      assert cut == String.duplicate("é", 999) <> "e"
+
+      assert valid?(
+               with_config(%{digest: @applied, refused: %{digest: @refused, reason: reason}})
+             )
+    end
   end
 
   describe "ClockCheck.to_wire/1" do

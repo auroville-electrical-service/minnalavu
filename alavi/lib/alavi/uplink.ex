@@ -8,14 +8,16 @@ defmodule Alavi.Uplink do
   When the buffer is empty and no answer has come from the server for
   `heartbeat_ms`, it sends a heartbeat (`Alavi.Buffer.heartbeat/1`), so that
   it learns of pending jobs, and the server sees an idle collector, not a
-  silent one. Every answer's `jobs` go to the `intake` (`Alavi.Intake`).
+  silent one. Every answer's `jobs` go to the `intake` (`Alavi.Intake`), and
+  its `config_digest` to the `config` keeper (`Alavi.ConfigKeeper`), whose
+  report each batch's backlog carries.
   """
 
   use GenServer
 
   require Logger
 
-  alias Alavi.{Buffer, Intake, Status, Wire}
+  alias Alavi.{Buffer, ConfigKeeper, Intake, Status, Wire}
   alias Alavi.Buffer.Batch
   alias Alavi.Uplink.{HTTP, Response, Target}
 
@@ -24,6 +26,8 @@ defmodule Alavi.Uplink do
   @typedoc """
   `timeout_ms` bounds the connect and the answer of each POST. `intake` is
   `:none` where no jobs are run (tests); jobs an answer lists are then logged.
+  `config` is `:none` for a collector that does not fetch its config: its
+  backlog then has no `config`, and answers' digests are not looked at.
   """
   @type option ::
           {:buffer, GenServer.server()}
@@ -32,6 +36,7 @@ defmodule Alavi.Uplink do
           | {:idle_ms, pos_integer()}
           | {:heartbeat_ms, pos_integer()}
           | {:intake, Intake.t() | :none}
+          | {:config, GenServer.server() | :none}
           | {:backoff_ms, backoff()}
           | {:timeout_ms, pos_integer()}
           | {:status, GenServer.server()}
@@ -52,6 +57,7 @@ defmodule Alavi.Uplink do
       idle_ms: Keyword.fetch!(opts, :idle_ms),
       heartbeat_ms: Keyword.fetch!(opts, :heartbeat_ms),
       intake: Keyword.fetch!(opts, :intake),
+      config: Keyword.fetch!(opts, :config),
       answered: monotonic(),
       timeout_ms: Keyword.fetch!(opts, :timeout_ms),
       status: Keyword.fetch!(opts, :status),
@@ -118,8 +124,25 @@ defmodule Alavi.Uplink do
   # Every answer lists the pending jobs; one naming unknown requests is about the batch sent.
   defp answered(answer, state) do
     unknown(answer)
+    digest(state.config, answer)
     %{state | answered: monotonic(), intake: jobs(state.intake, answer, monotonic())}
   end
+
+  defp digest(:none, _answer), do: :ok
+
+  defp digest(keeper, %{"config_digest" => digest}) when is_binary(digest) do
+    if digest =~ ~r/\A[0-9a-f]{64}\z/,
+      do: ConfigKeeper.answered(keeper, digest),
+      else: digest_missing(digest)
+  end
+
+  defp digest(_keeper, answer), do: digest_missing(answer["config_digest"])
+
+  defp digest_missing(value),
+    do:
+      Logger.warning(
+        "alavi uplink: the answer's config_digest is not a SHA-256 in lowercase hex: #{inspect(value)}"
+      )
 
   defp jobs(intake, %{"jobs" => jobs}, now) when intake != :none,
     do: Intake.offer(intake, jobs, now)
@@ -140,9 +163,13 @@ defmodule Alavi.Uplink do
   defp unknown(_answer), do: :ok
 
   defp send_batch(%Batch{} = batch, state) do
-    body = batch |> Wire.batch(state.clock.(), Buffer.backlog(state.buffer)) |> JSON.encode!()
+    backlog = Buffer.backlog(state.buffer)
+    body = batch |> Wire.batch(state.clock.(), backlog, report(state.config)) |> JSON.encode!()
     state.target |> HTTP.post(body, state.timeout_ms) |> Response.decide(batch.id)
   end
+
+  defp report(:none), do: :none
+  defp report(keeper), do: ConfigKeeper.report(keeper)
 
   defp settle({:ack, answer}, batch, state) do
     state = answered(answer, state)

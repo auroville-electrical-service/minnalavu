@@ -32,6 +32,19 @@ defmodule Alavi.Uplink.Response do
   def decide({:ok, status, body}, _batch_id), do: {:retry, "HTTP #{status}: #{excerpt(body)}"}
   def decide({:error, reason}, _batch_id), do: {:retry, "no answer: #{inspect(reason)}"}
 
+  # contract: test/alavi/uplink/response_test.exs "config/1"
+  @doc "The served config as decoded; any other answer is a fetch to try again."
+  @spec config(Alavi.Uplink.HTTP.result()) :: {:ok, term()} | {:error, String.t()}
+  def config({:ok, 200, body}) do
+    case JSON.decode(body) do
+      {:ok, document} -> {:ok, document}
+      {:error, _} -> {:error, "HTTP 200 without JSON: #{excerpt(body)}"}
+    end
+  end
+
+  def config({:ok, status, body}), do: {:error, "HTTP #{status}: #{excerpt(body)}"}
+  def config({:error, reason}), do: {:error, "no answer: #{inspect(reason)}"}
+
   defp message(text) when is_binary(text), do: excerpt(text)
   defp message(other), do: inspect(other)
 

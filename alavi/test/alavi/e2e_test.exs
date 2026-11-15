@@ -11,6 +11,7 @@ defmodule Alavi.EndToEndTest do
   import Alavi.PollerCase
 
   alias Alavi.{Buffer, Clock, Collector, FakeNtp, Uplink}
+  alias Alavi.Config.{Digest, Saved}
   alias Alavi.Uplink.Target
 
   @moduletag :e2e
@@ -43,7 +44,14 @@ defmodule Alavi.EndToEndTest do
     String.trim(token)
   end
 
-  defp start_collector!(dir, endpoints, token, named \\ [], clock \\ &DateTime.utc_now/0) do
+  defp start_collector!(
+         dir,
+         endpoints,
+         token,
+         named \\ [],
+         clock \\ &DateTime.utc_now/0,
+         keeper \\ :none
+       ) do
     {:ok, target} =
       Target.parse(env!("MINNALAVU_API_URL"), token, allow_http: true, cacerts: [])
 
@@ -68,6 +76,7 @@ defmodule Alavi.EndToEndTest do
       buffer: buffer,
       clock: clock,
       uplink: uplink,
+      config_keeper: keeper,
       raw_log: raw_log(),
       clock_status: :none,
       clock_check: :none,
@@ -300,6 +309,7 @@ defmodule Alavi.EndToEndTest do
        idle_ms: 50,
        heartbeat_ms: 100,
        intake: :none,
+       config: :none,
        backoff_ms: %{min: 50, max: 500},
        timeout_ms: 5_000,
        status: no_status()}
@@ -497,5 +507,94 @@ defmodule Alavi.EndToEndTest do
              SELECT answered, p50_ms, p90_ms, p99_ms, max_ms
              FROM store.latency_meter_days WHERE collector_id = '#{id}'
              """)
+  end
+
+  test "a registry change is fetched, saved and reported; one the collector cannot parse is refused, raised in health",
+       ctx do
+    {id, token} = new_collector!()
+    {_sim, port} = start_sim!(:tcp)
+    endpoints = [endpoint(port, "tcp", [meter(1, "elite_440")], %{"interval_ms" => 300})]
+    {:ok, local} = Digest.digest(%{"schema_version" => 1, "endpoints" => endpoints})
+
+    sql!("""
+    SELECT to_json(admin.register_endpoint(
+      endpoint_id => '#{id}_ep', valid_from => '2026-01-01Z', collector_id => '#{id}',
+      host => '127.0.0.1', port => #{port}, framing => 'tcp', polled_by_other_system => false,
+      timeout_ms => 100, max_timeouts => 3, retries => 2, busy_backoff_ms => 10,
+      reconnect_backoff_min_ms => 10, reconnect_backoff_max_ms => 40, interval_ms => 300))
+    """)
+
+    sql!("""
+    SELECT to_json(admin.register_target(endpoint_id => '#{id}_ep', unit_id => 1,
+      valid_from => '2026-01-01Z', profile => 'elite_440', interval_ms => NULL))
+    """)
+
+    served = fn ->
+      sql!("SELECT to_json(registry.config_digest(registry.collector_config('#{id}')))")
+    end
+
+    first = served.()
+    refute first == local
+
+    keeper = [digest: local, profiles: profiles(), name: Alavi.ConfigKeeper]
+    start_collector!(ctx.tmp_dir, endpoints, token, [], &DateTime.utc_now/0, keeper)
+
+    reported = fn ->
+      case rows!("""
+           SELECT config_digest AS digest, config_refused_digest AS refused,
+                  config_refusal_reason AS reason
+           FROM store.uploads WHERE collector_id = '#{id}'
+           ORDER BY received_at DESC, upload_id DESC LIMIT 1
+           """) do
+        [row] -> row
+        [] -> nil
+      end
+    end
+
+    saved = fn ->
+      case Saved.read(ctx.tmp_dir) do
+        {:ok, _path, document} -> document |> Digest.digest() |> elem(1)
+        :none -> nil
+      end
+    end
+
+    await!("the registry's config fetched, saved and reported", fn ->
+      match?(%{"digest" => ^first, "refused" => nil}, reported.()) and saved.() == first
+    end)
+
+    sql!("""
+    SELECT to_json(admin.change_target(endpoint_id => '#{id}_ep', unit_id => 1,
+      valid_from => now(), profile => 'elite_440', interval_ms => 600))
+    """)
+
+    second = served.()
+    refute second == first
+
+    await!("the changed config fetched, saved and reported", fn ->
+      match?(%{"digest" => ^second, "refused" => nil}, reported.()) and saved.() == second
+    end)
+
+    # A profile this collector has not loaded: the whole config is refused.
+    sql!("""
+    SELECT to_json(admin.change_target(endpoint_id => '#{id}_ep', unit_id => 1,
+      valid_from => now(), profile => 'no_such_profile', interval_ms => 600))
+    """)
+
+    third = served.()
+
+    await!("the refusal reported", fn ->
+      match?(%{"digest" => ^second, "refused" => ^third}, reported.())
+    end)
+
+    assert reported.()["reason"] =~ "no_such_profile"
+    assert saved.() == second
+
+    assert [%{"detail" => detail}] =
+             rows!("""
+             SELECT detail FROM health.problems
+             WHERE kind = 'config_refused' AND subject = '#{id}'
+             """)
+
+    assert detail =~ third and detail =~ second
   end
 end

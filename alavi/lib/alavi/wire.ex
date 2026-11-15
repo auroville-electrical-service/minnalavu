@@ -4,16 +4,28 @@ defmodule Alavi.Wire do
   no collector id: the server knows the collector from its token.
   """
 
-  alias Alavi.{Buffer, Clock, ClockCheck, FirmwareRead, LatencyDay, MissedRead, Reading}
+  alias Alavi.{
+    Buffer,
+    Clock,
+    ClockCheck,
+    ConfigKeeper,
+    FirmwareRead,
+    LatencyDay,
+    MissedRead,
+    Reading
+  }
+
   alias Alavi.Buffer.Batch
 
-  # contract: test/alavi/wire_test.exs "batch/3"
+  # contract: test/alavi/wire_test.exs "batch/4"
   @doc """
   `sent_at` is the collector's clock. `firmware_reads`, `clock_checks` and
-  `latency` only when the batch holds any.
+  `latency` only when the batch holds any; the backlog's `config` only from a
+  collector that fetches its config, `:none` otherwise.
   """
-  @spec batch(Batch.t(), DateTime.t(), Buffer.backlog()) :: %{String.t() => term()}
-  def batch(%Batch{} = batch, sent_at, backlog) do
+  @spec batch(Batch.t(), DateTime.t(), Buffer.backlog(), ConfigKeeper.report() | :none) ::
+          %{String.t() => term()}
+  def batch(%Batch{} = batch, sent_at, backlog, config) do
     events = Enum.group_by(batch.events, & &1.__struct__)
 
     %{
@@ -21,7 +33,7 @@ defmodule Alavi.Wire do
       "batch_id" => batch.id,
       "sent_at" => DateTime.to_iso8601(sent_at),
       "clock" => Clock.to_wire(batch.clock),
-      "backlog" => backlog(backlog),
+      "backlog" => backlog |> backlog() |> with_config(config),
       "readings" => wire(events, Reading),
       "missed_reads" => wire(events, MissedRead)
     }
@@ -31,6 +43,9 @@ defmodule Alavi.Wire do
   end
 
   defp wire(events, kind), do: events |> Map.get(kind, []) |> Enum.map(&kind.to_wire/1)
+
+  defp with_config(backlog, :none), do: backlog
+  defp with_config(backlog, report), do: Map.put(backlog, "config", config(report))
 
   defp optional(batch, _key, []), do: batch
   defp optional(batch, key, items), do: Map.put(batch, key, items)
@@ -53,4 +68,18 @@ defmodule Alavi.Wire do
       "quarantined" => backlog.quarantined
     }
   end
+
+  @reason_chars 1000
+
+  # contract: test/alavi/wire_test.exs "config/1"
+  @doc "A refusal's reason is cut to the #{@reason_chars} characters the batch schema allows."
+  @spec config(ConfigKeeper.report()) :: %{String.t() => String.t() | nil}
+  def config(%{digest: digest, refused: nil}),
+    do: %{"digest" => digest, "refused_digest" => nil, "reason" => nil}
+
+  def config(%{digest: digest, refused: %{digest: refused, reason: reason}}),
+    do: %{"digest" => digest, "refused_digest" => refused, "reason" => cut(reason)}
+
+  # The schema counts characters as code points, not graphemes.
+  defp cut(reason), do: reason |> String.codepoints() |> Enum.take(@reason_chars) |> Enum.join()
 end

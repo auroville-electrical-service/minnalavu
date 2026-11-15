@@ -8,6 +8,7 @@ defmodule Alavi.CollectorTest do
     Clock,
     ClockCheck,
     Collector,
+    Config,
     FakeNtp,
     FirmwareRead,
     MissedRead,
@@ -18,6 +19,7 @@ defmodule Alavi.CollectorTest do
   }
 
   alias Alavi.Buffer.Batch
+  alias Alavi.Config.{Digest, Saved}
   alias Alavi.Uplink.Target
 
   @moduletag :tmp_dir
@@ -48,6 +50,7 @@ defmodule Alavi.CollectorTest do
       buffer: buffer,
       clock: clock,
       uplink: uplink,
+      config_keeper: :none,
       raw_log: raw_log(),
       clock_status: :none,
       clock_check: :none,
@@ -452,7 +455,7 @@ defmodule Alavi.CollectorTest do
     schema =
       @contract |> Path.join("schema/batch.v1.schema.json") |> File.read!() |> JSON.decode!()
 
-    wire = Wire.batch(batch, ~U[2026-11-01 00:05:00Z], Buffer.backlog(buffer))
+    wire = Wire.batch(batch, ~U[2026-11-01 00:05:00Z], Buffer.backlog(buffer), :none)
     match?({:ok, _}, JSV.validate(wire, JSV.build!(schema, formats: true)))
   end
 
@@ -558,6 +561,42 @@ defmodule Alavi.CollectorTest do
     test "refuses a token that is not a bearer token", %{settings: settings} do
       assert {:error, "server token: " <> _} =
                Collector.load(put_in(settings.server.token, "two words"), @linux)
+    end
+
+    test "with no config served yet, the local file, and its digest for the keeper",
+         %{settings: settings} do
+      {:ok, local} = Config.read(settings.polling_config)
+      assert {:ok, opts} = Collector.load(settings, @linux)
+      assert Digest.digest(local) == {:ok, opts[:config_keeper][:digest]}
+      assert opts[:config_keeper][:name] == Alavi.ConfigKeeper
+      assert Map.has_key?(opts[:config_keeper][:profiles], "elite_440")
+    end
+
+    test "the config last served, saved under the buffer's dir, wins over the local file",
+         %{settings: settings} do
+      served = %{
+        "schema_version" => 1,
+        "endpoints" => [endpoint(5021, "tcp", [meter(2, "elite_500")])]
+      }
+
+      :ok = Saved.save(settings.buffer.dir, served)
+      assert {:ok, opts} = Collector.load(settings, @linux)
+      assert [%{port: 5021}] = opts[:config].endpoints
+      assert Digest.digest(served) == {:ok, opts[:config_keeper][:digest]}
+    end
+
+    test "a saved config the loaded profiles refuse stops startup, naming the file",
+         %{settings: settings} do
+      served = %{
+        "schema_version" => 1,
+        "endpoints" => [endpoint(5021, "tcp", [meter(2, "no_such_profile")])]
+      }
+
+      :ok = Saved.save(settings.buffer.dir, served)
+      assert {:error, message} = Collector.load(settings, @linux)
+      assert message =~ Saved.path(settings.buffer.dir)
+      assert message =~ "no_such_profile"
+      assert message =~ settings.polling_config
     end
 
     test "names a polling config file that does not load", %{settings: settings} do

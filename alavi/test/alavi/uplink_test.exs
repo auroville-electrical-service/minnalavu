@@ -1,11 +1,25 @@
 defmodule Alavi.UplinkTest do
   use ExUnit.Case, async: true
 
-  import Alavi.PollerCase, only: [start_status!: 1, eventually!: 1, refused: 0]
+  import Alavi.PollerCase,
+    only: [start_status!: 1, eventually!: 1, refused: 0, endpoint: 3, meter: 2, profiles: 0]
+
   import ExUnit.CaptureLog
 
-  alias Alavi.{Buffer, Clock, MissedRead, Reading, Status, TestServer, Uplink}
-  alias Alavi.Uplink.Target
+  alias Alavi.{
+    Buffer,
+    Clock,
+    Config,
+    ConfigKeeper,
+    MissedRead,
+    Reading,
+    Status,
+    TestServer,
+    Uplink
+  }
+
+  alias Alavi.Config.Digest
+  alias Alavi.Uplink.{HTTP, Response, Target}
 
   @moduletag :tmp_dir
   @moduletag :capture_log
@@ -40,6 +54,7 @@ defmodule Alavi.UplinkTest do
       idle_ms: 20,
       heartbeat_ms: 60_000,
       intake: :none,
+      config: :none,
       backoff_ms: %{min: 10, max: 40},
       timeout_ms: 2_000,
       status: Alavi.NoStatus
@@ -86,7 +101,7 @@ defmodule Alavi.UplinkTest do
 
   defp request! do
     assert_receive {:request, request}, 2_000
-    Map.put(request, :json, JSON.decode!(request.body))
+    Map.put(request, :json, request.body != "" && JSON.decode!(request.body))
   end
 
   # The next request carrying readings, past any heartbeats.
@@ -370,6 +385,125 @@ defmodule Alavi.UplinkTest do
 
       assert log =~ "no intake to run them" and log =~ "7d2c1f0e"
       assert log =~ "does not know" and log =~ "0b6f8d2e"
+    end
+  end
+
+  describe "start_link/1, with a config keeper" do
+    # Ingest answers name `served`'s digest; GET /rpc/collector_config serves it.
+    defp serving(served) do
+      fn
+        %{method: "GET"} ->
+          {200, JSON.encode!(served)}
+
+        %{body: body} ->
+          {:ok, digest} = Digest.digest(served)
+          id = JSON.decode!(body)["batch_id"]
+          {200, JSON.encode!(%{"batch_id" => id, "config_digest" => digest})}
+      end
+    end
+
+    defp keeper!(dir, port) do
+      {:ok, target} =
+        Target.parse("http://127.0.0.1:#{port}", @token, allow_http: true, cacerts: [])
+
+      start = %{
+        "schema_version" => 1,
+        "endpoints" => [endpoint(5020, "tcp", [meter(1, "elite_440")])]
+      }
+
+      {:ok, config} = Config.parse(start, profiles())
+      {:ok, digest} = Digest.digest(start)
+      name = :"keeper_#{System.unique_integer([:positive])}"
+
+      start_supervised!(
+        {ConfigKeeper,
+         config: config,
+         digest: digest,
+         profiles: profiles(),
+         dir: dir,
+         fetch: fn -> target |> HTTP.get_config(2_000) |> Response.config() end,
+         applied: fn _config, _digest -> :ok end,
+         status: Alavi.NoStatus,
+         name: name}
+      )
+
+      {name, digest}
+    end
+
+    defp posts!(n), do: for(_ <- 1..n, do: post!())
+
+    # The next POST, counting the GETs before it.
+    defp post!(gets \\ 0) do
+      case request!() do
+        %{method: "GET"} -> post!(gets + 1)
+        %{json: json} -> {json, gets}
+      end
+    end
+
+    test "a new digest in an answer is fetched with the token, and the next backlog reports it",
+         ctx do
+      served = %{
+        "schema_version" => 1,
+        "endpoints" => [endpoint(5021, "tcp", [meter(1, "elite_440")])]
+      }
+
+      {:ok, new} = Digest.digest(served)
+      server = server!([serving(served)])
+      {keeper, start} = keeper!(ctx.tmp_dir, TestServer.port(server))
+      uplink!(ctx.buffer, TestServer.port(server), heartbeat_ms: 50, config: keeper)
+
+      {first, 0} = post!()
+
+      assert first["backlog"]["config"] == %{
+               "digest" => start,
+               "refused_digest" => nil,
+               "reason" => nil
+             }
+
+      assert_receive {:request,
+                      %{method: "GET", path: "/rpc/collector_config", headers: headers}},
+                     2_000
+
+      assert headers["authorization"] == "Bearer " <> @token
+      {second, 0} = post!()
+      assert second["backlog"]["config"]["digest"] == new
+      assert [{_, 0}, {_, 0}] = posts!(2)
+    end
+
+    test "a refused config is reported in each backlog and not fetched again", ctx do
+      served = %{"schema_version" => 1, "endpoints" => []}
+      {:ok, refused} = Digest.digest(served)
+      server = server!([serving(served)])
+      {keeper, start} = keeper!(ctx.tmp_dir, TestServer.port(server))
+      uplink!(ctx.buffer, TestServer.port(server), heartbeat_ms: 50, config: keeper)
+
+      [{_, 0}, {_, 1} | rest] = posts!(5)
+      assert Enum.all?(rest, &match?({_, 0}, &1))
+
+      for {json, _} <- rest do
+        assert %{"digest" => ^start, "refused_digest" => ^refused, "reason" => "endpoints" <> _} =
+                 json["backlog"]["config"]
+
+        valid!(json)
+      end
+    end
+
+    test "an answer whose digest is not a SHA-256 in lowercase hex fetches nothing", ctx do
+      answer = fn %{body: body} ->
+        id = JSON.decode!(body)["batch_id"]
+        {200, JSON.encode!(%{"batch_id" => id, "config_digest" => String.duplicate("A", 64)})}
+      end
+
+      server = server!([answer])
+      {keeper, _start} = keeper!(ctx.tmp_dir, TestServer.port(server))
+
+      log =
+        capture_log(fn ->
+          uplink!(ctx.buffer, TestServer.port(server), heartbeat_ms: 50, config: keeper)
+          assert [{_, 0}, {_, 0}, {_, 0}] = posts!(3)
+        end)
+
+      assert log =~ "config_digest is not a SHA-256"
     end
   end
 

@@ -29,6 +29,7 @@ defmodule Alavi.Status.Snapshot do
     :clock_check,
     :buffer,
     :uplink,
+    :config,
     :endpoints,
     :raw_lines
   ]
@@ -159,6 +160,9 @@ defmodule Alavi.Status.Snapshot do
   @typedoc "As on the wire's `backlog`, with when it was asked; `nil` if the buffer did not answer."
   @type buffer :: %{as_of: time(), backlog: %{String.t() => term()} | nil}
 
+  @typedoc "As a batch's backlog reports it (`Alavi.Wire.config/1`)."
+  @type config :: %{String.t() => String.t() | nil}
+
   @typedoc "What the uplink did with one attempt."
   @type uplink_result ::
           {:stored, String.t()}
@@ -174,6 +178,7 @@ defmodule Alavi.Status.Snapshot do
           clock_check: clock_check() | nil,
           buffer: buffer() | nil,
           uplink: uplink() | nil,
+          config: config() | nil,
           endpoints: [endpoint()],
           raw_lines: [%{at: time(), line: String.t()}]
         }
@@ -190,6 +195,7 @@ defmodule Alavi.Status.Snapshot do
       clock_check: nil,
       buffer: nil,
       uplink: nil,
+      config: nil,
       endpoints: Enum.map(endpoints, &endpoint/1),
       raw_lines: []
     }
@@ -306,6 +312,10 @@ defmodule Alavi.Status.Snapshot do
 
     %{snapshot | uplink: uplink}
   end
+
+  # contract: test/alavi/status_test.exs "Snapshot.config/2"
+  @spec config(t(), Alavi.ConfigKeeper.report()) :: t()
+  def config(%__MODULE__{} = snapshot, report), do: %{snapshot | config: Wire.config(report)}
 
   # contract: test/alavi/status_test.exs "Snapshot.clock/2"
   @spec clock(t(), Clock.status()) :: t()

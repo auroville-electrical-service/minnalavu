@@ -16,9 +16,12 @@ defmodule Alavi.Uplink.TargetTest do
   end
 
   describe "parse/3" do
-    test "the ingest path is appended to the base URL's path" do
-      assert {:ok, %Target{url: ~c"https://store.example/api/rpc/ingest"}} =
-               parse("https://store.example/api/")
+    test "the ingest and config paths are appended to the base URL's path" do
+      assert {:ok,
+              %Target{
+                url: ~c"https://store.example/api/rpc/ingest",
+                config_url: ~c"https://store.example/api/rpc/collector_config"
+              }} = parse("https://store.example/api/")
     end
 
     test "plain http is refused unless explicitly allowed" do

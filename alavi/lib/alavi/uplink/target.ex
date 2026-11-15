@@ -1,15 +1,21 @@
 defmodule Alavi.Uplink.Target do
   # Shown as the URL only, so a crash report never logs the token or the CA store.
-  @derive {Inspect, only: [:url]}
-  @enforce_keys [:url, :token, :ssl]
+  @derive {Inspect, only: [:url, :config_url]}
+  @enforce_keys [:url, :config_url, :token, :ssl]
   defstruct @enforce_keys
 
-  @typedoc "`url` is the ingest URL; `ssl` is `[]` for plain HTTP."
-  @type t :: %__MODULE__{url: charlist(), token: String.t(), ssl: [:ssl.tls_client_option()]}
+  @typedoc "`url` is the ingest URL, `config_url` the served config's; `ssl` is `[]` for plain HTTP."
+  @type t :: %__MODULE__{
+          url: charlist(),
+          config_url: charlist(),
+          token: String.t(),
+          ssl: [:ssl.tls_client_option()]
+        }
 
   @type option :: {:allow_http, boolean()} | {:cacerts, [:public_key.combined_cert()]}
 
   @ingest "/rpc/ingest"
+  @config "/rpc/collector_config"
 
   # contract: test/alavi/uplink/target_test.exs "parse/3"
   @spec parse(String.t(), String.t(), [option()]) :: {:ok, t()} | {:error, String.t()}
@@ -20,13 +26,17 @@ defmodule Alavi.Uplink.Target do
     with {:ok, uri} <- uri(base_url),
          {:ok, ssl} <- ssl(uri, allow_http, cacerts),
          :ok <- token(token) do
-      path = String.trim_trailing(uri.path || "", "/") <> @ingest
-      url = URI.to_string(%{uri | path: path})
-      {:ok, %__MODULE__{url: String.to_charlist(url), token: token, ssl: ssl}}
+      {:ok,
+       %__MODULE__{url: url(uri, @ingest), config_url: url(uri, @config), token: token, ssl: ssl}}
     else
       {:error, reason} -> {:error, "server URL #{base_url}: #{reason}"}
       {:token, reason} -> {:error, "server token: #{reason}"}
     end
+  end
+
+  defp url(uri, rpc) do
+    path = String.trim_trailing(uri.path || "", "/") <> rpc
+    %{uri | path: path} |> URI.to_string() |> String.to_charlist()
   end
 
   defp uri(url) do

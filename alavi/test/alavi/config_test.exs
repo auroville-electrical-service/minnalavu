@@ -129,18 +129,23 @@ defmodule Alavi.ConfigTest do
     end
   end
 
-  describe "load/2" do
-    test "loads a config file" do
+  describe "read/1" do
+    test "reads and decodes a config file, which parse/2 then takes" do
       path =
         Path.join(System.tmp_dir!(), "alavi-config-#{System.unique_integer([:positive])}.json")
 
       File.write!(path, JSON.encode!(valid()))
       on_exit(fn -> File.rm(path) end)
 
-      assert {:ok, %Config{endpoints: [_, _]}} = Config.load(path, profiles())
+      assert {:ok, json} = Config.read(path)
+      assert {:ok, %Config{endpoints: [_, _]}} = Config.parse(json, profiles())
 
       assert {:error, "#{path}.missing: no such file or directory"} ==
-               Config.load(path <> ".missing", profiles())
+               Config.read(path <> ".missing")
+
+      File.write!(path, "{")
+      assert {:error, reason} = Config.read(path)
+      assert reason =~ "#{path}: invalid JSON"
     end
   end
 

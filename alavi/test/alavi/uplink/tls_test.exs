@@ -51,4 +51,31 @@ defmodule Alavi.Uplink.TLSTest do
       refute_receive {:request, _}, 100
     end
   end
+
+  describe "get_config/2" do
+    test "the served config is fetched with the collector's token, verifying the server alike" do
+      tls = chain("localhost")
+      port = server!(tls)
+
+      {:ok, target} =
+        Target.parse("https://localhost:#{port}", "t.o.k",
+          allow_http: false,
+          cacerts: tls[:cacerts]
+        )
+
+      assert {:ok, 200, _body} = HTTP.get_config(target, 2_000)
+
+      assert_receive {:request, %{method: "GET", path: "/rpc/collector_config", headers: headers}}
+
+      assert headers["authorization"] == "Bearer t.o.k"
+
+      {:ok, untrusted} =
+        Target.parse("https://localhost:#{port}", "t.o.k",
+          allow_http: false,
+          cacerts: :public_key.cacerts_get()
+        )
+
+      assert {:error, {:failed_connect, _}} = HTTP.get_config(untrusted, 2_000)
+    end
+  end
 end

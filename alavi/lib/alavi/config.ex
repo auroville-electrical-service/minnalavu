@@ -1,7 +1,8 @@
 defmodule Alavi.Config do
   @moduledoc """
   The collector's polling config: which endpoints and meters to read, and how.
-  `load/2` reads a local file; `parse/2` takes a decoded document.
+  `read/1` decodes a local file; `parse/2` parses a decoded document, from
+  the file or as the server served it (`Alavi.ConfigKeeper`).
 
   The document is schema version 1 of `contract/config/config.v1.schema.json`,
   which gives each field's meaning; its fields and limits are read from there
@@ -18,16 +19,11 @@ defmodule Alavi.Config do
 
   @type t :: %__MODULE__{endpoints: [Endpoint.t(), ...]}
 
-  # contract: test/alavi/config_test.exs "load/2"
-  @spec load(Path.t(), %{String.t() => Profile.t()}) :: {:ok, t()} | {:error, String.t()}
-  def load(path, profiles) do
-    with {:ok, text} <- read(path),
-         {:ok, json} <- decode(path, text) do
-      case parse(json, profiles) do
-        {:ok, config} -> {:ok, config}
-        {:error, reason} -> {:error, "#{path}: #{reason}"}
-      end
-    end
+  # contract: test/alavi/config_test.exs "read/1"
+  @doc "The document in a local file, decoded but not parsed."
+  @spec read(Path.t()) :: {:ok, term()} | {:error, String.t()}
+  def read(path) do
+    with {:ok, text} <- read_file(path), do: decode(path, text)
   end
 
   # contract: test/alavi/config_test.exs "parse/2"
@@ -50,7 +46,7 @@ defmodule Alavi.Config do
   defp expected_serials(endpoints),
     do: for(%{meters: meters} <- endpoints, %{serial: s} <- meters, s != nil, do: s)
 
-  defp read(path) do
+  defp read_file(path) do
     case File.read(path) do
       {:ok, text} -> {:ok, text}
       {:error, reason} -> {:error, "#{path}: #{:file.format_error(reason)}"}

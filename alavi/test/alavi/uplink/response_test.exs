@@ -67,4 +67,19 @@ defmodule Alavi.Uplink.ResponseTest do
                Response.decide({:ok, 422, body}, @batch)
     end
   end
+
+  describe "config/1" do
+    test "a 200 with JSON is the document served, as decoded" do
+      assert Response.config({:ok, 200, ~s({"schema_version": 1, "endpoints": []})}) ==
+               {:ok, %{"schema_version" => 1, "endpoints" => []}}
+    end
+
+    test "anything else is a fetch that failed, with what came back" do
+      assert {:error, "HTTP 200 without JSON: <html>" <> _} =
+               Response.config({:ok, 200, "<html>login</html>"})
+
+      assert {:error, "HTTP 403: " <> _} = Response.config({:ok, 403, @error})
+      assert {:error, "no answer: " <> _} = Response.config({:error, :timeout})
+    end
+  end
 end
