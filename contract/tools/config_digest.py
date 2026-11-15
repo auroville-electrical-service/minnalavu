@@ -48,6 +48,15 @@ CASES: tuple[tuple[str, list[dict[str, Json]]], ...] = (
             {"path": ["endpoints", 0, "meters", 0, "serial"], "value": 'EX-"1"\\'},
         ],
     ),
+    (
+        "control characters, each escaped, and DEL, which is not",
+        [
+            {
+                "path": ["endpoints", 0, "meters", 0, "serial"],
+                "value": "EX-\b\t\n\f\r\x01\x1f\x7f-1",
+            },
+        ],
+    ),
 )
 
 
