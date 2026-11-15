@@ -61,6 +61,20 @@ when the serial, product code or names differ from the last it sent for that
 endpoint and unit, and always the first after it starts. A batch with nothing
 changed has none. Readings do not carry firmware.
 
+A batch may also carry `clock_checks`: the collector's clock measured against
+an NTP server (SNTP), at start, once a day and after its clock steps, each
+sent once and kept whether or not the server answered. A check names its
+`trigger`, the `server` as configured and its `outcome`; the collector's
+send and receive times `t1` and `t4` (microseconds) are always there, and an
+answered check adds the server's receive and send times `t2` and `t3`
+(nanoseconds), the `address` that answered, `stratum`, `leap` and
+`reference_id`. A `kiss_of_death` check has the `address` that sent it and
+its `reference_id`, which is the kiss code (`RATE`, `DENY`, `RSTR`), and no
+server times, stratum or leap. Any other check has none of those. The times
+are stored as measured: offset, delay and error bound are computed in the
+store, never sent. Ingest keys a check on (collector, `t1`). `clock` stays
+beside it: what the OS claims, where `clock_checks` is what was measured.
+
 A reading or missed read taken for a request carries its `request_id`: one
 of the jobs the server's answer to an upload listed (`central/README.md`).
 A read the collector made of its own accord carries none; `null` is refused.

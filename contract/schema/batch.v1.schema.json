@@ -71,6 +71,11 @@
       "description": "Meters' software and firmware names. The collector sends a meter's when they, or the serial or product code read with them, differ from the last it sent for that endpoint and unit, and the first after it starts. Optional: a batch with nothing changed has none.",
       "type": "array",
       "items": { "$ref": "#/$defs/firmware_read" }
+    },
+    "clock_checks": {
+      "description": "The collector's clock measured against an NTP server: at start, once a day, and after a step in its clock. Each check is sent once it ends, answered or not. The four SNTP times are stored as measured, never an offset; offset, delay and error bound are the store's to compute. Ingest keys a check on (collector, t1): a resent check is a duplicate, not a conflict. Optional: a batch sent between checks has none.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/clock_check" }
     }
   },
   "$defs": {
@@ -269,6 +274,90 @@
           "$ref": "#/$defs/name"
         }
       }
+    },
+    "collector_time": {
+      "description": "The collector's clock, at most microseconds.",
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[^.]*(\\.[0-9]{1,6})?([Zz]|[+-][0-9]{2}:[0-9]{2})$"
+    },
+    "server_time": {
+      "description": "The NTP server's clock as its reply gave it, at most nanoseconds (an NTP fraction is 2^-32 s).",
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[^.]*(\\.[0-9]{1,9})?([Zz]|[+-][0-9]{2}:[0-9]{2})$"
+    },
+    "clock_check": {
+      "description": "One SNTP query (RFC 4330) and what came of it. answered: a reply the collector accepted, which carries the server's times and the header fields; timeout: no reply in time; unreachable: no query could be sent (the name did not resolve, or the socket failed); kiss_of_death: a reply with stratum 0, which carries the address that sent it and its kiss code in reference_id; invalid: a reply that is not a usable answer (wrong mode, version or originate echo, or a server that says it is unsynchronised). Any other check carries none of the server's fields.",
+      "type": "object",
+      "unevaluatedProperties": false,
+      "required": ["trigger", "server", "outcome", "t1", "t4"],
+      "properties": {
+        "trigger": {
+          "description": "start: the collector started; daily: a day since the last check; step: the collector's clock stepped.",
+          "enum": ["start", "daily", "step"]
+        },
+        "server": {
+          "description": "The NTP server as configured: a name or an address.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253
+        },
+        "outcome": { "enum": ["answered", "timeout", "unreachable", "kiss_of_death", "invalid"] },
+        "t1": {
+          "description": "When the collector sent the query, or tried to.",
+          "$ref": "#/$defs/collector_time"
+        },
+        "t4": {
+          "description": "When the collector received the reply, or gave up waiting for one.",
+          "$ref": "#/$defs/collector_time"
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "outcome": { "const": "answered" } } },
+          "then": {
+            "required": ["t2", "t3", "address", "stratum", "leap", "reference_id"],
+            "properties": {
+              "t2": { "description": "When the server received the query.", "$ref": "#/$defs/server_time" },
+              "t3": { "description": "When the server sent its reply.", "$ref": "#/$defs/server_time" },
+              "address": { "$ref": "#/$defs/ntp_address" },
+              "stratum": { "type": "integer", "minimum": 1, "maximum": 15 },
+              "leap": {
+                "description": "The leap indicator: 0 none, 1 a last minute of 61 s, 2 of 59 s. 3 (unsynchronised) makes a check invalid.",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2
+              },
+              "reference_id": { "$ref": "#/$defs/reference_id" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "outcome": { "const": "kiss_of_death" } } },
+          "then": {
+            "required": ["address", "reference_id"],
+            "properties": {
+              "address": { "$ref": "#/$defs/ntp_address" },
+              "reference_id": {
+                "description": "The kiss code (RATE, DENY, RSTR and so on), as the reply carried it.",
+                "$ref": "#/$defs/reference_id"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ntp_address": {
+      "description": "The address the server's name resolved to, which replied.",
+      "type": "string",
+      "anyOf": [{ "format": "ipv4" }, { "format": "ipv6" }]
+    },
+    "reference_id": {
+      "description": "A reply's reference identifier, its 32 bits as an unsigned integer.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
     }
   }
 }
