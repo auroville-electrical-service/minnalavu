@@ -109,7 +109,7 @@ sql -c "SELECT alert_test_meter('ALERT-0002', 2, now() - interval '1 day')"
 
 is 'a dry run succeeds' "$(alert)" 0
 is 'a dry run prints the mail' \
-  "$(grep -c '^  target_silent alert_test_ep unit 2: no reading or missed read since' "$tmp/out")" 1
+  "$(grep -c '^  target_silent alert_test_ep unit 2: no reading since' "$tmp/out")" 1
 is 'a dry run sends nothing' "$(mails)" 0
 is 'a dry run keeps no state' "$([[ -e $ALERT_STATE_FILE ]] && echo kept || echo none)" none
 

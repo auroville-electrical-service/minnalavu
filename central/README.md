@@ -265,10 +265,11 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
   was), `meter_silent` (no reading for
   `meter_silent_intervals` × its interval, counted from when it came into
   service if later; not listed when its collector or its target is silent),
-  `target_silent` (neither a reading nor a missed read at the unit for
-  `meter_silent_intervals` × its interval, counted from when it came into
-  service if later; not listed when its collector is silent; its subject is
-  `<endpoint> unit <n>`, its detail the address, profile and meter placed),
+  `target_silent` (no reading at the unit for `meter_silent_intervals` × its
+  interval, counted from when it came into service if later, whatever missed
+  reads there were; not listed when its collector is silent; its subject is
+  `<endpoint> unit <n>`, its detail the last missed read, the address, profile
+  and meter placed),
   `endpoint_errors` (erroring in `health.endpoints`; its detail gives the
   failed and due reads, the rate, the missed reads by reason and the
   address), `backlog_near_capacity` (bytes at or above
