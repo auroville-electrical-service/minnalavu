@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "endpoints": [
+    {
+      "host": "192.0.2.10",
+      "port": 502,
+      "framing": "tcp",
+      "max_timeouts": 3,
+      "polled_by_other_system": false,
+      "timeout_ms": 1000,
+      "retries": 2,
+      "busy_backoff_ms": 500,
+      "reconnect_backoff_ms": { "min": 1000, "max": 60000 },
+      "interval_ms": 900000,
+      "meters": [
+        { "unit_id": 1, "serial": "EX-00001", "profile": "elite_440" },
+        { "unit_id": 3, "profile": "elite_500", "interval_ms": 60000 }
+      ]
+    },
+    {
+      "host": "gateway-b.example.invalid",
+      "port": 502,
+      "framing": "rtu_over_tcp",
+      "polled_by_other_system": true,
+      "timeout_ms": 2000,
+      "retries": 0,
+      "busy_backoff_ms": 0,
+      "reconnect_backoff_ms": { "min": 5000, "max": 5000 },
+      "interval_ms": 300000,
+      "meters": [{ "unit_id": 2, "serial": "EX-500-000000002", "profile": "elite_500" }]
+    }
+  ]
+}

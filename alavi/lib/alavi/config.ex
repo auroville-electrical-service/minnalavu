@@ -3,30 +3,15 @@ defmodule Alavi.Config do
   The collector's polling config: which endpoints and meters to read, and how.
   `load/2` reads a local file; `parse/2` takes a decoded document.
 
-  ## Document, schema version 1
-
-      {
-        "schema_version": 1,
-        "endpoints": [
-          {
-            "host": "10.0.0.21", "port": 502, "framing": "tcp", "max_timeouts": 3,
-            "polled_by_other_system": false,
-            "timeout_ms": 1000, "retries": 2, "busy_backoff_ms": 500,
-            "reconnect_backoff_ms": {"min": 1000, "max": 60000},
-            "interval_ms": 900000,
-            "meters": [
-              {"unit_id": 1, "serial": "SIM-0001", "profile": "elite_440"},
-              {"unit_id": 3, "profile": "elite_500", "interval_ms": 60000}
-            ]
-          }
-        ]
-      }
-
-  Field meanings are in `Alavi.Config.Endpoint` and `Alavi.Config.Meter`.
+  The document is schema version 1 of `contract/config/config.v1.schema.json`,
+  which gives each field's meaning; its fields and limits are read from there
+  when alavi compiles. `contract/fixtures/config.v1.basic.json` is an example.
   """
 
-  alias Alavi.Config.{Endpoint, Fields}
+  alias Alavi.Config.{Endpoint, Fields, Schema}
   alias Alavi.Profile
+
+  @fields Schema.fields([])
 
   @enforce_keys [:endpoints]
   defstruct @enforce_keys
@@ -48,7 +33,7 @@ defmodule Alavi.Config do
   # contract: test/alavi/config_test.exs "parse/2"
   @spec parse(term(), %{String.t() => Profile.t()}) :: {:ok, t()} | {:error, String.t()}
   def parse(%{"schema_version" => 1} = json, profiles) do
-    with :ok <- Fields.only(json, ["schema_version", "endpoints"]),
+    with :ok <- Fields.only(json, @fields),
          {:ok, endpoints} <- Fields.each(json, "endpoints", &Endpoint.parse(&1, profiles)),
          :ok <- Fields.unique(endpoints, &{&1.host, &1.port}, "endpoint"),
          :ok <- Fields.unique(expected_serials(endpoints), & &1, "serial") do

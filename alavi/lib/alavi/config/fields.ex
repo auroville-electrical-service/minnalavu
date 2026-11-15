@@ -20,6 +20,17 @@ defmodule Alavi.Config.Fields do
     end
   end
 
+  # JSON Schema's `$` ends the string; PCRE's would also match before a final
+  # newline, hence :dollar_endonly.
+  @spec matching(map(), String.t(), String.t(), String.t()) :: result(String.t())
+  def matching(map, field, pattern, rule) do
+    with {:ok, value} <- string(map, field) do
+      if Regex.match?(Regex.compile!(pattern, [:unicode, :ucp, :dollar_endonly]), value),
+        do: {:ok, value},
+        else: {:error, "#{field} #{inspect(value)} is not #{rule}"}
+    end
+  end
+
   @spec integer(map(), String.t(), Range.t()) :: result(integer())
   def integer(map, field, first..last//_) do
     case Map.fetch(map, field) do

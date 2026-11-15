@@ -1,0 +1,87 @@
+{
+  "description": "Changes to config.v1.basic.json. Each of cases breaks one rule of the polling config (set value at path, or remove the field when delete is true); each of valid applies its changes and keeps the config valid. by names the sides that must give that verdict: schema (contract/config/config.v1.schema.json), parser (the collector's) and registry (central's checks, for a value it stores of the first endpoint and its first meter). A rule the schema cannot state leaves schema out.",
+  "cases": [
+    { "name": "schema version 2", "path": ["schema_version"], "value": 2, "by": ["schema", "parser"] },
+    { "name": "no endpoints", "path": ["endpoints"], "value": [], "by": ["schema", "parser"] },
+    { "name": "an unknown top-level field", "path": ["collector_id"], "value": "x", "by": ["schema", "parser"] },
+    { "name": "an unknown endpoint field", "path": ["endpoints", 0, "intervall"], "value": 5, "by": ["schema", "parser"] },
+    { "name": "a missing endpoint field", "path": ["endpoints", 0, "retries"], "delete": true, "by": ["schema", "parser"] },
+    { "name": "an empty host", "path": ["endpoints", 0, "host"], "value": "", "by": ["schema", "parser", "registry"] },
+    { "name": "a host with a space", "path": ["endpoints", 0, "host"], "value": "192.0.2.10 ", "by": ["schema", "parser", "registry"] },
+    { "name": "a host with a control character", "path": ["endpoints", 0, "host"], "value": "192.0.2.\u000710", "by": ["schema", "parser", "registry"] },
+    { "name": "a host that is not a string", "path": ["endpoints", 0, "host"], "value": 10, "by": ["schema", "parser"] },
+    { "name": "a port as a string", "path": ["endpoints", 0, "port"], "value": "502", "by": ["schema", "parser"] },
+    { "name": "port 0", "path": ["endpoints", 0, "port"], "value": 0, "by": ["schema", "parser", "registry"] },
+    { "name": "an unknown framing", "path": ["endpoints", 0, "framing"], "value": "udp", "by": ["schema", "parser", "registry"] },
+    { "name": "tcp without max_timeouts", "path": ["endpoints", 0, "max_timeouts"], "delete": true, "by": ["schema", "parser", "registry"] },
+    { "name": "RTU over TCP with max_timeouts", "path": ["endpoints", 0, "framing"], "value": "rtu_over_tcp", "by": ["schema", "parser", "registry"] },
+    { "name": "a string flag", "path": ["endpoints", 0, "polled_by_other_system"], "value": "no", "by": ["schema", "parser"] },
+    { "name": "retries 11", "path": ["endpoints", 0, "retries"], "value": 11, "by": ["schema", "parser", "registry"] },
+    { "name": "a fractional timeout", "path": ["endpoints", 0, "timeout_ms"], "value": 1.5, "by": ["schema", "parser"] },
+    { "name": "backoff max below min", "path": ["endpoints", 0, "reconnect_backoff_ms", "max"], "value": 999, "by": ["parser", "registry"] },
+    { "name": "an unknown backoff field", "path": ["endpoints", 0, "reconnect_backoff_ms", "step"], "value": 2, "by": ["schema", "parser"] },
+    { "name": "an endpoint interval of a day and a millisecond", "path": ["endpoints", 0, "interval_ms"], "value": 86400001, "by": ["schema", "parser", "registry"] },
+    { "name": "no meters", "path": ["endpoints", 0, "meters"], "value": [], "by": ["schema", "parser"] },
+    { "name": "a repeated endpoint", "path": ["endpoints", 1, "host"], "value": "192.0.2.10", "by": ["parser"] },
+    { "name": "unit id 248", "path": ["endpoints", 0, "meters", 0, "unit_id"], "value": 248, "by": ["schema", "parser", "registry"] },
+    { "name": "a repeated unit id", "path": ["endpoints", 0, "meters", 1, "unit_id"], "value": 1, "by": ["parser"] },
+    { "name": "an unknown meter field", "path": ["endpoints", 0, "meters", 0, "address"], "value": 1, "by": ["schema", "parser"] },
+    { "name": "a meter without a profile", "path": ["endpoints", 0, "meters", 0, "profile"], "delete": true, "by": ["schema", "parser"] },
+    { "name": "a profile name with a capital", "path": ["endpoints", 0, "meters", 0, "profile"], "value": "Elite_440", "by": ["schema", "parser", "registry"] },
+    { "name": "a profile name of 41 characters", "path": ["endpoints", 0, "meters", 0, "profile"], "value": "elite_440_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "by": ["schema", "parser", "registry"] },
+    { "name": "a profile not loaded", "path": ["endpoints", 0, "meters", 0, "profile"], "value": "elite_999", "by": ["parser"] },
+    { "name": "meter interval 0", "path": ["endpoints", 0, "meters", 0, "interval_ms"], "value": 0, "by": ["schema", "parser", "registry"] },
+    { "name": "an empty serial", "path": ["endpoints", 0, "meters", 0, "serial"], "value": "", "by": ["schema", "parser", "registry"] },
+    { "name": "a serial with a trailing space", "path": ["endpoints", 0, "meters", 0, "serial"], "value": "EX-0001 ", "by": ["schema", "parser", "registry"] },
+    { "name": "a serial with a leading space", "path": ["endpoints", 0, "meters", 0, "serial"], "value": " EX-0001", "by": ["schema", "parser", "registry"] },
+    { "name": "a serial with a tab", "path": ["endpoints", 0, "meters", 0, "serial"], "value": "EX\t0001", "by": ["schema", "parser", "registry"] },
+    { "name": "a serial that is not ASCII", "path": ["endpoints", 0, "meters", 0, "serial"], "value": "EX-0001é", "by": ["schema", "parser", "registry"] },
+    { "name": "a serial longer than its profile's registers hold", "path": ["endpoints", 0, "meters", 0, "serial"], "value": "EX-000001", "by": ["parser"] },
+    { "name": "a repeated serial", "path": ["endpoints", 1, "meters", 0, "serial"], "value": "EX-00001", "by": ["parser"] }
+  ],
+  "valid": [
+    {
+      "name": "RTU over TCP without max_timeouts",
+      "changes": [
+        { "path": ["endpoints", 0, "framing"], "value": "rtu_over_tcp" },
+        { "path": ["endpoints", 0, "max_timeouts"], "delete": true }
+      ],
+      "by": ["schema", "parser", "registry"]
+    },
+    {
+      "name": "a meter without a serial",
+      "changes": [{ "path": ["endpoints", 0, "meters", 0, "serial"], "delete": true }],
+      "by": ["schema", "parser"]
+    },
+    {
+      "name": "a serial with a space inside",
+      "changes": [{ "path": ["endpoints", 0, "meters", 0, "serial"], "value": "EX 00001" }],
+      "by": ["schema", "parser", "registry"]
+    },
+    {
+      "name": "an IPv6 host",
+      "changes": [{ "path": ["endpoints", 0, "host"], "value": "2001:db8::10" }],
+      "by": ["schema", "parser", "registry"]
+    },
+    {
+      "name": "backoff max equal to min",
+      "changes": [{ "path": ["endpoints", 0, "reconnect_backoff_ms", "max"], "value": 1000 }],
+      "by": ["schema", "parser", "registry"]
+    },
+    {
+      "name": "polled by another system",
+      "changes": [{ "path": ["endpoints", 0, "polled_by_other_system"], "value": true }],
+      "by": ["schema", "parser", "registry"]
+    },
+    {
+      "name": "a profile name of 40 characters",
+      "changes": [{ "path": ["endpoints", 0, "meters", 0, "profile"], "value": "elite_440_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }],
+      "by": ["schema", "registry"]
+    },
+    {
+      "name": "a repeated unit id on another endpoint",
+      "changes": [{ "path": ["endpoints", 1, "meters", 0, "unit_id"], "value": 1 }],
+      "by": ["schema", "parser"]
+    }
+  ]
+}

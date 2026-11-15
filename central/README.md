@@ -137,7 +137,10 @@ add to the collector's clock to get the reference's.
 
 Which endpoints and meters exist, where each sits and how it is polled, from
 when, in the shape of the collector's polling config
-(`alavi/lib/alavi/config.ex`), so that config can later be served from here.
+(`contract/config/config.v1.schema.json`), so that config can later be served
+from here. `test/config.sql` holds the registry's checks to that schema and to
+`contract/fixtures/config.v1.cases.json`: the same ranges, framings, host,
+profile name and serial rules.
 Collectors are `store.collectors`.
 
 - `registry.endpoints` and `registry.meters` hold identities only: an endpoint

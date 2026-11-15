@@ -68,7 +68,8 @@ EXCEPTION
 END
 $$;
 
--- Apply one change from contract/fixtures/batch.v1.cases.json to a batch.
+-- Apply one change from contract/fixtures/batch.v1.cases.json to a batch, or
+-- from config.v1.cases.json to a config.
 CREATE FUNCTION pg_temp.changed(batch jsonb, change jsonb) RETURNS jsonb
 LANGUAGE sql AS $$
   SELECT CASE

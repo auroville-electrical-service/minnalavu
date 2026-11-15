@@ -3,6 +3,8 @@ defmodule Alavi.ConfigTest do
 
   import Alavi.PollerCase
 
+  alias Alavi.ConfigCases
+
   alias Alavi.Config
   alias Alavi.Config.{Endpoint, Meter}
 
@@ -62,6 +64,10 @@ defmodule Alavi.ConfigTest do
        "meters[0]: serial must be a non-empty string"},
       {"a serial with a surrounding space", ["endpoints", 0, "meters", 0, "serial"], "SIM-1 ",
        ~s(serial "SIM-1 " is not printable ASCII without surrounding spaces)},
+      {"a serial ending in a newline", ["endpoints", 0, "meters", 0, "serial"], "SIM-1\n",
+       ~s(serial "SIM-1\\n" is not printable ASCII)},
+      {"a host ending in a newline", ["endpoints", 0, "host"], "127.0.0.1\n",
+       ~s(host "127.0.0.1\\n" is not an address or name)},
       {"a serial longer than its registers hold", ["endpoints", 0, "meters", 0, "serial"],
        "SIM-00001", ~s(longer than the 8 characters profile elite_440's serial registers hold)}
     ]
@@ -87,6 +93,30 @@ defmodule Alavi.ConfigTest do
 
         assert {:error, reason} = Config.parse(valid(), profiles)
         assert reason =~ "profile elite_440 has no identity.serial or identity.product_code check"
+      end
+    end
+
+    test "parses the contract fixture" do
+      assert {:ok, %Config{endpoints: [_, _]}} = Config.parse(ConfigCases.basic(), profiles())
+    end
+
+    for %{"name" => name} = rule <- ConfigCases.refused("parser") do
+      test "rejects the contract's case #{name}" do
+        json = ConfigCases.change(ConfigCases.basic(), unquote(Macro.escape(rule)))
+        assert {:error, _} = Config.parse(json, profiles())
+      end
+    end
+
+    for %{"name" => name, "changes" => changes} <- ConfigCases.accepted("parser") do
+      test "accepts the contract's change #{name}" do
+        json =
+          Enum.reduce(
+            unquote(Macro.escape(changes)),
+            ConfigCases.basic(),
+            &ConfigCases.change(&2, &1)
+          )
+
+        assert {:ok, %Config{}} = Config.parse(json, profiles())
       end
     end
 

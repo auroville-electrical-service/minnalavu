@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://minnalavu.invalid/contract/config.v1.schema.json",
+  "title": "Collector polling config, schema version 1",
+  "description": "What a collector polls and how: the collector's local file and the config the server serves are this one format. The collector takes its fields and limits from this file, and the registry's checks are tested against it. Rules a JSON Schema cannot state are the parser's (and the registry's, where it stores the value): an endpoint's host and port once per config, a unit_id once per endpoint, a serial once per config, reconnect_backoff_ms.max no less than its min, a profile among those the collector loaded that reads the serial and the product code, and a serial no longer than its profile's serial registers hold.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "endpoints"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "endpoints": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/endpoint" } }
+  },
+  "$defs": {
+    "ms": { "type": "integer", "minimum": 1, "maximum": 86400000 },
+    "endpoint": {
+      "description": "One IP endpoint in front of an RS-485 chain.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "host",
+        "port",
+        "framing",
+        "polled_by_other_system",
+        "timeout_ms",
+        "retries",
+        "busy_backoff_ms",
+        "reconnect_backoff_ms",
+        "interval_ms",
+        "meters"
+      ],
+      "properties": {
+        "host": {
+          "description": "An IP address or host name: no spaces or control characters.",
+          "type": "string",
+          "pattern": "^[^\\s\\x00-\\x1F\\x7F]{1,253}$"
+        },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "framing": { "enum": ["tcp", "rtu_over_tcp"] },
+        "max_timeouts": {
+          "description": "Timeouts in a row before reconnecting; framing tcp only, since RTU over TCP closes on every timeout.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "polled_by_other_system": {
+          "description": "Never connected to.",
+          "type": "boolean"
+        },
+        "timeout_ms": {
+          "description": "Per request and per connect.",
+          "$ref": "#/$defs/ms"
+        },
+        "retries": {
+          "description": "Further attempts at a register after a failed one.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "busy_backoff_ms": {
+          "description": "The wait before retrying after exception 06.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 86400000
+        },
+        "reconnect_backoff_ms": {
+          "description": "The wait between connection attempts, from min doubling to max; max is no less than min.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["min", "max"],
+          "properties": {
+            "min": { "$ref": "#/$defs/ms" },
+            "max": { "$ref": "#/$defs/ms" }
+          }
+        },
+        "interval_ms": {
+          "description": "How often each meter is read, unless the meter gives its own.",
+          "$ref": "#/$defs/ms"
+        },
+        "meters": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/meter" } }
+      },
+      "if": { "properties": { "framing": { "const": "tcp" } } },
+      "then": { "required": ["max_timeouts"] },
+      "else": { "not": { "required": ["max_timeouts"] } }
+    },
+    "meter": {
+      "description": "One unit on an endpoint's chain: its identity is read every round, then every register of its profile.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unit_id", "profile"],
+      "properties": {
+        "unit_id": { "type": "integer", "minimum": 1, "maximum": 247 },
+        "serial": {
+          "description": "The serial expected at this unit, when it is known: printable ASCII without surrounding spaces, as a serial is read. Readings carry the serial read, never this one.",
+          "type": "string",
+          "pattern": "^[!-~]([ -~]*[!-~])?$"
+        },
+        "profile": {
+          "description": "A profile in contract/profiles, by name.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,39}$"
+        },
+        "interval_ms": {
+          "description": "How often this meter is read; when absent, its endpoint's interval_ms.",
+          "$ref": "#/$defs/ms"
+        }
+      }
+    }
+  }
+}

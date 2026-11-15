@@ -20,6 +20,14 @@ What the collector and the server share. Nothing else is shared between them.
   buckets, upper bounds in milliseconds, one file per version. A version never
   changes once a batch cites it; a change is a new version in a new file, and
   the old file stays, since collectors in the field go on citing it.
+- `config/config.v1.schema.json`: a collector's polling config (JSON Schema
+  2020-12), schema version 1: the collector's local file, and the config the
+  server will serve, are this one format. The collector takes its fields,
+  ranges and patterns from it when it compiles; the registry's checks are
+  tested against it. Rules a schema cannot state (each endpoint and serial
+  once, each unit id once per endpoint, a backoff's max no less than its min,
+  a profile the collector loaded, a serial that fits its profile) are in its
+  description, and in the cases below.
 - `tools/`: scripts that compute fixtures independently of any collector.
   `register_decode.py` writes `register-decode.v1.json`
   (`uv run --script contract/tools/register_decode.py`, from the repo root);
@@ -28,6 +36,10 @@ What the collector and the server share. Nothing else is shared between them.
   `batch.v1.cases.json` lists changes to the basic batch that the schema must
   reject, and some it must accept; the collector's schema test and the
   server's ingest tests both run every one.
+  `config.v1.basic.json` is a polling config, and `config.v1.cases.json`
+  changes to it that must be refused, and some that must be accepted, each
+  naming the sides that must give that verdict: the schema, the collector's
+  parser, and the registry (for a value it stores).
   `modbus-read-requests.v1.json` gives the exact bytes of sample read
   requests, in both framings, computed independently of any collector, and
   inputs for which no request may be built. Every implementation that talks

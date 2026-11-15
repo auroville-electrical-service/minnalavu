@@ -7,7 +7,7 @@ defmodule Alavi.Config.Meter do
   Readings always carry the serial the meter reports; a different one is logged.
   """
 
-  alias Alavi.Config.Fields
+  alias Alavi.Config.{Fields, Schema}
   alias Alavi.Profile
 
   @enforce_keys [:unit_id, :serial, :profile, :interval_ms]
@@ -20,15 +20,21 @@ defmodule Alavi.Config.Meter do
           interval_ms: pos_integer()
         }
 
-  @max_ms 86_400_000
+  @path ["endpoints", "meters"]
+  @printable "printable ASCII without surrounding spaces"
+  @fields Schema.fields(@path)
+  @unit_id Schema.range(@path ++ ["unit_id"])
+  @serial Schema.pattern(@path ++ ["serial"])
+  @profile Schema.pattern(@path ++ ["profile"])
+  @interval Schema.range(@path ++ ["interval_ms"])
 
   # contract: test/alavi/config_test.exs "parse/2"
   @doc false
   @spec parse(term(), pos_integer(), %{String.t() => Profile.t()}) ::
           {:ok, t()} | {:error, String.t()}
   def parse(entry, endpoint_interval, profiles) when is_map(entry) do
-    with :ok <- Fields.only(entry, ["unit_id", "serial", "profile", "interval_ms"]),
-         {:ok, unit_id} <- Fields.integer(entry, "unit_id", 1..247),
+    with :ok <- Fields.only(entry, @fields),
+         {:ok, unit_id} <- Fields.integer(entry, "unit_id", @unit_id),
          {:ok, profile} <- profile(entry, profiles),
          {:ok, serial} <- serial(entry, profile),
          {:ok, interval} <- interval(entry, endpoint_interval) do
@@ -40,7 +46,7 @@ defmodule Alavi.Config.Meter do
   def parse(_entry, _interval, _profiles), do: {:error, "meter entry is not an object"}
 
   defp profile(entry, profiles) do
-    with {:ok, name} <- Fields.string(entry, "profile"),
+    with {:ok, name} <- Fields.matching(entry, "profile", @profile, "a profile name"),
          {:ok, profile} <- loaded(profiles, name),
          do: identified(profile)
   end
@@ -65,18 +71,9 @@ defmodule Alavi.Config.Meter do
   defp serial(entry, _profile) when not is_map_key(entry, "serial"), do: {:ok, nil}
 
   defp serial(entry, %Profile{name: name, identity: %{serial: %{count: count}}}) do
-    with {:ok, serial} <- Fields.string(entry, "serial"),
-         :ok <- readable(serial),
+    with {:ok, serial} <- Fields.matching(entry, "serial", @serial, @printable),
          :ok <- fits(serial, count * 2, name),
          do: {:ok, serial}
-  end
-
-  # A serial read is printable ASCII, trimmed: anything else could never match one.
-  defp readable(serial) do
-    if serial =~ ~r/\A[\x21-\x7E]([\x20-\x7E]*[\x21-\x7E])?\z/,
-      do: :ok,
-      else:
-        {:error, "serial #{inspect(serial)} is not printable ASCII without surrounding spaces"}
   end
 
   defp fits(serial, chars, _name) when byte_size(serial) <= chars, do: :ok
@@ -88,7 +85,7 @@ defmodule Alavi.Config.Meter do
          "profile #{name}'s serial registers hold"}
 
   defp interval(entry, _endpoint_interval) when is_map_key(entry, "interval_ms"),
-    do: Fields.integer(entry, "interval_ms", 1..@max_ms)
+    do: Fields.integer(entry, "interval_ms", @interval)
 
   defp interval(_entry, endpoint_interval), do: {:ok, endpoint_interval}
 end
