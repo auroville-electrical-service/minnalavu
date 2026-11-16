@@ -189,12 +189,17 @@
         {
           "bit": 7,
           "register_key": "reactive_energy_export_while_active_export"
+        },
+        {
+          "bit": 8,
+          "register_key": "apparent_energy_import"
+        },
+        {
+          "bit": 9,
+          "register_key": "apparent_energy_export"
         }
       ],
-      "unnamed": [
-        8,
-        9
-      ],
+      "unnamed": [],
       "why": "a 445's energies"
     },
     {
@@ -214,6 +219,14 @@
           "register_key": "active_energy_export"
         },
         {
+          "bit": 8,
+          "register_key": "apparent_energy_import"
+        },
+        {
+          "bit": 9,
+          "register_key": "apparent_energy_export"
+        },
+        {
           "bit": 10,
           "register_key": "reactive_energy_import"
         },
@@ -222,10 +235,7 @@
           "register_key": "reactive_energy_export"
         }
       ],
-      "unnamed": [
-        8,
-        9
-      ],
+      "unnamed": [],
       "why": "a 446's energies"
     },
     {
@@ -269,6 +279,14 @@
           "register_key": "active_energy_export"
         },
         {
+          "bit": 8,
+          "register_key": "apparent_energy_import"
+        },
+        {
+          "bit": 9,
+          "register_key": "apparent_energy_export"
+        },
+        {
           "bit": 19,
           "register_key": "voltage_average"
         },
@@ -281,10 +299,7 @@
           "register_key": "frequency"
         }
       ],
-      "unnamed": [
-        8,
-        9
-      ],
+      "unnamed": [],
       "why": "energies, average voltage and current, and frequency"
     },
     {
@@ -324,6 +339,10 @@
           "register_key": "active_energy_forwarded"
         },
         {
+          "bit": 1,
+          "register_key": "apparent_energy_forwarded"
+        },
+        {
           "bit": 4,
           "register_key": "active_energy_import"
         },
@@ -333,7 +352,6 @@
         }
       ],
       "unnamed": [
-        1,
         6
       ],
       "why": "net active (6) is unnamed"
@@ -352,6 +370,10 @@
         {
           "bit": 0,
           "register_key": "active_energy_forwarded"
+        },
+        {
+          "bit": 1,
+          "register_key": "apparent_energy_forwarded"
         },
         {
           "bit": 2,
@@ -376,13 +398,18 @@
         {
           "bit": 8,
           "register_key": "reactive_energy_export"
+        },
+        {
+          "bit": 9,
+          "register_key": "apparent_energy_import"
+        },
+        {
+          "bit": 10,
+          "register_key": "apparent_energy_export"
         }
       ],
       "unnamed": [
-        1,
         6,
-        9,
-        10,
         11,
         12,
         13,
@@ -424,7 +451,7 @@
         18699
       ],
       "mask_words": [
-        243
+        1011
       ],
       "registers": {
         "active_energy_import": [
@@ -450,6 +477,14 @@
         "reactive_energy_export_while_active_export": [
           52429,
           15820
+        ],
+        "apparent_energy_import": [
+          0,
+          16576
+        ],
+        "apparent_energy_export": [
+          50662,
+          18232
         ],
         "reactive_energy_import": [
           65535,
@@ -485,6 +520,14 @@
         {
           "register_key": "reactive_energy_export_while_active_export",
           "value": "0.1"
+        },
+        {
+          "register_key": "apparent_energy_import",
+          "value": "6"
+        },
+        {
+          "register_key": "apparent_energy_export",
+          "value": "47301.9"
         }
       ],
       "unsupported": [
@@ -503,7 +546,7 @@
         18716
       ],
       "mask_words": [
-        243
+        1011
       ],
       "registers": {
         "active_energy_import": [
@@ -515,8 +558,8 @@
           18234
         ],
         "reactive_energy_import_while_active_import": [
-          0,
-          32704
+          65535,
+          65535
         ],
         "reactive_energy_export_while_active_import": [
           65535,
@@ -527,6 +570,14 @@
           65535
         ],
         "reactive_energy_export_while_active_export": [
+          65535,
+          65535
+        ],
+        "apparent_energy_import": [
+          0,
+          32704
+        ],
+        "apparent_energy_export": [
           65535,
           65535
         ],
@@ -558,7 +609,9 @@
         "reactive_energy_import_while_active_import",
         "reactive_energy_export_while_active_import",
         "reactive_energy_import_while_active_export",
-        "reactive_energy_export_while_active_export"
+        "reactive_energy_export_while_active_export",
+        "apparent_energy_import",
+        "apparent_energy_export"
       ],
       "why": "a NaN under a supported bit is not_finite, not an entry"
     },
@@ -598,6 +651,14 @@
           65535,
           65535
         ],
+        "apparent_energy_import": [
+          65535,
+          65535
+        ],
+        "apparent_energy_export": [
+          65535,
+          65535
+        ],
         "reactive_energy_import": [
           65535,
           65535
@@ -620,6 +681,8 @@
         "reactive_energy_export_while_active_import",
         "reactive_energy_import_while_active_export",
         "reactive_energy_export_while_active_export",
+        "apparent_energy_import",
+        "apparent_energy_export",
         "reactive_energy_import",
         "reactive_energy_export"
       ],
@@ -643,6 +706,14 @@
           28198,
           18344
         ],
+        "apparent_energy_import": [
+          65535,
+          65535
+        ],
+        "apparent_energy_export": [
+          65535,
+          65535
+        ],
         "reactive_energy_import": [
           2176,
           18255
@@ -652,6 +723,10 @@
           65535
         ],
         "active_energy_forwarded": [
+          65535,
+          65535
+        ],
+        "apparent_energy_forwarded": [
           65535,
           65535
         ],
@@ -705,8 +780,11 @@
       ],
       "unsupported": [],
       "not_finite": [
+        "apparent_energy_import",
+        "apparent_energy_export",
         "reactive_energy_export",
         "active_energy_forwarded",
+        "apparent_energy_forwarded",
         "reactive_energy_lag",
         "reactive_energy_lead",
         "active_energy_import_l1",
@@ -735,6 +813,14 @@
           22082,
           18345
         ],
+        "apparent_energy_import": [
+          65535,
+          65535
+        ],
+        "apparent_energy_export": [
+          65535,
+          65535
+        ],
         "reactive_energy_import": [
           65535,
           65535
@@ -744,6 +830,10 @@
           65535
         ],
         "active_energy_forwarded": [
+          65535,
+          65535
+        ],
+        "apparent_energy_forwarded": [
           65535,
           65535
         ],
@@ -797,9 +887,12 @@
       ],
       "unsupported": [],
       "not_finite": [
+        "apparent_energy_import",
+        "apparent_energy_export",
         "reactive_energy_import",
         "reactive_energy_export",
         "active_energy_forwarded",
+        "apparent_energy_forwarded",
         "reactive_energy_lag",
         "reactive_energy_lead",
         "active_energy_import_l2",
@@ -1774,8 +1867,8 @@
     {
       "profile": "elite_500",
       "profile_version": 2,
-      "parameter": 5,
-      "register_key": "active_energy_export",
+      "parameter": 9,
+      "register_key": "apparent_energy_import",
       "stamp_words": [
         12938,
         24832

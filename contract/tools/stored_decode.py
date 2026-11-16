@@ -60,7 +60,7 @@ STORES: tuple[Store, ...] = ("history", "snapshot", "load_survey")
 KINDS: dict[str, Kind] = {
     k: k for k in ("cumulative", "interval", "demand", "instantaneous")
 }
-UNITS = frozenset(("Wh", "kWh", "varh", "kvarh", "V", "A", "Hz"))
+UNITS = frozenset(("Wh", "kWh", "varh", "kvarh", "VAh", "kVAh", "V", "A", "Hz"))
 MASK_TYPES: dict[str, MaskType] = {"u16": "u16", "u32": "u32", "u64": "u64"}
 MASK_WIDTH: dict[MaskType, int] = {"u16": 1, "u32": 2, "u64": 4}
 SELECTORS = frozenset(
@@ -503,6 +503,8 @@ E445 = [
     "reactive_energy_export_while_active_import",
     "reactive_energy_import_while_active_export",
     "reactive_energy_export_while_active_export",
+    "apparent_energy_import",
+    "apparent_energy_export",
 ]
 
 BLOCK_CASES = [
@@ -518,6 +520,8 @@ BLOCK_CASES = [
             "reactive_energy_export_while_active_import": 1.25,
             "reactive_energy_import_while_active_export": 312.5,
             "reactive_energy_export_while_active_export": 0.1,
+            "apparent_energy_import": 6.0,
+            "apparent_energy_export": 47301.9,
         },
         "a 445's history: its two reactive registers outside the mask read NaN and are unsupported",
     ),
@@ -529,7 +533,7 @@ BLOCK_CASES = [
         {
             "active_energy_import": 5.4,
             "active_energy_export": 47774.8,
-            "reactive_energy_import_while_active_import": math.nan,
+            "apparent_energy_import": math.nan,
         },
         "a NaN under a supported bit is not_finite, not an entry",
     ),
@@ -668,7 +672,7 @@ SURVEY_CASES = [
     ),
     SurveyCase(
         "elite_500",
-        5,
+        9,
         T("2026-11-14T00:00:00"),
         15,
         T("2026-11-14T00:31:00"),
