@@ -207,30 +207,6 @@
           "verified_on_device": null
         },
         {
-          "key": "apparent_energy_import",
-          "table": "holding",
-          "address": 542,
-          "type": "f32",
-          "word_order": "low_first",
-          "unit": "kVAh",
-          "kind": "cumulative",
-          "mask_bit": 8,
-          "source": "elite_440-a",
-          "verified_on_device": null
-        },
-        {
-          "key": "apparent_energy_export",
-          "table": "holding",
-          "address": 544,
-          "type": "f32",
-          "word_order": "low_first",
-          "unit": "kVAh",
-          "kind": "cumulative",
-          "mask_bit": 9,
-          "source": "elite_440-a",
-          "verified_on_device": null
-        },
-        {
           "key": "reactive_energy_import",
           "table": "holding",
           "address": 546,
@@ -355,30 +331,6 @@
           "verified_on_device": null
         },
         {
-          "key": "apparent_energy_import",
-          "table": "holding",
-          "address": 725,
-          "type": "f32",
-          "word_order": "low_first",
-          "unit": "kVAh",
-          "kind": "cumulative",
-          "mask_bit": 8,
-          "source": "elite_440-a",
-          "verified_on_device": null
-        },
-        {
-          "key": "apparent_energy_export",
-          "table": "holding",
-          "address": 727,
-          "type": "f32",
-          "word_order": "low_first",
-          "unit": "kVAh",
-          "kind": "cumulative",
-          "mask_bit": 9,
-          "source": "elite_440-a",
-          "verified_on_device": null
-        },
-        {
           "key": "reactive_energy_import",
           "table": "holding",
           "address": 729,
@@ -495,22 +447,6 @@
           "number": 7,
           "key": "reactive_energy_export_while_active_export",
           "unit": "kvarh",
-          "kind": "interval",
-          "source": "elite_440-a",
-          "verified_on_device": null
-        },
-        {
-          "number": 8,
-          "key": "apparent_energy_import",
-          "unit": "kVAh",
-          "kind": "interval",
-          "source": "elite_440-a",
-          "verified_on_device": null
-        },
-        {
-          "number": 9,
-          "key": "apparent_energy_export",
-          "unit": "kVAh",
           "kind": "interval",
           "source": "elite_440-a",
           "verified_on_device": null

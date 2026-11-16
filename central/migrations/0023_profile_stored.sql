@@ -10,7 +10,7 @@
 -- an interval quantity.
 
 CREATE TYPE store.stored_store AS ENUM ('history', 'snapshot', 'load_survey');
-CREATE TYPE store.stored_unit AS ENUM ('Wh', 'kWh', 'varh', 'kvarh', 'VAh', 'kVAh', 'V', 'A', 'Hz');
+CREATE TYPE store.stored_unit AS ENUM ('Wh', 'kWh', 'varh', 'kvarh', 'V', 'A', 'Hz');
 
 -- contract: central/test/profiles.sql
 CREATE TABLE store.profile_stored (

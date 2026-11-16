@@ -172,28 +172,6 @@
           "verified_on_device": null
         },
         {
-          "key": "apparent_energy_import",
-          "table": "holding",
-          "address": 927,
-          "type": "f32",
-          "word_order": "low_first",
-          "unit": "kVAh",
-          "kind": "cumulative",
-          "source": "elite_500-a",
-          "verified_on_device": null
-        },
-        {
-          "key": "apparent_energy_export",
-          "table": "holding",
-          "address": 929,
-          "type": "f32",
-          "word_order": "low_first",
-          "unit": "kVAh",
-          "kind": "cumulative",
-          "source": "elite_500-a",
-          "verified_on_device": null
-        },
-        {
           "key": "reactive_energy_import",
           "table": "holding",
           "address": 931,
@@ -222,17 +200,6 @@
           "type": "f32",
           "word_order": "low_first",
           "unit": "kWh",
-          "kind": "cumulative",
-          "source": "elite_500-a",
-          "verified_on_device": null
-        },
-        {
-          "key": "apparent_energy_forwarded",
-          "table": "holding",
-          "address": 937,
-          "type": "f32",
-          "word_order": "low_first",
-          "unit": "kVAh",
           "kind": "cumulative",
           "source": "elite_500-a",
           "verified_on_device": null
@@ -369,28 +336,6 @@
           "verified_on_device": null
         },
         {
-          "key": "apparent_energy_import",
-          "table": "holding",
-          "address": 1528,
-          "type": "f32",
-          "word_order": "low_first",
-          "unit": "kVAh",
-          "kind": "cumulative",
-          "source": "elite_500-a",
-          "verified_on_device": null
-        },
-        {
-          "key": "apparent_energy_export",
-          "table": "holding",
-          "address": 1530,
-          "type": "f32",
-          "word_order": "low_first",
-          "unit": "kVAh",
-          "kind": "cumulative",
-          "source": "elite_500-a",
-          "verified_on_device": null
-        },
-        {
           "key": "reactive_energy_import",
           "table": "holding",
           "address": 1532,
@@ -419,17 +364,6 @@
           "type": "f32",
           "word_order": "low_first",
           "unit": "kWh",
-          "kind": "cumulative",
-          "source": "elite_500-a",
-          "verified_on_device": null
-        },
-        {
-          "key": "apparent_energy_forwarded",
-          "table": "holding",
-          "address": 1538,
-          "type": "f32",
-          "word_order": "low_first",
-          "unit": "kVAh",
           "kind": "cumulative",
           "source": "elite_500-a",
           "verified_on_device": null
@@ -580,14 +514,6 @@
           "verified_on_device": null
         },
         {
-          "number": 1,
-          "key": "apparent_energy_forwarded",
-          "unit": "kVAh",
-          "kind": "interval",
-          "source": "elite_500-a",
-          "verified_on_device": null
-        },
-        {
           "number": 2,
           "key": "reactive_energy_lag",
           "unit": "kvarh",
@@ -631,22 +557,6 @@
           "number": 8,
           "key": "reactive_energy_export",
           "unit": "kvarh",
-          "kind": "interval",
-          "source": "elite_500-a",
-          "verified_on_device": null
-        },
-        {
-          "number": 9,
-          "key": "apparent_energy_import",
-          "unit": "kVAh",
-          "kind": "interval",
-          "source": "elite_500-a",
-          "verified_on_device": null
-        },
-        {
-          "number": 10,
-          "key": "apparent_energy_export",
-          "unit": "kVAh",
           "kind": "interval",
           "source": "elite_500-a",
           "verified_on_device": null
