@@ -10,6 +10,10 @@ defmodule Alavi.Poller.Job do
   the round that follows reads them when due, so a read on demand asked to
   answer in seconds is not lengthened by them.
 
+  A copy (`copy/2`) runs an `Alavi.Copy.Run` a phase per step: an entry
+  copied, a selector session opened or closed, a meter's clock read, so polls
+  and reads on demand go between them.
+
   A restore (`restore/2`) is one step, putting back the selectors a session
   saved (`Alavi.Selectors.Session.restore/3`); while it waits to be retried,
   `not_before` holds it back, and `held` says whether for a connection or
@@ -19,6 +23,7 @@ defmodule Alavi.Poller.Job do
   # contract: test/alavi/poller/job_test.exs "poll_round/2"
 
   alias Alavi.Config.Meter
+  alias Alavi.Copy.Run
   alias Alavi.{MissedRead, Reading}
   alias Alavi.Profile.Identity
 
@@ -33,11 +38,12 @@ defmodule Alavi.Poller.Job do
     :requester,
     :request_id,
     :not_before,
-    :held
+    :held,
+    :copy
   ]
   defstruct @enforce_keys
 
-  @type kind :: :poll_round | :read_on_demand | :restore
+  @type kind :: :poll_round | :read_on_demand | :restore | :copy
   @type held :: :connection | :backoff
   @typedoc "Who asked for a read on demand, and the reference they are told it by."
   @type requester :: {pid(), reference()}
@@ -47,7 +53,7 @@ defmodule Alavi.Poller.Job do
   reads stopped (`nil` when they did not), for its names step.
   """
   @type identified :: {Meter.t(), Identity.observed(), term()}
-  @type step :: {:meter, Meter.t()} | {:names, identified()}
+  @type step :: {:meter, Meter.t()} | {:names, identified()} | {:copy, Run.t()}
 
   @type t :: %__MODULE__{
           kind: kind(),
@@ -60,7 +66,8 @@ defmodule Alavi.Poller.Job do
           requester: requester() | nil,
           request_id: String.t() | nil,
           not_before: integer() | nil,
-          held: held() | nil
+          held: held() | nil,
+          copy: Run.t() | nil
         }
 
   @doc "A round over `meters`, started at `started` (monotonic milliseconds)."
@@ -77,9 +84,19 @@ defmodule Alavi.Poller.Job do
       requester: nil,
       request_id: nil,
       not_before: nil,
-      held: nil
+      held: nil,
+      copy: nil
     }
   end
+
+  # contract: test/alavi/poller/job_test.exs "copy/2"
+  @doc "A copy of the stored entries of `meters`, started at `started` (monotonic milliseconds)."
+  @spec copy([Meter.t()], integer()) :: t()
+  def copy(meters, started), do: %{poll_round([], started) | kind: :copy, copy: Run.new(meters)}
+
+  @doc "The copy's run after its step."
+  @spec copied(t(), Run.t()) :: t()
+  def copied(%__MODULE__{kind: :copy} = job, run), do: %{job | copy: run}
 
   # contract: test/alavi/poller/job_test.exs "restore/2"
   @doc "A restore of an endpoint's owed selectors, not run before `not_before` (monotonic milliseconds)."
@@ -119,6 +136,9 @@ defmodule Alavi.Poller.Job do
   end
 
   @spec next(t()) :: step() | :done
+  def next(%__MODULE__{kind: :copy, copy: run}),
+    do: if(Run.done?(run), do: :done, else: {:copy, run})
+
   def next(%__MODULE__{meters_left: [meter | _]}), do: {:meter, meter}
   def next(%__MODULE__{names_left: [identified | _]}), do: {:names, identified}
   def next(%__MODULE__{}), do: :done

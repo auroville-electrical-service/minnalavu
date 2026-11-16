@@ -10,8 +10,10 @@ defmodule Alavi.BufferTest do
     ClockCheckFixture,
     FirmwareRead,
     LatencyDayFixture,
+    MeterClockRead,
     MissedRead,
-    Reading
+    Reading,
+    StoredEntry
   }
 
   alias Alavi.Buffer.Batch
@@ -417,7 +419,7 @@ defmodule Alavi.BufferTest do
          "active_energy_import", "2026-11-01T00:00:00Z", [0x4700, 0x0000], {1, 25, -1}, "Wh", nil}
 
       paths =
-        for version <- 1..4 do
+        for version <- 1..5 do
           path = Path.join(dir, "0000000000000000000#{version + 4}.seg")
           segment = <<"ALAVIBUF", version>> <> frame({<<version::128>>, {:unsynced, nil}})
           File.write!(path, segment <> frame([reading]))
@@ -428,7 +430,7 @@ defmodule Alavi.BufferTest do
       assert_received {:buffer, buffer}
       assert log =~ "no valid header"
       assert Enum.all?(paths, &File.exists?(&1 <> ".discarded"))
-      assert %{discarded_files: 4, events: 3} = Buffer.backlog(buffer)
+      assert %{discarded_files: 5, events: 3} = Buffer.backlog(buffer)
     end
 
     test "a request id is kept with its reading and missed read, across a restart",
@@ -498,6 +500,51 @@ defmodule Alavi.BufferTest do
 
       assert {:ok, %Batch{events: ^checks}} = Buffer.take(buffer)
       assert Buffer.backlog(buffer).oldest == ~U[2026-11-01 00:00:04.000123Z]
+    end
+
+    test "stored entries and meter-clock reads are kept, across a restart, the oldest by the collector's clock",
+         %{tmp_dir: dir} do
+      entry = %StoredEntry{
+        endpoint: %{host: "127.0.0.1", port: 5020},
+        unit_id: 1,
+        meter_serial: "SIM-1",
+        product_code: "ELITE440-445",
+        profile: "elite_440",
+        profile_version: 2,
+        store: :load_survey,
+        meter_time: ~N[2026-11-13 00:30:00],
+        interval_s: 1800,
+        register_key: "active_energy_import",
+        value: Decimal.new("-0.0"),
+        slot: 3,
+        copied_at: ~U[2026-11-14 02:00:01.5Z]
+      }
+
+      history = %{
+        entry
+        | store: :history,
+          interval_s: nil,
+          value: Decimal.new("47208.1"),
+          slot: 1
+      }
+
+      clock = %MeterClockRead{
+        endpoint: %{host: "127.0.0.1", port: 5020},
+        unit_id: 1,
+        meter_serial: "SIM-1",
+        profile: "elite_440",
+        profile_version: 2,
+        meter_time: ~N[2026-11-14 02:28:49],
+        collector_at: ~U[2026-11-14 02:00:00.25Z]
+      }
+
+      buffer = start!(dir)
+      :ok = Buffer.record(buffer, [entry, history])
+      :ok = Buffer.record(buffer, [clock])
+      buffer = restart!(dir)
+
+      assert {:ok, %Batch{events: [^entry, ^history, ^clock]}} = Buffer.take(buffer)
+      assert Buffer.backlog(buffer).oldest == ~U[2026-11-14 02:00:00.25Z]
     end
 
     test "latency days are kept, across a restart, the oldest from the start of what each counts",

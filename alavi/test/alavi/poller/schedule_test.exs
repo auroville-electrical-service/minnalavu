@@ -77,6 +77,28 @@ defmodule Alavi.Poller.ScheduleTest do
     end
   end
 
+  describe "next/4, with a copy queued" do
+    test "a copy ranks below every other job: a round due, a round under way, a read on demand" do
+      [m1, m2, _m3] = ms = meters()
+      copy = Job.copy(ms, 0)
+      rod = elem(Job.read_on_demand(ms, [1], 0, {self(), make_ref()}), 1)
+      round = [m1, m2] |> Job.poll_round(0) |> Job.polled([:read], {m1, seen(1), nil})
+      later = %{1 => 60_000, 2 => 60_000, 3 => 60_000}
+
+      assert {:start, %Job{kind: :poll_round}} =
+               Schedule.next([copy], 100, %{1 => 0, 2 => 0, 3 => 0}, ms)
+
+      assert Schedule.next([copy, round], 100, later, ms) == {:step, round, [copy]}
+      assert Schedule.next([copy, rod], 100, later, ms) == {:step, rod, [copy]}
+
+      assert Schedule.next([Job.restore(0, :backoff), copy], 100, later, ms)
+             |> elem(1)
+             |> Map.fetch!(:kind) == :restore
+
+      assert Schedule.next([copy], 100, later, ms) == {:step, copy, []}
+    end
+  end
+
   describe "next/4, with a restore owed" do
     test "a ready restore runs before every other job, overdue round or read on demand" do
       [m1, m2, _m3] = ms = meters()

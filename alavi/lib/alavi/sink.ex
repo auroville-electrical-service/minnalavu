@@ -11,10 +11,24 @@ defmodule Alavi.Sink do
   next read.
   """
 
-  alias Alavi.{ClockCheck, FirmwareRead, LatencyDay, MissedRead, Reading}
+  alias Alavi.{
+    ClockCheck,
+    FirmwareRead,
+    LatencyDay,
+    MeterClockRead,
+    MissedRead,
+    Reading,
+    StoredEntry
+  }
 
   @type event ::
-          Reading.t() | MissedRead.t() | FirmwareRead.t() | ClockCheck.t() | LatencyDay.t()
+          Reading.t()
+          | MissedRead.t()
+          | FirmwareRead.t()
+          | ClockCheck.t()
+          | LatencyDay.t()
+          | StoredEntry.t()
+          | MeterClockRead.t()
   @type t :: {module(), term()}
 
   @callback record(arg :: term(), [event(), ...]) :: :ok | {:error, term()}

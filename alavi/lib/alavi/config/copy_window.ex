@@ -39,6 +39,28 @@ defmodule Alavi.Config.CopyWindow do
       else: from_start or before_end
   end
 
+  # contract: test/alavi/config/copy_window_test.exs "opened_at/2"
+  @doc "When the window open at the local time `at` opened, or nil when it is closed."
+  @spec opened_at(t(), NaiveDateTime.t()) :: NaiveDateTime.t() | nil
+  def opened_at(%__MODULE__{start: start} = window, at) do
+    cond do
+      not open?(window, NaiveDateTime.to_time(at)) -> nil
+      Time.compare(NaiveDateTime.to_time(at), start) != :lt -> on(at, 0, start)
+      true -> on(at, -1, start)
+    end
+  end
+
+  # contract: test/alavi/config/copy_window_test.exs "opened_at/2"
+  @doc "When the window next opens after the local time `at`."
+  @spec next_open(t(), NaiveDateTime.t()) :: NaiveDateTime.t()
+  def next_open(%__MODULE__{start: start}, at) do
+    today = on(at, 0, start)
+    if NaiveDateTime.after?(today, at), do: today, else: on(at, 1, start)
+  end
+
+  defp on(at, days, time),
+    do: at |> NaiveDateTime.to_date() |> Date.add(days) |> NaiveDateTime.new!(time)
+
   defp window(entry) do
     with :ok <- Fields.only(entry, @fields),
          {:ok, start} <- time(entry, "start", @start),

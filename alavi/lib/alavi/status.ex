@@ -103,6 +103,15 @@ defmodule Alavi.Status do
     do: GenServer.cast(server, {:selectors, endpoint, event})
 
   # contract: test/alavi/status_test.exs "feeds"
+  @doc "How an endpoint's copy of its meters' stored entries is getting on."
+  @spec copy(
+          GenServer.server(),
+          %{host: String.t(), port: :inet.port_number()},
+          Snapshot.copy_event()
+        ) :: :ok
+  def copy(server, endpoint, event), do: GenServer.cast(server, {:copy, endpoint, event})
+
+  # contract: test/alavi/status_test.exs "feeds"
   @spec uplink(GenServer.server(), Snapshot.uplink_result(), non_neg_integer()) :: :ok
   def uplink(server, result, next_ms), do: GenServer.cast(server, {:uplink, result, next_ms})
 
@@ -178,6 +187,9 @@ defmodule Alavi.Status do
 
   def handle_cast({:selectors, endpoint, event}, state),
     do: {:noreply, update(state, &Snapshot.selectors(&1, endpoint, event, state.clock.()))}
+
+  def handle_cast({:copy, endpoint, event}, state),
+    do: {:noreply, update(state, &Snapshot.copy(&1, endpoint, event, state.clock.()))}
 
   def handle_cast({:uplink, result, next_ms}, state),
     do: {:noreply, update(state, &Snapshot.uplink(&1, result, next_ms, state.clock.()))}

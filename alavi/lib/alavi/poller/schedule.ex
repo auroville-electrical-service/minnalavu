@@ -10,7 +10,8 @@ defmodule Alavi.Poller.Schedule do
   # round under way runs to its end first. A meter overdue by its interval
   # puts poll rounds ahead of reads on demand, so that a stream of reads
   # cannot stop the rounds that billing is read from. An owed restore comes
-  # before everything, once it is ready; until then the rest goes on.
+  # before everything, once it is ready; until then the rest goes on. A copy
+  # comes after everything else, a step at a time.
 
   alias Alavi.Config.Meter
   alias Alavi.Poller.Job
@@ -28,8 +29,8 @@ defmodule Alavi.Poller.Schedule do
   # Job kinds, highest priority first, while no meter is overdue by its
   # interval, and once one is. A round not yet started ranks as its kind,
   # below any queued job of the same rank.
-  @ranks [:restore, :read_on_demand, :poll_round]
-  @overdue_ranks [:restore, :poll_round, :read_on_demand]
+  @ranks [:restore, :read_on_demand, :poll_round, :copy]
+  @overdue_ranks [:restore, :poll_round, :read_on_demand, :copy]
 
   @reads_max 8
 

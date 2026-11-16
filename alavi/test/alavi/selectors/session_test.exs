@@ -1,7 +1,7 @@
 defmodule Alavi.Selectors.SessionTest do
   use ExUnit.Case, async: true
 
-  import Alavi.PollerCase, only: [start_sim!: 1]
+  import Alavi.PollerCase, only: [start_sim!: 2]
   import ExUnit.CaptureLog
 
   alias Alavi.Modbus.Client
@@ -14,8 +14,11 @@ defmodule Alavi.Selectors.SessionTest do
   @snapshot 1500
   @selectors [history: 6, snapshot: 52]
 
+  # Two connections: a test that drops one and connects again would otherwise
+  # race the simulator, which, like a one-connection gateway, refuses the new
+  # one until it has seen the old one close.
   setup %{tmp_dir: dir} do
-    {sim, port} = start_sim!(:tcp)
+    {sim, port} = start_sim!(:tcp, max_connections: 2)
     {:ok, client} = Client.connect("127.0.0.1", port, :tcp, timeout: 200, max_timeouts: 3)
     %{sim: sim, client: client, dir: dir, endpoint: %{host: "127.0.0.1", port: port}}
   end

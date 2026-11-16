@@ -276,6 +276,8 @@ defmodule Alavi.Status.Page do
         {"State in its last round",
          if(state in [:ok, :waiting], do: text(label(state)), else: bad(label(state)))},
         {"Selectors", selectors(e.selectors)},
+        {"Copies", copy(e.copy)},
+        {"Last copy error", copy_error(e.copy.last_error)},
         {"Framing", text(e.framing)},
         {"Polled by another system", text(e.polled_by_other_system)}
       ]),
@@ -300,6 +302,61 @@ defmodule Alavi.Status.Page do
 
   defp selectors(%{state: "refused"} = s),
     do: [warn("session refused"), " at ", text(s.at), ", nothing written: ", or_none(s.detail)]
+
+  defp copy(%{enabled: false}), do: none_text("off")
+
+  defp copy(c) do
+    window = [" (window ", text(c.window.start), "–", text(c.window.end), " collector time)"]
+
+    finite =
+      if c.not_finite > 0, do: ["; ", warn(c.not_finite), " not finite, not sent"], else: []
+
+    [copy_state(c), window, finite]
+  end
+
+  defp copy_state(%{state: "waiting"}), do: text("waiting for the window")
+
+  defp copy_state(%{state: "scanning"} = c),
+    do: [
+      ok("scanning"),
+      " unit ",
+      text(c.unit_id),
+      " ",
+      text(c.store),
+      ", slot ",
+      text(c.entry),
+      " of ",
+      text(c.of)
+    ]
+
+  defp copy_state(%{state: "copying"} = c),
+    do: [
+      ok("copying"),
+      " unit ",
+      text(c.unit_id),
+      " ",
+      text(c.store),
+      ", entry ",
+      text(c.entry),
+      " of ",
+      text(c.of)
+    ]
+
+  defp copy_state(%{state: "done"} = c), do: [ok("done for tonight"), " at ", text(c.at)]
+
+  defp copy_state(%{state: "window_closed"} = c),
+    do: [warn("stopped, the window closed"), " at ", text(c.at), "; resumes next night"]
+
+  defp copy_state(%{state: "retiring"} = c),
+    do: [warn("stopped, the poller retiring"), " at ", text(c.at)]
+
+  defp copy_state(%{state: "faulted"} = c),
+    do: [bad("stopped, a restore owed"), " at ", text(c.at)]
+
+  defp copy_error(nil), do: none_text("none")
+
+  defp copy_error(e),
+    do: [warn("unit #{e.unit_id}"), " at ", text(e.at), ": ", text(e.detail)]
 
   defp rounds([]), do: none("No round yet.")
 

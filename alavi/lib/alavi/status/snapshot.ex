@@ -121,6 +121,37 @@ defmodule Alavi.Status.Snapshot do
   @type selectors_event ::
           {:owed, String.t(), non_neg_integer()} | :restored | {:refused, String.t()}
 
+  @typedoc """
+  An endpoint's copies of its meters' stored entries: `enabled` and the
+  collector's `window` (local time, HH:MM) as configured, and `state`: `off`;
+  `waiting` for the window; `scanning` a store's stamps (`entry` the slot
+  count reached, `of` the entries held) or `copying` it (`entry` done `of`
+  due), on `unit_id`; then how the night's copy ended: `done` for tonight,
+  `window_closed` or `retiring` before it was done, `faulted` with a restore
+  owed. `not_finite` counts the quantities and intervals not sent for a NaN
+  under a supported mask bit, since start; `last_error` is the last meter's
+  copy that failed.
+  """
+  @type copy :: %{
+          enabled: boolean(),
+          window: %{start: String.t(), end: String.t()},
+          state: String.t(),
+          at: time() | nil,
+          unit_id: 1..247 | nil,
+          store: String.t() | nil,
+          entry: non_neg_integer() | nil,
+          of: non_neg_integer() | nil,
+          not_finite: non_neg_integer(),
+          last_error: %{at: time(), unit_id: 1..247, detail: String.t()} | nil
+        }
+
+  @type copy_event ::
+          {:at, 1..247, :history | :snapshot | :load_survey, :scanning | :copying,
+           non_neg_integer(), non_neg_integer()}
+          | {:not_finite, pos_integer()}
+          | {:error, 1..247, String.t()}
+          | {:finished, :done | :window | :retiring | :fault}
+
   @type endpoint :: %{
           host: String.t(),
           port: :inet.port_number(),
@@ -129,7 +160,8 @@ defmodule Alavi.Status.Snapshot do
           rounds: [round()],
           failures: [failure()],
           meters: [meter()],
-          selectors: selectors() | nil
+          selectors: selectors() | nil,
+          copy: copy()
         }
 
   @typedoc "`result`: `stored`, `quarantined`, `not_sent` (retried later) or `empty`."
@@ -186,7 +218,7 @@ defmodule Alavi.Status.Snapshot do
   # contract: test/alavi/status_test.exs "Snapshot.new/4"
   @doc "`settings` are `Alavi.Settings.shown/1`'s: never the token."
   @spec new(Config.t(), [{String.t(), String.t() | integer()}], String.t(), DateTime.t()) :: t()
-  def new(%Config{endpoints: endpoints}, settings, version, now) do
+  def new(%Config{endpoints: endpoints, copy_window: window}, settings, version, now) do
     %__MODULE__{
       version: version,
       started_at: iso(now),
@@ -196,7 +228,7 @@ defmodule Alavi.Status.Snapshot do
       buffer: nil,
       uplink: nil,
       config: nil,
-      endpoints: Enum.map(endpoints, &endpoint/1),
+      endpoints: Enum.map(endpoints, &endpoint(&1, window)),
       raw_lines: []
     }
   end
@@ -285,6 +317,47 @@ defmodule Alavi.Status.Snapshot do
     %{snapshot | endpoints: endpoints}
   end
 
+  # contract: test/alavi/status_test.exs "Snapshot.copy/4"
+  @doc "An endpoint not in the config is ignored."
+  @spec copy(t(), %{host: String.t(), port: :inet.port_number()}, copy_event(), DateTime.t()) ::
+          t()
+  def copy(%__MODULE__{} = snapshot, %{host: host, port: port}, event, now) do
+    endpoints =
+      Enum.map(snapshot.endpoints, fn
+        %{host: ^host, port: ^port} = endpoint ->
+          %{endpoint | copy: copied(endpoint.copy, event, iso(now))}
+
+        endpoint ->
+          endpoint
+      end)
+
+    %{snapshot | endpoints: endpoints}
+  end
+
+  defp copied(copy, {:at, unit, store, phase, n, m}, at),
+    do: %{
+      copy
+      | state: Atom.to_string(phase),
+        at: at,
+        unit_id: unit,
+        store: Atom.to_string(store),
+        entry: n,
+        of: m
+    }
+
+  defp copied(copy, {:not_finite, n}, _at), do: %{copy | not_finite: copy.not_finite + n}
+
+  defp copied(copy, {:error, unit, detail}, at),
+    do: %{copy | last_error: %{at: at, unit_id: unit, detail: detail}}
+
+  defp copied(copy, {:finished, outcome}, at),
+    do: %{copy | state: finished(outcome), at: at, unit_id: nil, store: nil, entry: nil, of: nil}
+
+  defp finished(:done), do: "done"
+  defp finished(:window), do: "window_closed"
+  defp finished(:retiring), do: "retiring"
+  defp finished(:fault), do: "faulted"
+
   defp selectors_view({:owed, detail, attempts}), do: {"owed", detail, attempts}
   defp selectors_view(:restored), do: {"restored", nil, 0}
   defp selectors_view({:refused, detail}), do: {"refused", detail, 0}
@@ -326,9 +399,9 @@ defmodule Alavi.Status.Snapshot do
   config no longer has goes.
   """
   @spec polling(t(), Config.t()) :: t()
-  def polling(%__MODULE__{} = snapshot, %Config{endpoints: endpoints}) do
+  def polling(%__MODULE__{} = snapshot, %Config{endpoints: endpoints, copy_window: window}) do
     shown = Map.new(snapshot.endpoints, &{{&1.host, &1.port}, &1})
-    %{snapshot | endpoints: Enum.map(endpoints, &carried(endpoint(&1), shown))}
+    %{snapshot | endpoints: Enum.map(endpoints, &carried(endpoint(&1, window), shown))}
   end
 
   defp carried(fresh, shown) do
@@ -341,6 +414,7 @@ defmodule Alavi.Status.Snapshot do
           | rounds: old.rounds,
             failures: old.failures,
             selectors: old.selectors,
+            copy: carried_copy(fresh.copy, old.copy),
             meters: Enum.map(fresh.meters, &carried_meter(&1, meters[&1.unit_id]))
         }
 
@@ -348,6 +422,10 @@ defmodule Alavi.Status.Snapshot do
         fresh
     end
   end
+
+  # A copy switched or windowed differently starts afresh, as its poller does.
+  defp carried_copy(%{enabled: e, window: w} = _fresh, %{enabled: e, window: w} = old), do: old
+  defp carried_copy(fresh, _old), do: fresh
 
   defp carried_meter(fresh, nil), do: fresh
 
@@ -395,7 +473,7 @@ defmodule Alavi.Status.Snapshot do
   def to_json(%__MODULE__{} = snapshot),
     do: snapshot |> Map.from_struct() |> Map.put(:format, "alavi-status.v1") |> JSON.encode!()
 
-  defp endpoint(%Endpoint{} = e) do
+  defp endpoint(%Endpoint{} = e, window) do
     %{
       host: e.host,
       port: e.port,
@@ -404,9 +482,23 @@ defmodule Alavi.Status.Snapshot do
       rounds: [],
       failures: [],
       meters: Enum.map(e.meters, &meter/1),
-      selectors: nil
+      selectors: nil,
+      copy: %{
+        enabled: e.copy,
+        window: %{start: hhmm(window.start), end: hhmm(window.end)},
+        state: if(e.copy, do: "waiting", else: "off"),
+        at: nil,
+        unit_id: nil,
+        store: nil,
+        entry: nil,
+        of: nil,
+        not_finite: 0,
+        last_error: nil
+      }
     }
   end
+
+  defp hhmm(time), do: time |> Time.to_string() |> binary_part(0, 5)
 
   defp meter(%Meter{} = m) do
     %{

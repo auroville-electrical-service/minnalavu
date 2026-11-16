@@ -4,9 +4,19 @@ defmodule Alavi.Profile do
   with the simulator and the server.
   """
 
-  alias Alavi.Profile.{Firmware, Identity, Register}
+  alias Alavi.Profile.{Firmware, Identity, Register, Stored}
 
-  @enforce_keys [:name, :version, :models, :sources, :identity, :firmware, :registers]
+  @enforce_keys [
+    :name,
+    :version,
+    :models,
+    :sources,
+    :identity,
+    :firmware,
+    :registers,
+    :meter_clock,
+    :stored
+  ]
   defstruct @enforce_keys
 
   # The batch schema's bound: 2^53 - 1, so a version survives a JSON number.
@@ -22,7 +32,9 @@ defmodule Alavi.Profile do
           sources: [Register.source()],
           identity: Identity.t(),
           firmware: Firmware.t() | nil,
-          registers: [Register.t()]
+          registers: [Register.t()],
+          meter_clock: Stored.stamp() | nil,
+          stored: Stored.t() | nil
         }
 
   @spec load(Path.t()) :: {:ok, t()} | {:error, String.t()}
@@ -90,7 +102,10 @@ defmodule Alavi.Profile do
          {:ok, firmware} <- parse_firmware(json),
          {:ok, registers} <- parse_registers(entries),
          :ok <- unique_keys(registers),
-         :ok <- known_sources(sources, identity, firmware, registers) do
+         {:ok, clock} <- optional(json, "meter_clock", &Stored.parse_clock/1),
+         {:ok, stored} <- optional(json, "stored", &Stored.parse/1),
+         :ok <-
+           known_sources(sources, identity, firmware, registers, stored_sources(clock, stored)) do
       {:ok,
        %__MODULE__{
          name: name,
@@ -99,7 +114,9 @@ defmodule Alavi.Profile do
          sources: sources,
          identity: identity,
          firmware: firmware,
-         registers: registers
+         registers: registers,
+         meter_clock: clock,
+         stored: stored
        }}
     end
   end
@@ -110,7 +127,7 @@ defmodule Alavi.Profile do
   def parse(_json),
     do:
       {:error,
-       "expected schema_version, profile, a version from 1 to 2^53 - 1, models, a non-empty sources list, identity, optionally firmware, and a non-empty registers list"}
+       "expected schema_version, profile, a version from 1 to 2^53 - 1, models, a non-empty sources list, identity, optionally firmware, a non-empty registers list, and optionally meter_clock and stored"}
 
   @spec register(t(), String.t()) :: {:ok, Register.t()} | {:error, :unknown_register}
   def register(%__MODULE__{registers: registers}, key) do
@@ -147,16 +164,23 @@ defmodule Alavi.Profile do
       else: {:error, "sources lists an ID more than once"}
   end
 
-  defp known_sources(sources, identity, firmware, registers) do
+  defp known_sources(sources, identity, firmware, registers, stored) do
     used =
       Identity.sources(identity) ++
-        firmware_sources(firmware) ++ for(%{source: id} <- registers, id != nil, do: id)
+        firmware_sources(firmware) ++
+        for(%{source: id} <- registers, id != nil, do: id) ++ stored
 
     case Enum.reject(used, &(&1 in sources)) do
       [] -> :ok
       [id | _] -> {:error, "source #{inspect(id)} is not in sources"}
     end
   end
+
+  defp optional(json, field, parse),
+    do: if(Map.has_key?(json, field), do: parse.(json[field]), else: {:ok, nil})
+
+  defp stored_sources(clock, nil), do: List.wrap(clock && clock.source)
+  defp stored_sources(clock, stored), do: stored_sources(clock, nil) ++ Stored.sources(stored)
 
   defp parse_firmware(%{"firmware" => json}), do: Firmware.parse(json)
   defp parse_firmware(_json), do: {:ok, nil}

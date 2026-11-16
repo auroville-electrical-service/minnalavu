@@ -3,7 +3,7 @@ defmodule Alavi.WireTest do
 
   alias Alavi.Buffer.Batch
   alias Alavi.{Clock, ClockCheck, ClockCheckFixture, FirmwareRead, LatencyDay, LatencyDayFixture}
-  alias Alavi.{MissedRead, Reading, Wire}
+  alias Alavi.{MeterClockRead, MissedRead, Reading, StoredEntry, Wire}
 
   doctest Alavi.Clock
   doctest Alavi.Wire
@@ -101,6 +101,72 @@ defmodule Alavi.WireTest do
       assert valid?(wire)
       assert wire["latency"] == Enum.map(days, &LatencyDay.to_wire/1)
       refute Map.has_key?(wire([reading()]), "latency")
+    end
+
+    test "stored entries and meter-clock reads go in their arrays, valid in the schema; none, and neither is sent" do
+      history = %StoredEntry{
+        endpoint: @endpoint,
+        unit_id: 9,
+        meter_serial: "SIM-9",
+        product_code: "ELITE440-445",
+        profile: "elite_440",
+        profile_version: 2,
+        store: :history,
+        meter_time: ~N[2026-11-01 00:00:00],
+        interval_s: nil,
+        register_key: "active_energy_import",
+        value: Decimal.new("47208.1"),
+        slot: 1,
+        copied_at: ~U[2026-11-14 02:00:01.5Z]
+      }
+
+      survey = %{
+        history
+        | store: :load_survey,
+          meter_time: ~N[2026-11-13 23:30:00],
+          interval_s: 1800,
+          value: Decimal.new("0.25"),
+          slot: 1
+      }
+
+      clock = %MeterClockRead{
+        endpoint: @endpoint,
+        unit_id: 9,
+        meter_serial: "SIM-9",
+        profile: "elite_440",
+        profile_version: 2,
+        meter_time: ~N[2026-11-14 02:28:49],
+        collector_at: ~U[2026-11-14 02:00:00Z]
+      }
+
+      wire = wire([reading(), history, survey, clock])
+      assert valid?(wire)
+
+      assert [
+               %{
+                 "store" => "history",
+                 "meter_time" => "2026-11-01T00:00:00",
+                 "value" => "47208.1"
+               } = h,
+               %{"store" => "load_survey", "interval_s" => 1800, "slot" => 1}
+             ] = wire["stored_entries"]
+
+      refute Map.has_key?(h, "interval_s")
+
+      assert wire["meter_clock_reads"] == [
+               %{
+                 "endpoint" => %{"host" => "10.0.0.21", "port" => 502},
+                 "unit_id" => 9,
+                 "meter_serial" => "SIM-9",
+                 "profile" => "elite_440",
+                 "profile_version" => 2,
+                 "meter_time" => "2026-11-14T02:28:49",
+                 "collector_at" => "2026-11-14T02:00:00Z"
+               }
+             ]
+
+      refute Map.has_key?(wire([reading()]), "stored_entries")
+      refute Map.has_key?(wire([reading()]), "meter_clock_reads")
     end
 
     test "a heartbeat, a batch with no events, still carries the clock and backlog" do

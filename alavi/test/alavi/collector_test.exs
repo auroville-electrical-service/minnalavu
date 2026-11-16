@@ -11,6 +11,7 @@ defmodule Alavi.CollectorTest do
     Config,
     FakeNtp,
     FirmwareRead,
+    MeterClockRead,
     MissedRead,
     Reading,
     Settings,
@@ -75,13 +76,21 @@ defmodule Alavi.CollectorTest do
       endpoints = [endpoint(port, "tcp", meters)]
 
       {_collector, buffer} = start_collector!(ctx.tmp_dir, endpoints)
-      :ok = await_events!(buffer, 10)
+      # Each identified meter's names, then its clock, follow the round's readings.
+      :ok = await_events!(buffer, 12)
       {:ok, %Batch{events: events} = batch} = Buffer.take(buffer)
 
       assert Enum.map(events, & &1.unit_id) |> Enum.dedup() == [1, 9, 3, 1, 3]
 
-      %{Reading => readings, MissedRead => missed, FirmwareRead => names} =
+      %{
+        Reading => readings,
+        MissedRead => missed,
+        FirmwareRead => names,
+        MeterClockRead => clocks
+      } =
         Enum.group_by(events, & &1.__struct__)
+
+      assert Enum.map(clocks, & &1.unit_id) == [1, 3]
 
       assert length(readings) == 6
       assert Enum.all?(missed, &match?(%MissedRead{unit_id: 9}, &1))

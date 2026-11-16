@@ -274,6 +274,79 @@ defmodule Alavi.StatusTest do
     end
   end
 
+  describe "Snapshot.copy/4" do
+    @endpoint %{host: "127.0.0.1", port: 5020}
+
+    test "off unless the endpoint copies; then waiting for its window, shown in local HH:MM" do
+      assert %{enabled: false, state: "off", window: %{start: "02:00", end: "03:00"}} =
+               hd(snapshot().endpoints).copy
+
+      on = config!([endpoint(5020, "tcp", [meter(1, "elite_440")], %{"copy" => true})])
+
+      assert %{enabled: true, state: "waiting", not_finite: 0, last_error: nil} =
+               hd(Snapshot.new(on, @settings, "0.1.0", @now).endpoints).copy
+    end
+
+    test "where the copy has got to, what it could not send, its last error, and how it ended" do
+      copy =
+        snapshot()
+        |> Snapshot.copy(@endpoint, {:at, 1, :history, :scanning, 2, 6}, @now)
+        |> Snapshot.copy(@endpoint, {:at, 3, :load_survey, :copying, 4, 49}, @now)
+        |> Snapshot.copy(@endpoint, {:not_finite, 2}, @now)
+        |> Snapshot.copy(@endpoint, {:not_finite, 1}, @now)
+        |> Snapshot.copy(@endpoint, {:error, 1, "{:history, :timeout}"}, @now)
+
+      assert %{
+               state: "copying",
+               unit_id: 3,
+               store: "load_survey",
+               entry: 4,
+               of: 49,
+               not_finite: 3,
+               last_error: %{
+                 unit_id: 1,
+                 detail: "{:history, :timeout}",
+                 at: "2026-11-14T10:00:00Z"
+               }
+             } = hd(copy.endpoints).copy
+
+      for {outcome, state} <- [
+            done: "done",
+            window: "window_closed",
+            retiring: "retiring",
+            fault: "faulted"
+          ] do
+        ended = Snapshot.copy(copy, @endpoint, {:finished, outcome}, @now)
+
+        assert %{state: ^state, unit_id: nil, store: nil, entry: nil, not_finite: 3} =
+                 hd(ended.endpoints).copy
+      end
+
+      assert Snapshot.copy(snapshot(), %{host: "10.9.9.9", port: 502}, {:not_finite, 1}, @now) ==
+               snapshot()
+    end
+
+    test "kept across a new polling config with the same switch and window, else afresh" do
+      copied = Snapshot.copy(snapshot(), @endpoint, {:finished, :done}, @now)
+      same = config!([endpoint(5020, "tcp", [meter(1, "elite_440")])])
+      on = config!([endpoint(5020, "tcp", [meter(1, "elite_440")], %{"copy" => true})])
+
+      assert hd(Snapshot.polling(copied, same).endpoints).copy.state == "done"
+      assert hd(Snapshot.polling(copied, on).endpoints).copy.state == "waiting"
+    end
+
+    test "in status.json, as JSON" do
+      json =
+        snapshot()
+        |> Snapshot.copy(@endpoint, {:at, 1, :snapshot, :copying, 0, 1}, @now)
+        |> Snapshot.to_json()
+        |> JSON.decode!()
+
+      assert %{"state" => "copying", "store" => "snapshot", "window" => %{"start" => "02:00"}} =
+               hd(json["endpoints"])["copy"]
+    end
+  end
+
   describe "Snapshot.raw_lines/3" do
     test "lines are kept newest first, at most 50" do
       snapshot = Snapshot.raw_lines(snapshot(), ["first", "second"], @now)
@@ -540,6 +613,7 @@ defmodule Alavi.StatusTest do
       Status.clock_check(status, ClockCheckFixture.failed(:timeout))
       Status.latency(status, %{host: "127.0.0.1", port: 5020}, %{3 => @summary})
       Status.selectors(status, %{host: "127.0.0.1", port: 5020}, {:owed, "found at start", 0})
+      Status.copy(status, %{host: "127.0.0.1", port: 5020}, {:error, 1, "refused"})
       snapshot = Status.read(status)
       Status.polling(status, config!([endpoint(5021, "tcp", [meter(1, "elite_440")])]))
       assert [%{port: 5021}] = Status.read(status).endpoints
@@ -552,6 +626,7 @@ defmodule Alavi.StatusTest do
       assert snapshot.clock_check.outcome == "timeout"
       assert meter_view(snapshot, 3).latency.p99 == 80
       assert hd(snapshot.endpoints).selectors.state == "owed"
+      assert hd(snapshot.endpoints).copy.last_error.detail == "refused"
     end
 
     test "a read on demand updates its meters, not the rounds", %{tmp_dir: dir} do

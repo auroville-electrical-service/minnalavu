@@ -30,4 +30,25 @@ defmodule Alavi.Config.CopyWindowTest do
              ) == [false, true, true, true, false, false]
     end
   end
+
+  describe "opened_at/2" do
+    test "an open window opened today at its start, or yesterday when it crossed midnight" do
+      day = %CopyWindow{start: ~T[02:00:00], end: ~T[03:00:00]}
+      night = %CopyWindow{start: ~T[23:30:00], end: ~T[00:30:00]}
+
+      assert CopyWindow.opened_at(day, ~N[2026-11-16 02:30:00]) == ~N[2026-11-16 02:00:00]
+      assert CopyWindow.opened_at(day, ~N[2026-11-16 03:00:00]) == nil
+      assert CopyWindow.opened_at(night, ~N[2026-11-16 23:45:00]) == ~N[2026-11-16 23:30:00]
+      assert CopyWindow.opened_at(night, ~N[2026-11-17 00:10:00]) == ~N[2026-11-16 23:30:00]
+      assert CopyWindow.opened_at(night, ~N[2026-11-17 12:00:00]) == nil
+    end
+
+    test "the window next opens at its start today, or tomorrow once that has passed" do
+      day = %CopyWindow{start: ~T[02:00:00], end: ~T[03:00:00]}
+
+      assert CopyWindow.next_open(day, ~N[2026-11-16 01:59:59]) == ~N[2026-11-16 02:00:00]
+      assert CopyWindow.next_open(day, ~N[2026-11-16 02:00:00]) == ~N[2026-11-17 02:00:00]
+      assert CopyWindow.next_open(day, ~N[2026-11-16 12:00:00]) == ~N[2026-11-17 02:00:00]
+    end
+  end
 end

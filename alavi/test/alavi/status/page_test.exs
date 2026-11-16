@@ -167,6 +167,33 @@ defmodule Alavi.Status.PageTest do
                "session refused</span> at 2026-11-14T10:00:00Z, nothing written: {:moved, :history, 3, 0}"
     end
 
+    test "shows the endpoint's copies: off, where a copy has got to, how it ended, its last error" do
+      snapshot = StatusFixture.snapshot(1, 5)
+      endpoint = %{host: StatusFixture.host(1), port: 502}
+      at = ~U[2026-11-14 10:00:00Z]
+      waiting = &%{&1 | copy: %{&1.copy | enabled: true, state: "waiting"}}
+      on = %{snapshot | endpoints: Enum.map(snapshot.endpoints, waiting)}
+      shown = &(Page.endpoint(Snapshot.copy(on, endpoint, &1, at), 1, 5) |> elem(1))
+
+      {:ok, html} = Page.endpoint(snapshot, 1, 5)
+      assert html =~ ~s|<th>Copies</th><td><span class="note">off</span>|
+      assert html =~ ~s|<th>Last copy error</th><td><span class="note">none</span>|
+
+      assert shown.({:at, 2, :load_survey, :copying, 4, 49}) =~
+               ~s|<span class="ok">copying</span> unit 2 load_survey, entry 4 of 49 (window 02:00–03:00 collector time)|
+
+      assert shown.({:at, 2, :history, :scanning, 1, 6}) =~ "slot 1 of 6"
+      assert shown.({:finished, :done}) =~ "done for tonight</span> at 2026-11-14T10:00:00Z"
+      assert shown.({:finished, :window}) =~ "the window closed</span>"
+      assert shown.({:finished, :fault}) =~ ~s|<span class="bad">stopped, a restore owed</span>|
+
+      assert shown.({:not_finite, 3}) =~
+               ~s|waiting for the window (window 02:00–03:00 collector time); <span class="warn">3</span> not finite, not sent|
+
+      assert shown.({:error, 2, "{:history, :timeout}"}) =~
+               "unit 2</span> at 2026-11-14T10:00:00Z: {:history, :timeout}"
+    end
+
     test "shows the endpoint's rounds, failures and meters with their register values" do
       snapshot = StatusFixture.snapshot(10, 5, missing: [{1, 2}])
       {:ok, html} = Page.endpoint(snapshot, 1, 5)

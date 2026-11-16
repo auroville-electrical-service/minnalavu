@@ -4,7 +4,7 @@ defmodule Alavi.Poller.FirmwareTest do
   import Alavi.PollerCase
   import ExUnit.CaptureLog
 
-  alias Alavi.{FirmwareRead, MissedRead, Reading}
+  alias Alavi.{FirmwareRead, MeterClockRead, MissedRead, Reading}
   alias Simulator.Meter
 
   @import "active_energy_import"
@@ -106,6 +106,30 @@ defmodule Alavi.Poller.FirmwareTest do
       advance(clock, @day_s)
       round = until!(&names_read?/1)
       assert sent(round) == []
+    end
+
+    test "the meter's clock is read with the names, once a day, under the serial the round read" do
+      {_sim, clock} = poll!([sim_meter(1, "elite_440")], [meter(1, "elite_440")])
+
+      assert names_read?(round!())
+
+      assert_received {:meter_clock,
+                       %MeterClockRead{
+                         unit_id: 1,
+                         meter_serial: "SIM-1",
+                         profile: "elite_440",
+                         profile_version: 2
+                       } = read}
+
+      assert read.collector_at == @start
+      assert abs(NaiveDateTime.diff(read.meter_time, NaiveDateTime.utc_now())) < 5
+
+      for _ <- 1..3, do: refute(names_read?(round!()))
+      refute_received {:meter_clock, _}
+
+      advance(clock, @day_s)
+      until!(&names_read?/1)
+      assert_received {:meter_clock, %MeterClockRead{unit_id: 1}}
     end
 
     test "a new serial reads the names in its round, and sends them under it" do

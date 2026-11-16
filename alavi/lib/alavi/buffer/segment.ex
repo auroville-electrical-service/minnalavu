@@ -10,7 +10,7 @@ defmodule Alavi.Buffer.Segment do
   require Logger
 
   alias Alavi.Buffer.Codec
-  alias Alavi.{Clock, ClockCheck, LatencyDay, Sink}
+  alias Alavi.{Clock, ClockCheck, LatencyDay, MeterClockRead, Sink, StoredEntry}
 
   @enforce_keys [:seq, :id, :clock, :path, :events, :bytes, :oldest]
   defstruct @enforce_keys
@@ -126,6 +126,8 @@ defmodule Alavi.Buffer.Segment do
 
   defp at(%ClockCheck{t1: t1}), do: t1
   defp at(%LatencyDay{} = day), do: LatencyDay.since(day)
+  defp at(%StoredEntry{copied_at: at}), do: at
+  defp at(%MeterClockRead{collector_at: at}), do: at
   defp at(event), do: event.timestamp
 
   defp older(nil, b), do: b

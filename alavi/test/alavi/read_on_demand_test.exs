@@ -24,6 +24,7 @@ defmodule Alavi.ReadOnDemandTest do
   defp round! do
     for _ <- 1..3, do: recorded!()
     for _ <- 1..3, do: assert_receive({:firmware, _}, 2_000)
+    for _ <- 1..3, do: assert_receive({:meter_clock, _}, 2_000)
   end
 
   defp answer!(ref, timeout \\ 1_000) do

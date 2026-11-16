@@ -90,6 +90,21 @@ defmodule Alavi.Modbus.ReadOnlyTest do
       assert Enum.sort(callers) == [{@session, :request}, {@session, :write_selector}]
     end
 
+    # The copy is the collector's only unattended writer: its writes are
+    # Session.set/5 alone, each inside a session it opened, and every other
+    # request it makes is a read through the poller's client.
+    test "the copy writes only through the selector session, and builds no request of its own" do
+      copier = Path.join(@lib, "alavi/copy/copier.ex")
+      assert copier in lib_files()
+
+      session_calls = remote_calls(copier, :Session)
+      assert Enum.sort(Enum.uniq(session_calls)) == [:close, :open, :set]
+      # `Client.t()` in its types is no call.
+      assert Enum.reject(remote_calls(copier, :Client), &(&1 == :t)) == []
+      assert remote_calls(copier, :Selector) == []
+      assert remote_calls(copier, :PDU) == []
+    end
+
     test "no module but the client calls a socket module, and the clock check only UDP" do
       offenders =
         for file <- lib_files(),
@@ -255,6 +270,20 @@ defmodule Alavi.Modbus.ReadOnlyTest do
 
         :write_selector = node, acc ->
           {node, [:write_selector | acc]}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    found
+  end
+
+  # The functions of the module aliased as `name` that a file calls.
+  defp remote_calls(file, name) do
+    {_, found} =
+      Macro.prewalk(quoted(file), [], fn
+        {:., _, [{:__aliases__, _, parts}, fun]} = node, acc when is_atom(fun) ->
+          {node, if(List.last(parts) == name, do: [fun | acc], else: acc)}
 
         node, acc ->
           {node, acc}

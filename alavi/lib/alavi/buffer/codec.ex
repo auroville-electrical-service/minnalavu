@@ -1,6 +1,6 @@
 defmodule Alavi.Buffer.Codec do
   @moduledoc false
-  # The on-disk format of a buffer segment, version 5. Pure: binaries in and out.
+  # The on-disk format of a buffer segment, version 6. Pure: binaries in and out.
   #
   #     segment = magic, header frame, record frame*
   #     magic   = "ALAVIBUF", format version (1 byte)
@@ -12,9 +12,19 @@ defmodule Alavi.Buffer.Codec do
   # read: a segment in any other is set aside, not decoded. An event kind added
   # within a version is read by this release, not by an older one.
 
-  alias Alavi.{Clock, ClockCheck, FirmwareRead, LatencyDay, MissedRead, Reading, Sink}
+  alias Alavi.{
+    Clock,
+    ClockCheck,
+    FirmwareRead,
+    LatencyDay,
+    MeterClockRead,
+    MissedRead,
+    Reading,
+    Sink,
+    StoredEntry
+  }
 
-  @version 5
+  @version 6
   @magic <<"ALAVIBUF", @version>>
 
   @typedoc "`size` is the length of the longest valid prefix."
@@ -111,6 +121,19 @@ defmodule Alavi.Buffer.Codec do
      iso(l.poller_started_at), l.buckets_version, l.retries, l.timeouts, l.max_ms, l.buckets}
   end
 
+  defp encode_event(%StoredEntry{} = e) do
+    %Decimal{sign: sign, coef: coef, exp: exp} = e.value
+
+    {:stored_entry, e.endpoint.host, e.endpoint.port, e.unit_id, e.meter_serial, e.product_code,
+     e.profile, e.profile_version, e.store, naive(e.meter_time), e.interval_s, e.register_key,
+     {sign, coef, exp}, e.slot, iso(e.copied_at)}
+  end
+
+  defp encode_event(%MeterClockRead{} = r) do
+    {:meter_clock_read, r.endpoint.host, r.endpoint.port, r.unit_id, r.meter_serial, r.profile,
+     r.profile_version, naive(r.meter_time), iso(r.collector_at)}
+  end
+
   defp decode_event(
          {:reading, host, port, unit_id, serial, product_code, profile, version, key, ts,
           {sign, coef, exp}, request_id}
@@ -192,7 +215,45 @@ defmodule Alavi.Buffer.Codec do
     }
   end
 
+  defp decode_event(
+         {:stored_entry, host, port, unit_id, serial, product_code, profile, version, store,
+          meter_time, interval_s, key, {sign, coef, exp}, slot, copied_at}
+       )
+       when store in [:history, :snapshot, :load_survey] do
+    %StoredEntry{
+      endpoint: %{host: host, port: port},
+      unit_id: unit_id,
+      meter_serial: serial,
+      product_code: product_code,
+      profile: profile,
+      profile_version: version,
+      store: store,
+      meter_time: NaiveDateTime.from_iso8601!(meter_time),
+      interval_s: interval_s,
+      register_key: key,
+      value: %Decimal{sign: sign, coef: coef, exp: exp},
+      slot: slot,
+      copied_at: datetime(copied_at)
+    }
+  end
+
+  defp decode_event(
+         {:meter_clock_read, host, port, unit_id, serial, profile, version, meter_time,
+          collector_at}
+       ) do
+    %MeterClockRead{
+      endpoint: %{host: host, port: port},
+      unit_id: unit_id,
+      meter_serial: serial,
+      profile: profile,
+      profile_version: version,
+      meter_time: NaiveDateTime.from_iso8601!(meter_time),
+      collector_at: datetime(collector_at)
+    }
+  end
+
   defp iso(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
+  defp naive(%NaiveDateTime{} = at), do: NaiveDateTime.to_iso8601(at)
 
   defp datetime(text) do
     {:ok, dt, 0} = DateTime.from_iso8601(text)

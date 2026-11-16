@@ -3,6 +3,7 @@ defmodule Alavi.Poller.JobTest do
 
   import Alavi.PollerCase
 
+  alias Alavi.Copy.Run
   alias Alavi.Poller.Job
 
   defp meters do
@@ -91,6 +92,16 @@ defmodule Alavi.Poller.JobTest do
 
       assert Job.read_on_demand(meters(), [2, 5, 5, 0], 0, requester) ==
                {:error, {:unknown_units, [5, 0]}}
+    end
+  end
+
+  describe "copy/2" do
+    test "steps its run until the run is done" do
+      [m1, _m2] = ms = meters()
+      job = Job.copy(ms, 5)
+      assert %Job{kind: :copy, started: 5} = job
+      assert {:copy, %Run{phase: {:visit, ^m1}} = run} = Job.next(job)
+      assert Job.next(Job.copied(job, Run.faulted(run))) == :done
     end
   end
 end

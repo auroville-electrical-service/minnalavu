@@ -78,9 +78,11 @@ defmodule Alavi.Clock.WindowsTest do
     test "an unrecognised answer is unsynced, logged once with the raw output" do
       {query, _runs} = scripted([{:ok, @ntp}, {:ok, "Quelle: Lokale CMOS-Uhr"}])
 
+      # The first answer stands for a whole refresh: long enough to be seen on
+      # a loaded machine before the failing one replaces it.
       log =
         capture_log(fn ->
-          pid = start!(query, 30)
+          pid = start!(query, 300)
           :ok = await_status!(pid, %{source: :ntp, last_sync_at: ~U[2026-11-11 09:59:00Z]})
           :ok = await_status!(pid, %{source: :unsynced, last_sync_at: nil})
           Process.sleep(200)
@@ -92,9 +94,11 @@ defmodule Alavi.Clock.WindowsTest do
     test "a failing query is unsynced, logged with the reason" do
       {query, _} = scripted([{:ok, @ntp}, {:error, "w32tm exited with status 1: no service"}])
 
+      # The first answer stands for a whole refresh: long enough to be seen on
+      # a loaded machine before the failing one replaces it.
       log =
         capture_log(fn ->
-          pid = start!(query, 30)
+          pid = start!(query, 300)
           :ok = await_status!(pid, %{source: :ntp, last_sync_at: ~U[2026-11-11 09:59:00Z]})
           :ok = await_status!(pid, %{source: :unsynced, last_sync_at: nil})
         end)

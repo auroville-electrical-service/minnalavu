@@ -29,10 +29,22 @@ defmodule Alavi.Poller do
   the status shows the endpoint faulted (`Alavi.Status.selectors/3`). It
   records no readings and no missed reads.
 
+  On an endpoint whose `copy` is set, a copy of its meters' stored entries
+  (`Alavi.Copy.Run`) starts each night once the copy window opens, by the
+  collector's local time, and not while a restore is owed; it ranks below
+  every other job, a step at a time, so rounds and reads on demand go on
+  between its entries. Its selector sessions hold the poller's connection: a
+  session whose connection is lost leaves its restore owed and ends the
+  night's copy. When the window closes the copy stops at an entry boundary,
+  its session closed, and the next night's resumes from the progress kept
+  on disk, in `copied/` under the selectors directory. Once a day, with the
+  firmware names, each meter's clock is read and recorded beside ours.
+
   A poller retired (`retire/2`) starts no more rounds, and stops once the job
   under way and the reads on demand already queued are done: at a round
   boundary, never mid-round, and so never inside a selector session, which
-  runs within one step. Retired `:removed`, it first puts back any owed
+  runs within one step, or a copy's, which stops at its next entry boundary
+  and closes its session first. Retired `:removed`, it first puts back any owed
   selectors, retrying as before however long that takes; retired
   `:replaced`, it leaves them owed on disk, for the poller that replaces it
   finds them at start. Its latency so far is logged and recorded as when
@@ -50,6 +62,7 @@ defmodule Alavi.Poller do
   require Logger
 
   alias Alavi.Config.{CopyWindow, Endpoint, Meter}
+  alias Alavi.Copy.{Copier, Run}
   alias Alavi.{Decode, FirmwareRead, LatencyDay, MissedRead, Reading, Sink, Status, Uplink}
   alias Alavi.Modbus.Client
   alias Alavi.Poller.{Job, Latency, Names, Policy, RawLog, Schedule}
@@ -209,6 +222,9 @@ defmodule Alavi.Poller do
       queue: [],
       job: nil,
       selectors_dir: selectors_dir,
+      copies_dir: Path.join(selectors_dir, "copied"),
+      copy_done_at: nil,
+      connections: 0,
       restore: nil,
       timer: nil,
       due: Map.new(endpoint.meters, &{&1.unit_id, now}),
@@ -280,6 +296,8 @@ defmodule Alavi.Poller do
     do: "polled with new settings, any owed restore left to them"
 
   defp act(state) do
+    state = copy_due(state)
+
     case decide(state) do
       {:step, job, rest} -> run(job, %{state | queue: rest})
       {:start, round} -> begin_round(round, state)
@@ -291,7 +309,7 @@ defmodule Alavi.Poller do
     case decide(state) do
       {:wait, ms} ->
         timer = make_ref()
-        Process.send_after(self(), {:poll, timer}, ms)
+        Process.send_after(self(), {:poll, timer}, min(ms, copy_wait(state)))
         %{state | timer: timer}
 
       _work ->
@@ -305,6 +323,43 @@ defmodule Alavi.Poller do
     do: Schedule.next(state.queue, now(), state.due, state.endpoint.meters)
 
   defp decide(state), do: Schedule.next(state.queue, now(), %{}, [])
+
+  # A copy is queued once a night, when the window has opened since the last
+  # one ended, unless one is queued, a restore is owed or the poller retiring.
+  defp copy_due(%{endpoint: %Endpoint{copy: true}, retiring: nil, restore: nil} = state) do
+    opened = CopyWindow.opened_at(state.copy_window, local_now(state))
+
+    cond do
+      opened == nil -> state
+      Enum.any?(state.queue, &(&1.kind == :copy)) -> state
+      state.copy_done_at != nil and not NaiveDateTime.before?(state.copy_done_at, opened) -> state
+      true -> %{state | queue: state.queue ++ [Job.copy(state.endpoint.meters, now())]}
+    end
+  end
+
+  defp copy_due(state), do: state
+
+  # Milliseconds until the window next opens, for a poller that would sleep past it.
+  defp copy_wait(%{endpoint: %Endpoint{copy: true}, retiring: nil} = state) do
+    local = local_now(state)
+
+    max(
+      NaiveDateTime.diff(CopyWindow.next_open(state.copy_window, local), local, :millisecond),
+      1
+    )
+  end
+
+  defp copy_wait(_state), do: :infinity
+
+  # The collector's local wall clock, which the copy window is set in.
+  defp local_now(state) do
+    state.clock.()
+    |> DateTime.to_naive()
+    |> NaiveDateTime.truncate(:second)
+    |> NaiveDateTime.to_erl()
+    |> :calendar.universal_time_to_local_time()
+    |> NaiveDateTime.from_erl!()
+  end
 
   defp begin_round(%Job{started: started} = round, state) do
     state = log_raw(state, &RawLog.flush(&1, started))
@@ -327,7 +382,14 @@ defmodule Alavi.Poller do
 
   # The job is `state.job` while its step runs; resumed, it goes back at the head.
   defp run(job, state) do
-    state = step(Job.next(job), %{dated(state) | job: job})
+    job = stopping(job, state)
+    state = %{dated(state) | job: job}
+
+    state =
+      case Job.next(job) do
+        :done -> state
+        next -> step(next, state)
+      end
 
     case Job.next(state.job) do
       :done -> done(state)
@@ -345,10 +407,50 @@ defmodule Alavi.Poller do
     %{state | job: Job.named(state.job)}
   end
 
+  defp step({:copy, run}, state) do
+    {run, state} = Copier.step(run, state, copy_io())
+    %{state | job: Job.copied(state.job, run)}
+  end
+
+  defp stopping(%Job{kind: :copy, copy: run} = job, state) do
+    cond do
+      state.retiring != nil -> Job.copied(job, Run.stop(run, :retiring))
+      not copy_open?(state) -> Job.copied(job, Run.stop(run, :window))
+      true -> job
+    end
+  end
+
+  defp stopping(job, _state), do: job
+
+  defp copy_open?(state),
+    do: CopyWindow.open?(state.copy_window, NaiveDateTime.to_time(local_now(state)))
+
+  defp copy_io do
+    %{
+      identify: &identify/2,
+      read: &held_read/2,
+      client: &with_client/2,
+      owe_restore: &copy_left_owed/1
+    }
+  end
+
+  defp copy_left_owed(state) do
+    Status.selectors(state.status, endpoint_ref(state.endpoint), {:owed, "left by a copy", 0})
+    owe_restore(state, now())
+  end
+
   defp done(%{job: %Job{kind: :poll_round} = job} = state) do
     Status.round(state.status, Job.events(job))
     latency(state)
     %{state | due: Schedule.after_round(state.due, job), job: nil}
+  end
+
+  defp done(%{job: %Job{kind: :copy, copy: run}} = state) do
+    outcome = Run.outcome(run)
+    Status.copy(state.status, endpoint_ref(state.endpoint), {:finished, outcome})
+    Logger.info("alavi poller #{label(state)}: tonight's copy ended: #{outcome}")
+    latency(state)
+    %{state | job: nil, copy_done_at: local_now(state)}
   end
 
   defp done(%{job: %Job{kind: :read_on_demand, requester: {pid, ref}} = job} = state) do
@@ -456,7 +558,8 @@ defmodule Alavi.Poller do
       {{:ok, results}, state} ->
         read = firmware_read(state, meter, seen, results)
         Status.firmware(state.status, read)
-        {sent(Names.read(names, read.timestamp), read, state), state}
+        names = sent(Names.read(names, read.timestamp), read, state)
+        {names, daily_clock(meter, seen, state)}
 
       {{:error, reason}, state} ->
         not_read(state, meter, reason)
@@ -484,6 +587,21 @@ defmodule Alavi.Poller do
     do: {{:ok, error}, state}
 
   defp name_result({{_skip, reason, _n}, state}), do: {{:error, reason}, state}
+
+  # The meter's clock, read once a day with its names.
+  defp daily_clock(meter, seen, state) do
+    case Copier.meter_clock(meter, seen.serial, state, &held_read/2) do
+      {{:ok, _words}, state} ->
+        state
+
+      {{:error, :no_meter_clock}, state} ->
+        state
+
+      {{:error, why}, state} ->
+        warn(state, meter, "meter clock not read, again with the names: #{inspect(why)}")
+        state
+    end
+  end
 
   defp not_read(state, meter, reason),
     do: warn(state, meter, "firmware names not read, again next round: #{inspect(reason)}")
@@ -696,6 +814,47 @@ defmodule Alavi.Poller do
     end
   end
 
+  # One read on the connection held, never reconnecting: a copy's selector
+  # session must not move to another connection unseen.
+  defp held_read(%{client: %Client{socket: socket}} = state, read) when socket != nil,
+    do: held_read(state, read, 1)
+
+  defp held_read(state, _read), do: {{:error, :closed}, state}
+
+  defp held_read(state, {unit, table, address, count} = read, n) do
+    sent = now()
+    reply = Client.read(state.client, unit, table, address, count)
+    state = timed(state, unit, n, now() - sent, reply)
+
+    case anomalies(reply, state) do
+      {{:ok, words, client}, state} ->
+        {{:ok, words}, %{state | client: client}}
+
+      {{:error, error, client}, state} ->
+        held_retry(%{state | client: client}, read, n, error)
+    end
+  end
+
+  defp held_retry(%{client: %Client{socket: socket}} = state, read, n, error) do
+    case Policy.next(error, n, state.endpoint) do
+      :retry when socket != nil ->
+        held_read(state, read, n + 1)
+
+      {:retry_after, ms} when socket != nil ->
+        Process.sleep(ms)
+        held_read(state, read, n + 1)
+
+      _skip ->
+        {{:error, error}, state}
+    end
+  end
+
+  defp with_client(state, call) do
+    {result, client} = call.(state.client)
+    {anomalies, client} = Client.take_anomalies(client)
+    {result, log_raw(%{state | client: client}, &RawLog.note(&1, anomalies, now()))}
+  end
+
   defp timed(state, unit, n, ms, reply) do
     record = &Latency.record(&1, state.today, n, ms, outcome(reply))
     %{state | latency: Map.update!(state.latency, unit, record)}
@@ -788,7 +947,12 @@ defmodule Alavi.Poller do
     end
   end
 
-  defp reconnected(state), do: %{state | queue: Schedule.reconnected(state.queue, now())}
+  defp reconnected(state),
+    do: %{
+      state
+      | queue: Schedule.reconnected(state.queue, now()),
+        connections: state.connections + 1
+    }
 
   defp client_opts(%Endpoint{framing: :tcp} = e),
     do: [timeout: e.timeout_ms, max_timeouts: e.max_timeouts]
