@@ -19,6 +19,12 @@ defmodule Simulator.Faults do
     echoed but not applied, so the selector reads back what it held. No meter
     has been seen doing this; it stands for a write another client undid at
     once, which is what reading a selector back after writing it is for.
+  - `refused_writes`: a selector write to one of these `{unit_id, address}`
+    gets the exception code mapped to it and is not applied; reads there are
+    answered.
+  - `dropped_requests`: a request that starts at one of these
+    `{unit_id, address}`, read or write, closes the connection unanswered,
+    as a gateway that drops its link mid-copy.
   - `busy`: every request gets exception 06, server device busy.
   - `noise`: bytes sent before each RTU response, like a stray byte at RS-485
     bus turnaround. Modbus TCP responses are unaffected.
@@ -30,6 +36,8 @@ defmodule Simulator.Faults do
             refused_spans: %{},
             two_byte_replies: %{},
             lost_writes: MapSet.new(),
+            refused_writes: %{},
+            dropped_requests: MapSet.new(),
             busy: false,
             bad_crc: false,
             delay_ms: 0,
@@ -42,6 +50,8 @@ defmodule Simulator.Faults do
           refused_spans: %{optional({1..247, 0..0xFFFF, 1..125}) => 1..255},
           two_byte_replies: %{optional(1..247) => 0..255},
           lost_writes: MapSet.t({1..247, 0..0xFFFF}),
+          refused_writes: %{optional({1..247, 0..0xFFFF}) => 1..255},
+          dropped_requests: MapSet.t({1..247, 0..0xFFFF}),
           busy: boolean(),
           bad_crc: boolean(),
           delay_ms: non_neg_integer(),

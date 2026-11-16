@@ -15,6 +15,8 @@ defmodule Simulator.Server do
     case :gen_tcp.listen(Keyword.fetch!(opts, :port), @listen_opts) do
       {:ok, listen} ->
         {:ok, port} = :inet.port(listen)
+        now = Keyword.fetch!(opts, :now)
+        started = now.()
 
         {:ok,
          %{
@@ -23,7 +25,8 @@ defmodule Simulator.Server do
            acceptor: acceptor(listen),
            offline: nil,
            framing: Keyword.fetch!(opts, :framing),
-           meters: Keyword.fetch!(opts, :meters),
+           meters: opts |> Keyword.fetch!(:meters) |> Enum.map(&Meter.anchor(&1, started)),
+           now: now,
            max_connections: Keyword.fetch!(opts, :max_connections),
            missing_units: Keyword.fetch!(opts, :missing_units),
            faults: %Faults{},
@@ -54,7 +57,9 @@ defmodule Simulator.Server do
       do: {:reply, {:silent, state.faults}, state}
 
   def handle_call({:respond, unit_id, pdu}, _from, state) do
-    case Protocol.respond(state.meters, state.faults, unit_id, pdu, state.missing_units) do
+    host_ms = state.now.()
+
+    case Protocol.respond(state.meters, state.faults, unit_id, pdu, state.missing_units, host_ms) do
       {:write, reply, meter} ->
         {:reply, {{:reply, reply}, state.faults}, change(state, unit_id, fn _ -> meter end)}
 
@@ -167,8 +172,10 @@ defmodule Simulator.Server do
   defp serve(socket, framing, server, buffer) do
     case Protocol.decode_request(framing, buffer) do
       {:ok, request, rest} ->
-        reply(socket, framing, server, request)
-        serve(socket, framing, server, rest)
+        case reply(socket, framing, server, request) do
+          :drop -> :gen_tcp.close(socket)
+          :ok -> serve(socket, framing, server, rest)
+        end
 
       :incomplete ->
         receive_more(socket, framing, server, buffer)
@@ -191,6 +198,9 @@ defmodule Simulator.Server do
       {:silent, _faults} ->
         :ok
 
+      {:drop, _faults} ->
+        :drop
+
       {{:reply, pdu}, faults} ->
         send_response(socket, framing, faults, request, pdu)
 
@@ -201,6 +211,7 @@ defmodule Simulator.Server do
 
   defp send_response(socket, framing, faults, request, pdu) do
     Process.sleep(faults.delay_ms)
-    :gen_tcp.send(socket, Protocol.encode_response(framing, faults, request, pdu))
+    _ = :gen_tcp.send(socket, Protocol.encode_response(framing, faults, request, pdu))
+    :ok
   end
 end

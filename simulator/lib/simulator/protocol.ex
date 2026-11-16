@@ -60,28 +60,50 @@ defmodule Simulator.Protocol do
     end
   end
 
-  # contract: test/simulator/protocol_test.exs "respond/5"
+  # contract: test/simulator/protocol_test.exs "respond/6"
   @doc """
-  The response PDU for a request, or `:silent` when nothing would answer.
+  The response PDU for a request at host time `host_ms`, or `:silent` when
+  nothing would answer, or `:drop` when the connection is to close.
   `{:reply_as, unit, pdu}` is framed under `unit` instead of the unit asked for.
   `{:write, pdu, meter}` answers a selector write that `meter` now holds.
   """
-  @spec respond([Meter.t()], Faults.t(), 0..255, binary(), missing_units()) ::
+  @spec respond([Meter.t()], Faults.t(), 0..255, binary(), missing_units(), integer()) ::
           {:reply, binary()}
           | {:reply_as, 0..255, binary()}
           | {:write, binary(), Meter.t()}
           | :silent
-  def respond(meters, %Faults{} = faults, unit_id, <<fc, _::binary>> = pdu, missing \\ :silent) do
+          | :drop
+  def respond(meters, %Faults{} = faults, unit_id, <<fc, _::binary>> = pdu, missing, host_ms) do
     read = read_at(unit_id, pdu)
     span = span_at(unit_id, pdu)
 
+    case fault(faults, unit_id, {read, span}, fc) do
+      nil ->
+        meters
+        |> Enum.find(&(&1.unit_id == unit_id))
+        |> answer(pdu, missing, host_ms)
+        |> lost(MapSet.member?(faults.lost_writes, read))
+
+      response ->
+        response
+    end
+  end
+
+  # What a fault answers instead of the meter, or nil when none does.
+  defp fault(faults, unit_id, {read, span}, fc),
+    do: unanswered(faults, unit_id, read) || refused(faults, unit_id, {read, span}, fc)
+
+  defp unanswered(faults, unit_id, read) do
     cond do
-      MapSet.member?(faults.silent_units, unit_id) ->
-        :silent
+      MapSet.member?(faults.silent_units, unit_id) -> :silent
+      MapSet.member?(faults.dropped_requests, read) -> :drop
+      MapSet.member?(faults.silent_reads, read) -> :silent
+      true -> nil
+    end
+  end
 
-      MapSet.member?(faults.silent_reads, read) ->
-        :silent
-
+  defp refused(faults, unit_id, {read, span}, fc) do
+    cond do
       is_map_key(faults.two_byte_replies, unit_id) ->
         {:reply_as, faults.two_byte_replies[unit_id], <<@gateway_target_failed>>}
 
@@ -91,14 +113,14 @@ defmodule Simulator.Protocol do
       is_map_key(faults.refused_spans, span) ->
         {:reply, exception(fc, faults.refused_spans[span])}
 
+      fc in [6, 16] and is_map_key(faults.refused_writes, read) ->
+        {:reply, exception(fc, faults.refused_writes[read])}
+
       faults.busy ->
         {:reply, exception(fc, @busy)}
 
       true ->
-        meters
-        |> Enum.find(&(&1.unit_id == unit_id))
-        |> answer(pdu, missing)
-        |> lost(MapSet.member?(faults.lost_writes, read))
+        nil
     end
   end
 
@@ -125,15 +147,16 @@ defmodule Simulator.Protocol do
 
   defp span_at(_unit_id, _pdu), do: nil
 
-  defp answer(nil, _pdu, :silent), do: :silent
+  defp answer(nil, _pdu, :silent, _host_ms), do: :silent
 
-  defp answer(nil, <<fc, _::binary>>, :gateway_error),
+  defp answer(nil, <<fc, _::binary>>, :gateway_error, _host_ms),
     do: {:reply, exception(fc, @gateway_target_failed)}
 
-  defp answer(meter, pdu, _missing), do: answer(meter, pdu)
+  defp answer(meter, pdu, _missing, host_ms), do: answer(meter, pdu, host_ms)
 
-  defp answer(meter, <<fc, address::16, count::16>>) when fc in [3, 4] and count in 1..125 do
-    case Meter.read(meter, table(fc), address, count) do
+  defp answer(meter, <<fc, address::16, count::16>>, host_ms)
+       when fc in [3, 4] and count in 1..125 do
+    case Meter.read(meter, table(fc), address, count, host_ms) do
       {:ok, words} ->
         {:reply, <<fc, count * 2, for(w <- words, into: <<>>, do: <<w::16>>)::binary>>}
 
@@ -142,18 +165,18 @@ defmodule Simulator.Protocol do
     end
   end
 
-  defp answer(_meter, <<fc, _address::16, _count::16>>) when fc in [3, 4],
+  defp answer(_meter, <<fc, _address::16, _count::16>>, _host_ms) when fc in [3, 4],
     do: {:reply, exception(fc, @illegal_value)}
 
-  defp answer(meter, <<6, address::16, value::16>> = pdu),
-    do: written(Meter.write(meter, 6, address, value), 6, pdu)
+  defp answer(meter, <<6, address::16, value::16>> = pdu, host_ms),
+    do: written(Meter.write(meter, 6, address, value, host_ms), 6, pdu)
 
-  defp answer(meter, <<16, address::16, 1::16, 2, value::16>>),
-    do: written(Meter.write(meter, 16, address, value), 16, <<16, address::16, 1::16>>)
+  defp answer(meter, <<16, address::16, 1::16, 2, value::16>>, host_ms),
+    do: written(Meter.write(meter, 16, address, value, host_ms), 16, <<16, address::16, 1::16>>)
 
-  defp answer(_meter, <<16, _::binary>>), do: {:reply, exception(16, @illegal_value)}
+  defp answer(_meter, <<16, _::binary>>, _host_ms), do: {:reply, exception(16, @illegal_value)}
 
-  defp answer(_meter, <<fc, _::binary>>), do: {:reply, exception(fc, @illegal_function)}
+  defp answer(_meter, <<fc, _::binary>>, _host_ms), do: {:reply, exception(fc, @illegal_function)}
 
   defp written({:ok, meter}, _fc, echo), do: {:write, echo, meter}
   defp written({:exception, code}, fc, _echo), do: {:reply, exception(fc, code)}

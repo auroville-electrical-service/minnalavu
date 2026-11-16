@@ -3,6 +3,9 @@ defmodule Simulator.ProtocolTest do
 
   alias Simulator.{Faults, Meter, Profile, Protocol}
 
+  # 2026-11-14 10:00:00 UTC, in ms.
+  @at 1_794_650_400_000
+
   setup do
     meter =
       Meter.new(1, Profile.load!("elite_500"), %{"active_energy_import" => Decimal.new("1.5")})
@@ -10,39 +13,41 @@ defmodule Simulator.ProtocolTest do
     %{meters: [meter]}
   end
 
-  describe "respond/5" do
+  describe "respond/6" do
     test "reads mapped holding registers", %{meters: meters} do
       # 1.5 as an f64 is 0x3FF8_0000_0000_0000; low word first on the wire.
       assert {:reply, <<3, 8, 0::16, 0::16, 0::16, 0x3FF8::16>>} =
-               Protocol.respond(meters, %Faults{}, 1, <<3, 11_149::16, 4::16>>)
+               Protocol.respond(meters, %Faults{}, 1, <<3, 11_149::16, 4::16>>, :silent, @at)
     end
 
     test "unmapped address is exception 02", %{meters: meters} do
       assert {:reply, <<0x84, 2>>} =
-               Protocol.respond(meters, %Faults{}, 1, <<4, 11_149::16, 2::16>>)
+               Protocol.respond(meters, %Faults{}, 1, <<4, 11_149::16, 2::16>>, :silent, @at)
     end
 
     test "write function codes are exception 01", %{meters: meters} do
       assert {:reply, <<0x86, 1>>} =
-               Protocol.respond(meters, %Faults{}, 1, <<6, 11_149::16, 1::16>>)
+               Protocol.respond(meters, %Faults{}, 1, <<6, 11_149::16, 1::16>>, :silent, @at)
     end
 
     test "a silent read goes unanswered, and the unit's other reads are answered",
          %{meters: meters} do
       faults = %Faults{silent_reads: MapSet.new([{1, 11_149}])}
-      assert :silent = Protocol.respond(meters, faults, 1, <<3, 11_149::16, 2::16>>)
+      assert :silent = Protocol.respond(meters, faults, 1, <<3, 11_149::16, 2::16>>, :silent, @at)
 
       assert {:reply, <<3, 2, _::16>>} =
-               Protocol.respond(meters, faults, 1, <<3, 11_150::16, 1::16>>)
+               Protocol.respond(meters, faults, 1, <<3, 11_150::16, 1::16>>, :silent, @at)
     end
 
     test "a refused read gets its exception, and the unit's other reads are answered",
          %{meters: meters} do
       faults = %Faults{refused_reads: %{{1, 11_149} => 4}}
-      assert {:reply, <<0x83, 4>>} = Protocol.respond(meters, faults, 1, <<3, 11_149::16, 2::16>>)
+
+      assert {:reply, <<0x83, 4>>} =
+               Protocol.respond(meters, faults, 1, <<3, 11_149::16, 2::16>>, :silent, @at)
 
       assert {:reply, <<3, 2, _::16>>} =
-               Protocol.respond(meters, faults, 1, <<3, 11_150::16, 1::16>>)
+               Protocol.respond(meters, faults, 1, <<3, 11_150::16, 1::16>>, :silent, @at)
     end
 
     test "a refused span gets its exception, and other reads from its address are answered",
@@ -50,24 +55,39 @@ defmodule Simulator.ProtocolTest do
       faults = %Faults{refused_spans: %{{1, 11_149, 2} => 11}}
 
       assert {:reply, <<0x83, 11>>} =
-               Protocol.respond(meters, faults, 1, <<3, 11_149::16, 2::16>>)
+               Protocol.respond(meters, faults, 1, <<3, 11_149::16, 2::16>>, :silent, @at)
 
       assert {:reply, <<3, 2, _::16>>} =
-               Protocol.respond(meters, faults, 1, <<3, 11_149::16, 1::16>>)
+               Protocol.respond(meters, faults, 1, <<3, 11_149::16, 1::16>>, :silent, @at)
     end
 
     test "no meter at a unit id stays silent", %{meters: meters} do
-      assert :silent = Protocol.respond(meters, %Faults{}, 2, <<3, 11_149::16, 2::16>>)
+      assert :silent =
+               Protocol.respond(meters, %Faults{}, 2, <<3, 11_149::16, 2::16>>, :silent, @at)
     end
 
     test "no meter at a unit id behind a gateway is exception 0B", %{meters: meters} do
       assert {:reply, <<0x83, 0x0B>>} =
-               Protocol.respond(meters, %Faults{}, 2, <<3, 11_149::16, 2::16>>, :gateway_error)
+               Protocol.respond(
+                 meters,
+                 %Faults{},
+                 2,
+                 <<3, 11_149::16, 2::16>>,
+                 :gateway_error,
+                 @at
+               )
     end
 
     test "a gateway still answers for the meters it has", %{meters: meters} do
       assert {:reply, <<3, 4, _::binary>>} =
-               Protocol.respond(meters, %Faults{}, 1, <<3, 11_149::16, 2::16>>, :gateway_error)
+               Protocol.respond(
+                 meters,
+                 %Faults{},
+                 1,
+                 <<3, 11_149::16, 2::16>>,
+                 :gateway_error,
+                 @at
+               )
     end
 
     test "a gateway's two-byte reply is 0B alone under its mapped unit byte, and other units are answered",
@@ -75,36 +95,66 @@ defmodule Simulator.ProtocolTest do
       faults = %Faults{two_byte_replies: %{1 => 7}}
 
       assert {:reply_as, 7, <<0x0B>>} =
-               Protocol.respond(meters, faults, 1, <<3, 11_149::16, 2::16>>)
+               Protocol.respond(meters, faults, 1, <<3, 11_149::16, 2::16>>, :silent, @at)
 
       assert {:reply, <<3, 4, _::binary>>} =
                Protocol.respond(
                  meters,
                  %{faults | two_byte_replies: %{2 => 1}},
                  1,
-                 <<3, 11_149::16, 2::16>>
+                 <<3, 11_149::16, 2::16>>,
+                 :silent,
+                 @at
                )
     end
 
     test "a selector write is echoed, with the meter that now holds it", %{meters: meters} do
       assert {:write, <<16, 900::16, 1::16>>, meter} =
-               Protocol.respond(meters, %Faults{}, 1, <<16, 900::16, 1::16, 2, 4::16>>)
+               Protocol.respond(
+                 meters,
+                 %Faults{},
+                 1,
+                 <<16, 900::16, 1::16, 2, 4::16>>,
+                 :silent,
+                 @at
+               )
 
-      assert {:ok, [4]} = Meter.read(meter, :holding, 900, 1)
+      assert {:ok, [4]} = Meter.read(meter, :holding, 900, 1, @at)
     end
 
     test "a write the meter refuses is its exception, and a multi-register 16 is 03",
          %{meters: meters} do
       assert {:reply, <<0x90, 2>>} =
-               Protocol.respond(meters, %Faults{}, 1, <<16, 5001::16, 1::16, 2, 0::16>>)
+               Protocol.respond(
+                 meters,
+                 %Faults{},
+                 1,
+                 <<16, 5001::16, 1::16, 2, 0::16>>,
+                 :silent,
+                 @at
+               )
 
       assert {:reply, <<0x90, 3>>} =
-               Protocol.respond(meters, %Faults{}, 1, <<16, 900::16, 2::16, 4, 0::32>>)
+               Protocol.respond(
+                 meters,
+                 %Faults{},
+                 1,
+                 <<16, 900::16, 2::16, 4, 0::32>>,
+                 :silent,
+                 @at
+               )
     end
 
     test "busy endpoint is exception 06", %{meters: meters} do
       assert {:reply, <<0x83, 6>>} =
-               Protocol.respond(meters, %Faults{busy: true}, 1, <<3, 11_149::16, 2::16>>)
+               Protocol.respond(
+                 meters,
+                 %Faults{busy: true},
+                 1,
+                 <<3, 11_149::16, 2::16>>,
+                 :silent,
+                 @at
+               )
     end
   end
 

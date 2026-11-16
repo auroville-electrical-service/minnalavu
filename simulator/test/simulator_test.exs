@@ -27,8 +27,50 @@ defmodule SimulatorTest do
 
       assert send_pdu(socket, 1, <<6, 520::16, 3::16>>) == <<6, 520::16, 3::16>>
       assert send_pdu(socket, 2, <<3, 520::16, 1::16>>) == <<3, 2, 0::16>>
-      assert send_pdu(socket, 3, <<6, 700::16, 3::16>>) == <<6, 700::16, 3::16>>
-      assert send_pdu(socket, 4, <<3, 700::16, 1::16>>) == <<3, 2, 3::16>>
+      assert send_pdu(socket, 3, <<6, 801::16, 3::16>>) == <<6, 801::16, 3::16>>
+      assert send_pdu(socket, 4, <<3, 801::16, 1::16>>) == <<3, 2, 3::16>>
+    end
+
+    test "a dropped request closes the connection unanswered, mid-copy; a new one is answered" do
+      {sim, port} = start_sim!()
+      Simulator.faults(sim, dropped_requests: [{1, 807}])
+      {:ok, socket} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false])
+
+      assert send_pdu(socket, 1, <<6, 801::16, 1::16>>) == <<6, 801::16, 1::16>>
+      assert <<3, 4, _::32>> = send_pdu(socket, 2, <<3, 803::16, 2::16>>)
+      :ok = :gen_tcp.send(socket, <<3::16, 0::16, 6::16, 1, 3, 807::16, 96::16>>)
+      assert :gen_tcp.recv(socket, 0, 1_000) == {:error, :closed}
+
+      {:ok, socket} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false])
+      assert send_pdu(socket, 4, <<3, 801::16, 1::16>>) == <<3, 2, 1::16>>
+      Simulator.faults(sim, dropped_requests: [])
+      assert <<3, 192, _::binary>> = send_pdu(socket, 5, <<3, 807::16, 96::16>>)
+    end
+
+    test "a refused selector write is its exception and is not applied; reads there are answered" do
+      {sim, port} = start_sim!()
+      Simulator.faults(sim, refused_writes: [{{1, 520}, 4}])
+      {:ok, socket} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false])
+
+      assert send_pdu(socket, 1, <<6, 520::16, 2::16>>) == <<0x86, 4>>
+      assert send_pdu(socket, 2, <<3, 520::16, 1::16>>) == <<3, 2, 0::16>>
+      assert send_pdu(socket, 3, <<6, 801::16, 2::16>>) == <<6, 801::16, 2::16>>
+    end
+  end
+
+  describe "start_link/1" do
+    test "`now` is the host clock the meters' clocks run from" do
+      # 2026-11-14 10:00:00 UTC; the 440 counts seconds since 1988, low word first.
+      at = 1_794_650_400_000
+      meter = 1 |> Meter.new(Profile.load!("elite_440")) |> Meter.clock(60, 0)
+      sim = start_supervised!({Simulator, framing: :tcp, meters: [meter], now: fn -> at end})
+
+      {:ok, socket} =
+        :gen_tcp.connect(~c"127.0.0.1", Simulator.port(sim), [:binary, active: false])
+
+      seconds = NaiveDateTime.diff(~N[2026-11-14 10:01:00], ~N[1988-01-01 00:00:00])
+      <<high::16, low::16>> = <<seconds::32>>
+      assert send_pdu(socket, 1, <<3, 173::16, 2::16>>) == <<3, 4, low::16, high::16>>
     end
   end
 

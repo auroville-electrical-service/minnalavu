@@ -8,7 +8,8 @@ defmodule Simulator do
       port = Simulator.port(sim)
 
   Read requests (function codes 03/04) are answered, and selector writes as
-  `Simulator.Meter` describes; any other function gets exception 01, illegal
+  `Simulator.Meter` describes, with stored entries behind them
+  (`Simulator.Stores`); any other function gets exception 01, illegal
   function.
   """
 
@@ -20,16 +21,27 @@ defmodule Simulator do
           | {:meters, [Meter.t()]}
           | {:max_connections, pos_integer()}
           | {:missing_units, Simulator.Protocol.missing_units()}
+          | {:now, (-> integer())}
 
+  # contract: test/simulator_test.exs "start_link/1"
   @doc """
   Start an endpoint on 127.0.0.1. `port` 0 (the default) picks a free port.
   `max_connections` defaults to 1, like most meter Ethernet modules.
   `missing_units`: `:silent` (default) or `:gateway_error`, exception 0B as a
-  gateway sends.
+  gateway sends. `now`: the host clock, in ms since the Unix epoch, read once
+  per request (default the system's); each meter is anchored at its value at
+  start (`Simulator.Meter.anchor/2`).
   """
   @spec start_link([option()]) :: GenServer.on_start()
   def start_link(opts) do
-    opts = Keyword.merge([port: 0, max_connections: 1, missing_units: :silent], opts)
+    defaults = [
+      port: 0,
+      max_connections: 1,
+      missing_units: :silent,
+      now: fn -> System.os_time(:millisecond) end
+    ]
+
+    opts = Keyword.merge(defaults, opts)
     GenServer.start_link(Simulator.Server, opts)
   end
 
@@ -75,6 +87,8 @@ defmodule Simulator do
     changes = Keyword.update(changes, :refused_spans, nil, &Map.new/1)
     changes = Keyword.update(changes, :two_byte_replies, nil, &Map.new/1)
     changes = Keyword.update(changes, :lost_writes, nil, &MapSet.new/1)
+    changes = Keyword.update(changes, :refused_writes, nil, &Map.new/1)
+    changes = Keyword.update(changes, :dropped_requests, nil, &MapSet.new/1)
     changes = Enum.reject(changes, fn {_k, v} -> is_nil(v) end)
     GenServer.call(sim, {:faults, changes})
   end

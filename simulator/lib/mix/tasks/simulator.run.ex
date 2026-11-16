@@ -7,13 +7,32 @@ defmodule Mix.Tasks.Simulator.Run do
 
   `--framing` is `tcp` or `rtu_over_tcp`. Active energy import on every meter
   rises by 1 (in the register's unit) each second, so repeated reads show movement.
+
+  Every meter's stores and clock (`Simulator.Stores`, `Simulator.Meter`):
+
+  - `--histories N`, `--snapshots N`, `--days N`: how many billing histories,
+    daily snapshots and load-survey days it holds (default 6, the model's
+    own snapshot count, 7);
+  - `--clock-offset S`: seconds its clock runs ahead of the host's (default
+    0; negative behind);
+  - `--clock-drift PPM`: millionths it gains on the host's from the start
+    (default 0; negative loses).
   """
 
   use Mix.Task
 
   alias Simulator.{Meter, Profile}
 
-  @switches [port: :integer, framing: :string, meter: :keep]
+  @switches [
+    port: :integer,
+    framing: :string,
+    meter: :keep,
+    histories: :integer,
+    snapshots: :integer,
+    days: :integer,
+    clock_offset: :integer,
+    clock_drift: :integer
+  ]
 
   @impl Mix.Task
   def run(args) do
@@ -22,7 +41,7 @@ defmodule Mix.Tasks.Simulator.Run do
     if rest != [] or invalid != [],
       do: Mix.raise("unknown arguments: #{inspect(rest ++ invalid)}")
 
-    meters = opts |> Keyword.get_values(:meter) |> Enum.map(&meter/1)
+    meters = opts |> Keyword.get_values(:meter) |> Enum.map(&(&1 |> meter() |> stored(opts)))
     if meters == [], do: Mix.raise("give at least one --meter UNIT:PROFILE")
 
     port = Keyword.get(opts, :port) || Mix.raise("--port is required")
@@ -43,6 +62,17 @@ defmodule Mix.Tasks.Simulator.Run do
       false -> Mix.raise("no profile #{inspect(spec)} in #{Profile.dir()}")
       _ -> Mix.raise("bad --meter #{inspect(spec)}; expected UNIT:PROFILE, e.g. 1:elite_440")
     end
+  end
+
+  defp stored(meter, opts) do
+    counts = Keyword.take(opts, [:histories, :snapshots, :days])
+
+    if Enum.any?(counts, fn {_, n} -> n not in 0..0xFFFF end),
+      do: Mix.raise("--histories, --snapshots and --days must be 0 to 65535")
+
+    meter
+    |> Meter.stores(counts)
+    |> Meter.clock(Keyword.get(opts, :clock_offset, 0), Keyword.get(opts, :clock_drift, 0))
   end
 
   defp framing("tcp"), do: :tcp
