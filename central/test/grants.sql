@@ -266,11 +266,11 @@ CREATE TEMP VIEW monitor_roles AS
 SELECT pg_temp.is(
   (SELECT string_agg(c.relname::text, ', ' ORDER BY c.relname)
    FROM pg_class c WHERE c.relnamespace = 'health'::regnamespace AND c.relkind = 'v'),
-  'collector_clocks, collectors, endpoint_latency, endpoints, energy_drops, meter_clock_reads, '
-  || 'meter_firmware, meters, misplaced_serials, place_serials, problems, stored_entries, '
-  || 'stored_entry_conflicts, targets, thresholds, unregistered_serial_places, '
-  || 'unregistered_serials',
-  'health holds the seventeen health views');
+  'collector_clocks, collectors, copy_stores, copy_targets, endpoint_latency, endpoints, '
+  || 'energy_drops, meter_clock_reads, meter_firmware, meters, misplaced_serials, '
+  || 'missed_snapshots, place_serials, problems, stored_entries, stored_entry_conflicts, '
+  || 'targets, thresholds, unregistered_serial_places, unregistered_serials',
+  'health holds the twenty health views');
 
 SELECT pg_temp.is(
   (SELECT count(*) FROM pg_class c
@@ -365,7 +365,10 @@ FROM unnest(ARRAY[
   'SELECT * FROM health.thresholds',
   'SELECT * FROM health.stored_entries',
   'SELECT * FROM health.stored_entry_conflicts',
-  'SELECT * FROM health.meter_clock_reads'
+  'SELECT * FROM health.meter_clock_reads',
+  'SELECT * FROM health.copy_targets',
+  'SELECT * FROM health.missed_snapshots',
+  'SELECT * FROM health.copy_stores'
 ]) q;
 
 SELECT pg_temp.is(pg_temp.sqlstate_as('monitor', q), '42501', 'monitor is refused: ' || q)
@@ -397,11 +400,11 @@ FROM unnest(ARRAY[
   $q$SELECT api.ingest('{}')$q$,
   'SELECT api.collector_config()',
   $q$SELECT registry.collector_config('sqltest_grants')$q$,
-  $q$SELECT admin.set_health_thresholds('1 hour', 4, 0.8, '1 day', 0.05)$q$,
+  $q$SELECT admin.set_health_thresholds('1 hour', 4, 0.8, '1 day', 0.05, '1 hour', '62 days', '14 days', '7 days', '30 days')$q$,
   $q$SELECT admin.retire_meter('SQLREG-0001', now())$q$,
   $q$SELECT admin.register_target('e', 1, now(), 'elite_440', NULL)$q$,
   $q$SELECT admin.retire_target('e', 1, now())$q$,
-  $q$INSERT INTO registry.health_thresholds (collector_silent_after, meter_silent_intervals, backlog_near_capacity, lookback, endpoint_error_rate) VALUES ('1 hour', 4, 0.8, '1 day', 0.05)$q$,
+  $q$INSERT INTO registry.health_thresholds (collector_silent_after, meter_silent_intervals, backlog_near_capacity, lookback, endpoint_error_rate, snapshot_missed_margin, history_behind_after, snapshot_behind_after_elite_500, load_survey_behind_after_elite_440, load_survey_behind_after_elite_500) VALUES ('1 hour', 4, 0.8, '1 day', 0.05, '1 hour', '62 days', '14 days', '7 days', '30 days')$q$,
   'SELECT * FROM store.profile_versions',
   'SELECT * FROM store.profile_registers',
   'SELECT * FROM store.profile_stored',
@@ -567,6 +570,7 @@ FROM unnest(ARRAY[
   'SELECT * FROM store.meter_clock_reads',
   'SELECT * FROM health.stored_entries',
   'SELECT * FROM health.meter_clock_reads',
+  'SELECT * FROM health.copy_stores',
   'SELECT * FROM store.profile_versions',
   'SELECT * FROM store.profile_registers',
   'SELECT * FROM store.profile_stored',

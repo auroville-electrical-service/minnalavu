@@ -9,7 +9,9 @@ BEGIN;
 
 SELECT admin.set_health_thresholds(collector_silent_after => '1 hour',
   meter_silent_intervals => 4, backlog_near_capacity => 0.8, lookback => '1 day',
-  endpoint_error_rate => 0.05);
+  endpoint_error_rate => 0.05, snapshot_missed_margin => '1 hour',
+  history_behind_after => '62 days', snapshot_behind_after_elite_500 => '14 days',
+  load_survey_behind_after_elite_440 => '7 days', load_survey_behind_after_elite_500 => '30 days');
 
 SELECT admin.create_collector(c) FROM unnest(ARRAY['sqlh_a', 'sqlh_b', 'sqlh_c', 'sqlh_d']) c;
 
@@ -485,9 +487,227 @@ SELECT pg_temp.is(
          now() - interval '3 days', now() - interval '10 minutes'),
   'a firmware change''s problem says the names before and after, when each was read, and where');
 
+-- Copies, on collector sqlh_e (last upload 5 minutes ago) and sqlh_f (last
+-- upload 20 hours ago), at 10.0.0.5:502. Each meter's clock is set by the
+-- meter time it reads now, so meter days do not hang on the hour the tests
+-- run: most read 2026-06-15 12:00, so their 2026-06-14 snapshot was replaced
+-- 12 hours ago by their clock and 2026-06-13's is outside the lookback.
+SAVEPOINT copies;
+SELECT admin.create_collector(c) FROM unnest(ARRAY['sqlh_e', 'sqlh_f']) c;
+INSERT INTO b VALUES ('sqlh_e', pg_temp.upload('sqlh_e', '5 minutes', 0, 0, 0, 0)),
+                     ('sqlh_f', pg_temp.upload('sqlh_f', '20 hours', 0, 0, 0, 0));
+
+CREATE FUNCTION pg_temp.copy_endpoint(id text, collector text, ago interval, copy boolean,
+                                      other boolean)
+RETURNS bigint
+LANGUAGE sql AS $$
+  SELECT admin.register_endpoint(
+    endpoint_id => id, valid_from => now() - ago, collector_id => collector, host => id,
+    port => 502, framing => 'tcp', polled_by_other_system => other, timeout_ms => 1000,
+    max_timeouts => 3, retries => 2, busy_backoff_ms => 500, reconnect_backoff_min_ms => 1000,
+    reconnect_backoff_max_ms => 60000, interval_ms => 900000, copy => copy)
+$$;
+
+-- A target of this profile, in service for ten days.
+CREATE FUNCTION pg_temp.copy_target(endpoint text, unit integer, profile text) RETURNS bigint
+LANGUAGE sql AS $$
+  SELECT admin.register_target(endpoint_id => endpoint, unit_id => unit,
+    valid_from => now() - interval '10 days', profile => profile, interval_ms => NULL)
+$$;
+
+-- A meter-clock read `ago` at the endpoint's unit, through its collector's
+-- batch, by a meter whose clock reads meter_now now.
+CREATE FUNCTION pg_temp.clock(endpoint text, unit integer, serial text, profile text,
+                              ago interval, meter_now timestamp)
+RETURNS void
+LANGUAGE sql AS $$
+  INSERT INTO store.meter_clock_reads
+  SELECT e.collector_id, e.host, e.port, unit, now() - ago, serial, profile, 2, meter_now - ago,
+         b.batch
+  FROM registry.endpoint_history e JOIN b ON b.collector = e.collector_id
+  WHERE e.endpoint_id = endpoint AND e.period @> now()
+$$;
+
+-- An entry of the serial's store, stamped at meter_time, under one of its
+-- profile's quantities in that store.
+CREATE FUNCTION pg_temp.copied(serial text, profile text, store store.stored_store,
+                               meter_time timestamp)
+RETURNS void
+LANGUAGE sql AS $$
+  INSERT INTO store.stored_entries
+    (meter_serial, store, register_key, meter_time, value, interval_s, profile, profile_version,
+     product_code, slot, copied_at, endpoint_host, endpoint_port, unit_id, collector_id,
+     batch_id)
+  SELECT serial, copied.store, min(p.register_key), meter_time, 1.0,
+         CASE WHEN copied.store = 'load_survey' THEN 1800 END, copied.profile, 2, 'P', 0,
+         now(), 'h', 502, 1, 'sqlh_e', (SELECT batch FROM b WHERE collector = 'sqlh_e')
+  FROM store.profile_stored p
+  WHERE (p.profile, p.version, p.store) = (copied.profile, 2, copied.store)
+$$;
+
+-- sqlc_on copies since 200 days ago. sqlc_late was switched on 30 hours ago,
+-- before the meter's 2026-06-14 snapshot was taken by its clock (36 hours
+-- ago); sqlc_off copies nothing; sqlc_other is another system's; sqlc_quiet
+-- is behind sqlh_f, which has not uploaded since the snapshot was replaced.
+SELECT pg_temp.copy_endpoint('sqlc_on', 'sqlh_e', '200 days', true, false);
+SELECT pg_temp.copy_endpoint('sqlc_late', 'sqlh_e', '10 days', false, false);
+SELECT admin.change_endpoint(endpoint_id => 'sqlc_late', valid_from => now() - interval '30 hours',
+  collector_id => 'sqlh_e', host => 'sqlc_late', port => 502, framing => 'tcp',
+  polled_by_other_system => false, timeout_ms => 1000, max_timeouts => 3, retries => 2,
+  busy_backoff_ms => 500, reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000,
+  interval_ms => 900000, copy => true);
+SELECT pg_temp.copy_endpoint('sqlc_off', 'sqlh_e', '10 days', false, false);
+SELECT pg_temp.copy_endpoint('sqlc_other', 'sqlh_e', '10 days', true, true);
+SELECT pg_temp.copy_endpoint('sqlc_quiet', 'sqlh_f', '10 days', true, false);
+
+-- On sqlc_on: unit 1 missed 2026-06-14 (and 2026-06-12, outside the
+-- lookback); unit 2 copied it, but its load survey stopped at 2026-06-05;
+-- unit 3's clock passed midnight 30 minutes ago, inside the margin, and unit
+-- 4's 90 minutes ago, past it; unit 5 was first seen 30 hours ago, after
+-- 2026-06-14's snapshot; unit 6 is not seen yet; unit 7, a 500, keeps many
+-- snapshots, was first seen 200 days ago, and its history and load survey
+-- are behind.
+SELECT pg_temp.copy_target('sqlc_on', u, CASE WHEN u = 7 THEN 'elite_500' ELSE 'elite_440' END)
+FROM generate_series(1, 7) u;
+SELECT pg_temp.copy_target(e, 1, 'elite_440')
+FROM unnest(ARRAY['sqlc_late', 'sqlc_off', 'sqlc_other', 'sqlc_quiet']) e;
+
+SELECT pg_temp.clock(e, u, s, p, a, m)
+FROM (VALUES ('sqlc_on', 1, 'SQLC-0001', 'elite_440', '10 days'::interval,
+              '2026-06-15 12:00'::timestamp),
+             ('sqlc_on', 1, 'SQLC-0001', 'elite_440', '1 hour', '2026-06-15 12:00'),
+             ('sqlc_on', 2, 'SQLC-0002', 'elite_440', '10 days', '2026-06-15 12:00'),
+             ('sqlc_on', 3, 'SQLC-0003', 'elite_440', '10 days', '2026-06-15 00:30'),
+             ('sqlc_on', 4, 'SQLC-0004', 'elite_440', '10 days', '2026-06-15 01:30'),
+             ('sqlc_on', 5, 'SQLC-0005', 'elite_440', '30 hours', '2026-06-15 12:00'),
+             ('sqlc_on', 7, 'SQLC-5001', 'elite_500', '200 days', '2026-06-15 12:00'),
+             ('sqlc_late', 1, 'SQLC-0201', 'elite_440', '10 days', '2026-06-15 12:00'),
+             ('sqlc_off', 1, 'SQLC-0101', 'elite_440', '10 days', '2026-06-15 12:00'),
+             ('sqlc_other', 1, 'SQLC-0301', 'elite_440', '10 days', '2026-06-15 12:00'),
+             ('sqlc_quiet', 1, 'SQLC-0401', 'elite_440', '21 hours', '2026-06-15 12:00'),
+             ('sqlc_quiet', 1, 'SQLC-0401', 'elite_440', '10 days', '2026-06-15 12:00'))
+       v (e, u, s, p, a, m);
+
+SELECT pg_temp.copied(s, p, st::store.stored_store, t)
+FROM (VALUES ('SQLC-0001', 'elite_440', 'snapshot', '2026-06-13 00:00'::timestamp),
+             ('SQLC-0001', 'elite_440', 'snapshot', '2026-06-11 00:00'),
+             ('SQLC-0001', 'elite_440', 'load_survey', '2026-06-15 11:30'),
+             ('SQLC-0001', 'elite_440', 'history', '2026-06-01 00:00'),
+             ('SQLC-0002', 'elite_440', 'snapshot', '2026-06-14 00:00'),
+             ('SQLC-0002', 'elite_440', 'load_survey', '2026-06-05 23:30'),
+             ('SQLC-0002', 'elite_440', 'history', '2026-06-01 00:00'),
+             ('SQLC-0003', 'elite_440', 'snapshot', '2026-06-13 00:00'),
+             ('SQLC-0003', 'elite_440', 'load_survey', '2026-06-15 00:00'),
+             ('SQLC-0003', 'elite_440', 'history', '2026-06-01 00:00'),
+             ('SQLC-0004', 'elite_440', 'snapshot', '2026-06-13 00:00'),
+             ('SQLC-0004', 'elite_440', 'load_survey', '2026-06-15 01:00'),
+             ('SQLC-0004', 'elite_440', 'history', '2026-06-01 00:00'),
+             ('SQLC-5001', 'elite_500', 'snapshot', '2026-06-10 00:00'),
+             ('SQLC-5001', 'elite_500', 'load_survey', '2026-05-01 00:00'),
+             ('SQLC-5001', 'elite_500', 'history', '2026-03-01 00:00'),
+             ('SQLC-0401', 'elite_440', 'load_survey', '2026-06-14 15:00')) v (s, p, st, t);
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s/%s %s %s %s', endpoint_id, unit_id, coalesce(serial, '-'),
+                            copying_since = now() - interval '30 hours',
+                            last_upload_at = now() - interval '5 minutes'),
+                     ', ' ORDER BY endpoint_id, unit_id)
+   FROM health.copy_targets WHERE endpoint_id LIKE 'sqlc_%'),
+  'sqlc_late/1 SQLC-0201 t t, sqlc_on/1 SQLC-0001 f t, sqlc_on/2 SQLC-0002 f t, '
+  || 'sqlc_on/3 SQLC-0003 f t, sqlc_on/4 SQLC-0004 f t, sqlc_on/5 SQLC-0005 f t, '
+  || 'sqlc_on/6 - f t, sqlc_on/7 SQLC-5001 f t, sqlc_quiet/1 SQLC-0401 f f',
+  'a target is copied while its endpoint copies and no other system polls it, with since when '
+  || 'it has copied, the serial its last meter-clock read found, and its collector''s last upload');
+
+SELECT pg_temp.is(
+  (SELECT format('%s %s %s',
+                 meter_offset = '2026-06-15 12:00'::timestamp - (now() AT TIME ZONE 'UTC'),
+                 clock_read_at = now() - interval '1 hour',
+                 first_seen_at = now() - interval '10 days')
+   FROM health.copy_targets WHERE serial = 'SQLC-0001'),
+  't t t',
+  'a copied target shows its meter''s offset from UTC as last read, and when it was first seen');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s %s', serial, meter_day), ', ' ORDER BY serial, meter_day)
+   FROM health.missed_snapshots),
+  'SQLC-0001 2026-06-14, SQLC-0004 2026-06-14',
+  'a copied 440''s snapshot day is missed once the meter replaced it, past the margin, before '
+  || 'the last upload, within the lookback; not before copying began or the meter was seen, '
+  || 'not while copying is off, not for another system''s endpoint or a meter not seen');
+
+SELECT pg_temp.is(
+  (SELECT detail FROM health.problems WHERE kind = 'snapshot_missed' AND subject = 'SQLC-0001'),
+  format('no snapshot copied for meter day 2026-06-14, now replaced on the meter; its clock read '
+         || '%s from UTC at %s; at sqlc_on:502 unit 1 via sqlh_e',
+         '2026-06-15 12:00'::timestamp - (now() AT TIME ZONE 'UTC'), now() - interval '1 hour'),
+  'a missed snapshot''s problem says the meter days, the meter''s clock as read, and where');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s %s %s', serial, store, coalesce(newest_entry::text, '-')), ', '
+                     ORDER BY serial, store)
+   FROM health.copy_stores WHERE serial IN ('SQLC-0002', 'SQLC-0005', 'SQLC-5001')),
+  'SQLC-0002 history 2026-06-01 00:00:00, SQLC-0002 load_survey 2026-06-05 23:30:00, '
+  || 'SQLC-0005 history -, SQLC-0005 load_survey -, '
+  || 'SQLC-5001 history 2026-03-01 00:00:00, SQLC-5001 snapshot 2026-06-10 00:00:00, '
+  || 'SQLC-5001 load_survey 2026-05-01 00:00:00',
+  'each copied meter''s stores are judged per its profile, with the newest entry copied, a 440''s '
+  || 'snapshot left to missed_snapshots');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(subject, ', ' ORDER BY subject) FROM health.problems
+   WHERE kind IN ('snapshot_missed', 'copy_behind')),
+  'SQLC-0001, SQLC-0002 load_survey, SQLC-0004, SQLC-5001 history, SQLC-5001 load_survey',
+  'a store is behind when its newest copied entry is older than its model''s behind_after at '
+  || 'the last upload, and the endpoint copied and the meter was seen since before then; a '
+  || '500''s snapshots are judged as a store, not night by night');
+
+SELECT pg_temp.is(
+  (SELECT detail FROM health.problems WHERE kind = 'copy_behind' AND subject = 'SQLC-5001 history'),
+  format('newest history entry copied 2026-03-01 00:00:00, more than 62 days before the meter''s '
+         || 'clock at the last upload (%s); at sqlc_on:502 unit 7 via sqlh_e, profile elite_500',
+         '2026-06-15 11:55'::timestamp),
+  'a store behind says its newest entry, the threshold, the meter''s clock at the last upload, '
+  || 'and where');
+
+SAVEPOINT caught_up;
+SELECT pg_temp.copied('SQLC-0001', 'elite_440', 'snapshot', '2026-06-14 00:00');
+SELECT pg_temp.copied('SQLC-5001', 'elite_500', 'load_survey', '2026-05-17 00:00');
+SELECT pg_temp.is(
+  (SELECT string_agg(subject, ', ' ORDER BY subject) FROM health.problems
+   WHERE kind IN ('snapshot_missed', 'copy_behind')),
+  'SQLC-0002 load_survey, SQLC-0004, SQLC-5001 history',
+  'a snapshot copied clears its day, and an entry stamped within behind_after its store');
+ROLLBACK TO SAVEPOINT caught_up;
+
+SELECT pg_temp.is(pg_temp.unkeyed_scans('SELECT * FROM health.missed_snapshots'), NULL,
+  'health.missed_snapshots finds clock reads, uploads and snapshot entries by index');
+SELECT pg_temp.is(pg_temp.unkeyed_scans('SELECT * FROM health.copy_stores'), NULL,
+  'health.copy_stores finds clock reads, uploads and entries by index');
+
+SELECT admin.set_health_thresholds(collector_silent_after => '1 hour',
+  meter_silent_intervals => 4, backlog_near_capacity => 0.8, lookback => '4 days',
+  endpoint_error_rate => 0.05, snapshot_missed_margin => '2 hours',
+  history_behind_after => '120 days', snapshot_behind_after_elite_500 => '14 days',
+  load_survey_behind_after_elite_440 => '7 days', load_survey_behind_after_elite_500 => '50 days');
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s %s', serial, meter_day), ', ' ORDER BY serial, meter_day)
+   FROM health.missed_snapshots WHERE serial IN ('SQLC-0001', 'SQLC-0004')),
+  'SQLC-0001 2026-06-12, SQLC-0001 2026-06-14, SQLC-0004 2026-06-10, SQLC-0004 2026-06-11, '
+  || 'SQLC-0004 2026-06-12',
+  'missed snapshot days are judged by the margin and lookback in force');
+SELECT pg_temp.is(
+  (SELECT string_agg(subject, ', ' ORDER BY subject) FROM health.problems
+   WHERE kind = 'copy_behind'),
+  'SQLC-0002 load_survey',
+  'a store behind is judged by its model''s behind_after in force');
+ROLLBACK TO SAVEPOINT copies;
+
 SELECT admin.set_health_thresholds(collector_silent_after => '3 hours',
   meter_silent_intervals => 10, backlog_near_capacity => 0.9, lookback => '4 days',
-  endpoint_error_rate => 0.2);
+  endpoint_error_rate => 0.2, snapshot_missed_margin => '1 hour',
+  history_behind_after => '62 days', snapshot_behind_after_elite_500 => '14 days',
+  load_survey_behind_after_elite_440 => '7 days', load_survey_behind_after_elite_500 => '30 days');
 
 SELECT pg_temp.is(
   (SELECT string_agg(format('%s %s', kind, subject), '; ' ORDER BY kind, subject)

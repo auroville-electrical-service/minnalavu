@@ -107,7 +107,7 @@ BEGIN
   RETURN (SELECT string_agg(format('%s on %s', n ->> 'Node Type', n ->> 'Relation Name'), '; ')
           FROM jsonb_path_query(plan, 'lax $.**') n
           WHERE jsonb_typeof(n) = 'object'
-            AND n ->> 'Relation Name' ~ '^(readings|missed_reads|_hyper_)'
+            AND n ->> 'Relation Name' ~ '^(readings|missed_reads|meter_clock_reads|uploads|_hyper_)'
             AND n ->> 'Node Type' <> 'Custom Scan'
             AND NOT (n ? 'Index Cond' OR n ? 'Recheck Cond'));
 END

@@ -294,6 +294,26 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
 - `health.energy_drops`: the drops in `store.energy_drops` at or just after
   a reading whose batch arrived within the lookback, found by index from those
   batches, never by a scan of the readings.
+- `health.copy_targets`: per registered target copied now (it and its
+  endpoint in service, `copy` on, no other system polling it): since when its
+  endpoint has copied without a break, the serial its last meter-clock read
+  at the unit's address found (none until one comes), when that serial's
+  clock was first read anywhere (when a collector able to copy first saw
+  it), the meter's offset from UTC as that read measured it (zone and drift
+  together), and the collector's last upload. Meter times below are placed
+  beside the server's by that offset.
+- `health.missed_snapshots`: per copied 440, each meter day whose snapshot
+  (stamped at the meter's midnight, replaced at the next: a 440 keeps one)
+  was not copied: taken after its endpoint began copying and the meter was
+  first seen, replaced at least `snapshot_missed_margin` before the meter's
+  clock at the collector's last upload, and replaced within the lookback.
+  Each day is one lookup by serial, store and stamp range.
+- `health.copy_stores`: per copied meter and each store its profile is judged
+  on (440: history, load survey; 500: history, snapshot, load survey), the
+  newest entry copied and whether the store is behind: no entry stamped later
+  than its `*_behind_after` before the meter's clock at the collector's last
+  upload, and copied and seen since before then. `behind` is one lookup by
+  serial, store and stamp range; `newest_entry` one per register key.
 - `health.problems`: one row per problem, `(kind, subject)` naming it and
   `detail` describing it now. Kinds: `collector_silent` (no upload for
   `collector_silent_after`), `clock_unchecked` (unchecked in
@@ -324,9 +344,15 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
   shows apart from interleaving), `firmware_changed` (a serial whose
   latest names differ from an earlier record, while the batch that first
   brought the latest names arrived within the lookback, so a weeks-late change
-  is flagged when it arrives, and a resend neither hides nor renews it) and
+  is flagged when it arrives, and a resend neither hides nor renews it),
   `energy_backwards` (a serial with a drop in `health.energy_drops`; each drop,
-  both readings' clock signals and whether it is suspect in its detail).
+  both readings' clock signals and whether it is suspect in its detail),
+  `snapshot_missed` (a serial in `health.missed_snapshots`; its meter days,
+  the meter's clock as last read and the address in its detail) and
+  `copy_behind` (a store behind in `health.copy_stores`, subject
+  `<serial> <store>`; its newest entry copied and the threshold in its
+  detail). Both are measured at the collector's last upload, so a collector
+  gone quiet shows as `collector_silent`, not as copies missed.
 - `health.stored_entries`, `health.stored_entry_conflicts` and
   `health.meter_clock_reads`: every row of their `store` tables, the first and
   last with `received_at`, when the batch that brought it first arrived, so a
@@ -337,10 +363,19 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
 
       SELECT admin.set_health_thresholds(collector_silent_after => '1 hour',
         meter_silent_intervals => 4, backlog_near_capacity => 0.8, lookback => '1 day',
-        endpoint_error_rate => 0.05);
+        endpoint_error_rate => 0.05, snapshot_missed_margin => '1 hour',
+        history_behind_after => '62 days', snapshot_behind_after_elite_500 => '14 days',
+        load_survey_behind_after_elite_440 => '7 days', load_survey_behind_after_elite_500 => '30 days');
 
   `endpoint_error_rate`'s first value, 0.05, is a guess until the pilot's
   figures say what a healthy chain misses.
+  So are the first values of `snapshot_missed_margin` (1 hour),
+  `history_behind_after` (62 days), `snapshot_behind_after_elite_500` (14
+  days), `load_survey_behind_after_elite_440` (7 days) and
+  `load_survey_behind_after_elite_500` (30 days), until the pilot's copies show
+  what its meters keep: each sits below what the pilot's meters of that model
+  held (a 440 34 days of load survey, a 500 52 snapshots and 332 days; six
+  histories each).
 
 The role `monitor` may select from these views and nothing else: no raw
 table, no registry table, nothing in `api` or `admin`, no function, no writes

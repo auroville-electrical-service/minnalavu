@@ -9,7 +9,9 @@ BEGIN;
 
 SELECT admin.set_health_thresholds(collector_silent_after => '1 hour',
   meter_silent_intervals => 4, backlog_near_capacity => 0.8, lookback => '1 day',
-  endpoint_error_rate => 0.1);
+  endpoint_error_rate => 0.1, snapshot_missed_margin => '1 hour',
+  history_behind_after => '62 days', snapshot_behind_after_elite_500 => '14 days',
+  load_survey_behind_after_elite_440 => '7 days', load_survey_behind_after_elite_500 => '30 days');
 
 INSERT INTO store.collectors (id) VALUES ('sqlp_a'), ('sqlp_b');
 
@@ -158,7 +160,9 @@ SELECT pg_temp.is(pg_temp.address_lookups('SELECT * FROM health.endpoints'),
 
 SELECT admin.set_health_thresholds(collector_silent_after => '1 hour',
   meter_silent_intervals => 4, backlog_near_capacity => 0.8, lookback => '3 days',
-  endpoint_error_rate => 0.2);
+  endpoint_error_rate => 0.2, snapshot_missed_margin => '1 hour',
+  history_behind_after => '62 days', snapshot_behind_after_elite_500 => '14 days',
+  load_survey_behind_after_elite_440 => '7 days', load_survey_behind_after_elite_500 => '30 days');
 
 SELECT pg_temp.is(
   (SELECT string_agg(format('%s %s', endpoint_id, error_rate), ', ' ORDER BY endpoint_id)

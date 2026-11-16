@@ -10,7 +10,9 @@ BEGIN;
 
 SELECT admin.set_health_thresholds(collector_silent_after => '1 hour',
   meter_silent_intervals => 4, backlog_near_capacity => 0.8, lookback => '1 day',
-  endpoint_error_rate => 0.05);
+  endpoint_error_rate => 0.05, snapshot_missed_margin => '1 hour',
+  history_behind_after => '62 days', snapshot_behind_after_elite_500 => '14 days',
+  load_survey_behind_after_elite_440 => '7 days', load_survey_behind_after_elite_500 => '30 days');
 
 INSERT INTO store.collectors (id) VALUES ('sqle_a'), ('sqle_b');
 
@@ -164,7 +166,9 @@ SELECT pg_temp.is(
 
 SELECT admin.set_health_thresholds(collector_silent_after => '1 hour',
   meter_silent_intervals => 4, backlog_near_capacity => 0.8, lookback => '4 days',
-  endpoint_error_rate => 0.05);
+  endpoint_error_rate => 0.05, snapshot_missed_margin => '1 hour',
+  history_behind_after => '62 days', snapshot_behind_after_elite_500 => '14 days',
+  load_survey_behind_after_elite_440 => '7 days', load_survey_behind_after_elite_500 => '30 days');
 
 SELECT pg_temp.ok(
   (SELECT 'SQLE-OLD' IN (SELECT subject FROM health.problems WHERE kind = 'energy_backwards')),
