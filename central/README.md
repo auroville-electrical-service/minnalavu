@@ -62,8 +62,9 @@ The directory is not named `minnalavu/`, since that is the repo itself.
   `meter_clock_reads`: a meter's clock as read beside the collector's, raw,
   keyed on `(collector_id, endpoint_host, endpoint_port, unit_id,
   collector_at)`, with the serial, profile version and `meter_time` (no
-  zone); a read that differs from the stored one under its key is counted,
-  not kept. Offsets against true time are for views, through the clock checks.
+  zone); a read that differs from the stored one under its key goes to
+  `meter_clock_read_conflicts`, beside the stored one, which stands. Offsets
+  against true time are for views, through the clock checks.
   `batches` (one row per batch, as first received), `uploads` (every arrival of a batch, with the collector's
   backlog), `reading_conflicts` (a reading whose key was already taken by one
   with other content) and `collectors`. Nothing in `store` can be updated,
@@ -353,10 +354,11 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
   `<serial> <store>`; its newest entry copied and the threshold in its
   detail). Both are measured at the collector's last upload, so a collector
   gone quiet shows as `collector_silent`, not as copies missed.
-- `health.stored_entries`, `health.stored_entry_conflicts` and
-  `health.meter_clock_reads`: every row of their `store` tables, the first and
-  last with `received_at`, when the batch that brought it first arrived, so a
-  late copy is found by arrival, as readings are.
+- `health.stored_entries`, `health.stored_entry_conflicts`,
+  `health.meter_clock_reads` and `health.meter_clock_read_conflicts`: every
+  row of their `store` tables, the first and third with `received_at`, when
+  the batch that brought it first arrived, so a late copy is found by
+  arrival, as readings are.
 - `health.thresholds`: the thresholds in force, from
   `registry.health_thresholds` (append-only; the last row set holds). Change
   them as the owner:
@@ -451,8 +453,8 @@ nothing else (`test/grants.sql`); no other role may call the function. It
 cannot log in; a login is a member of it, as for `monitor`.
 
 `minkanakku`'s read-only role, not built yet, will read `stored_entries`,
-`stored_entry_conflicts` and `meter_clock_reads` beside the readings and the
-catalog: a widening of that interface, to be changed with the same care.
+`stored_entry_conflicts`, `meter_clock_reads` and `meter_clock_read_conflicts`
+beside the readings and the catalog: a widening of that interface, to be changed with the same care.
 
     SELECT jobs.request_job(collector_id => 'pilot_01', kind => 'read_on_demand',
       meters => ARRAY['…'], requester => '…');          -- returns the request id
@@ -498,8 +500,9 @@ per upload in `store.uploads` and shown in `health.collectors`.
   `received`, `inserted`, `duplicate` and `conflicting` (a conflicting one is
   counted, not kept), and clock checks, latency entries, stored entries and
   meter-clock reads the same (a conflicting stored entry is kept in
-  `store.stored_entry_conflicts`), and `config_digest` (above). Stored entries
-  and meter-clock reads are counted per upload in `store.uploads` too, as
+  `store.stored_entry_conflicts`, a conflicting meter-clock read in
+  `store.meter_clock_read_conflicts`), and `config_digest` (above). Stored
+  entries and meter-clock reads are counted per upload in `store.uploads` too, as
   readings and missed reads are. `jobs`, when the collector has
   pending requests, lists them oldest first, each with its `request_id`, `kind`,
   `meters` (serials), `requested_at` and `expires_at`; a request is listed

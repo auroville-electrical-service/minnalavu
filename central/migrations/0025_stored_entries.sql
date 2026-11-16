@@ -59,7 +59,8 @@ CREATE TABLE store.stored_entry_conflicts (
 
 -- A meter's clock as read beside the collector's, raw. Keyed as a firmware
 -- read is, by where and when the collector read it: a resent read is a
--- duplicate. Offsets are views, grounded through the collector's clock checks.
+-- duplicate, and one that says otherwise is kept as a conflict. Offsets are
+-- views, grounded through the collector's clock checks.
 -- contract: central/test/stored.sql
 CREATE TABLE store.meter_clock_reads (
   collector_id text NOT NULL REFERENCES store.collectors (id),
@@ -82,11 +83,23 @@ COMMENT ON COLUMN store.meter_clock_reads.meter_time IS
 CREATE INDEX ON store.meter_clock_reads (meter_serial, collector_at DESC);
 CREATE INDEX ON store.meter_clock_reads (batch_id);
 
+-- A meter-clock read whose key is taken by one that says something else.
+-- contract: central/test/stored.sql
+CREATE TABLE store.meter_clock_read_conflicts (
+  LIKE store.meter_clock_reads INCLUDING CONSTRAINTS,
+  received_at timestamptz NOT NULL,
+  PRIMARY KEY (batch_id, collector_id, endpoint_host, endpoint_port, unit_id, collector_at),
+  FOREIGN KEY (collector_id) REFERENCES store.collectors (id),
+  FOREIGN KEY (batch_id) REFERENCES store.batches (batch_id),
+  FOREIGN KEY (profile, profile_version) REFERENCES store.profile_versions (profile, version)
+);
+
 DO $$
 DECLARE
   t text;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['stored_entries', 'stored_entry_conflicts', 'meter_clock_reads'] LOOP
+  FOREACH t IN ARRAY ARRAY['stored_entries', 'stored_entry_conflicts', 'meter_clock_reads',
+                           'meter_clock_read_conflicts'] LOOP
     EXECUTE format(
       'CREATE TRIGGER refuse_change BEFORE UPDATE OR DELETE ON store.%I
          FOR EACH ROW EXECUTE FUNCTION store.refuse_change()', t);
@@ -192,7 +205,8 @@ $$;
 -- reads. An entry copied again (a later night, another slot or address) is a
 -- duplicate when it says the same: value, interval, profile version and
 -- product code; where, when and for what it was copied is evidence of the
--- copy, not part of the entry. One that says otherwise is kept as a conflict.
+-- copy, not part of the entry. One that says otherwise is kept as a conflict,
+-- as is a meter-clock read that says otherwise under a taken key.
 -- contract: central/test/ingest.sql, central/test/stored.sql, central/test/requests.sql, central/test/collector_config.sql
 CREATE OR REPLACE FUNCTION api.ingest(jsonb) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
@@ -391,14 +405,22 @@ BEGIN
   )
   SELECT count(*) INTO meter_clocks_new FROM inserted;
 
-  -- Counted, not kept, as clock checks: the stored read stands.
-  SELECT count(*) INTO meter_clocks_conflicting
-  FROM store.batch_meter_clock_reads(b) m
-  JOIN store.meter_clock_reads s
-    ON (s.collector_id, s.endpoint_host, s.endpoint_port, s.unit_id, s.collector_at)
-       = (caller, m.endpoint_host, m.endpoint_port, m.unit_id, m.collector_at)
-  WHERE (s.meter_serial, s.profile, s.profile_version, s.meter_time)
-        IS DISTINCT FROM (m.meter_serial, m.profile, m.profile_version, m.meter_time);
+  WITH differing AS (
+    SELECT m.*
+    FROM store.batch_meter_clock_reads(b) m
+    JOIN store.meter_clock_reads s
+      ON (s.collector_id, s.endpoint_host, s.endpoint_port, s.unit_id, s.collector_at)
+         = (caller, m.endpoint_host, m.endpoint_port, m.unit_id, m.collector_at)
+    WHERE (s.meter_serial, s.profile, s.profile_version, s.meter_time)
+          IS DISTINCT FROM (m.meter_serial, m.profile, m.profile_version, m.meter_time)
+  ), kept AS (
+    INSERT INTO store.meter_clock_read_conflicts
+      (endpoint_host, endpoint_port, unit_id, collector_at, meter_serial, profile,
+       profile_version, meter_time, collector_id, batch_id, received_at)
+    SELECT d.*, caller, id, now() FROM differing d
+    ON CONFLICT DO NOTHING
+  )
+  SELECT count(*) INTO meter_clocks_conflicting FROM differing;
 
   unknown_requests := jobs.link_batch(b, caller, id);
 
@@ -472,7 +494,7 @@ $$;
 
 -- What monitor may read of them: every row, with when its batch first
 -- arrived, so a late copy is found by arrival. The future minkanakku role
--- reads all three too, a widening of its interface; it is not built here.
+-- reads all four too, a widening of its interface; it is not built here.
 -- contract: central/test/grants.sql
 CREATE VIEW health.stored_entries AS
   SELECT s.*, b.received_at
@@ -485,8 +507,11 @@ CREATE VIEW health.meter_clock_reads AS
   SELECT m.*, b.received_at
   FROM store.meter_clock_reads m JOIN store.batches b USING (batch_id);
 
-GRANT SELECT ON health.stored_entries, health.stored_entry_conflicts, health.meter_clock_reads
-  TO monitor;
+CREATE VIEW health.meter_clock_read_conflicts AS
+  SELECT * FROM store.meter_clock_read_conflicts;
+
+GRANT SELECT ON health.stored_entries, health.stored_entry_conflicts, health.meter_clock_reads,
+  health.meter_clock_read_conflicts TO monitor;
 
 -- migrate:down
 -- Forward only: a rollback would drop raw data. Undo with a new migration.

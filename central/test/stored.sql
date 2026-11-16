@@ -77,10 +77,11 @@ SELECT pg_temp.is(
   'a resent batch''s stored entries and meter-clock reads are duplicates');
 
 SELECT pg_temp.is(
-  (SELECT format('%s %s %s', (SELECT count(*) FROM store.stored_entries),
+  (SELECT format('%s %s %s %s', (SELECT count(*) FROM store.stored_entries),
                  (SELECT count(*) FROM store.stored_entry_conflicts),
-                 (SELECT count(*) FROM store.meter_clock_reads))),
-  '3 0 1',
+                 (SELECT count(*) FROM store.meter_clock_reads),
+                 (SELECT count(*) FROM store.meter_clock_read_conflicts))),
+  '3 0 1 0',
   'and nothing of them is stored twice');
 
 SELECT pg_temp.is(
@@ -155,19 +156,38 @@ SELECT pg_temp.is(
   '{"received": 3, "inserted": 1, "duplicate": 2, "conflicting": 0}',
   'an entry under another stamp is a new entry, whatever its slot');
 
--- Meter-clock reads: another meter time at a taken read is counted, not kept.
+-- Meter-clock reads: another meter time at a taken read is kept apart.
+CREATE TEMP TABLE clock_differing (batch jsonb);
+INSERT INTO clock_differing SELECT pg_temp.changed(
+  pg_temp.renamed(:'basic', 'd5d5d5d5-d5d5-4d5d-8d5d-d5d5d5d5d5d5'),
+  '{"path": ["meter_clock_reads", 0, "meter_time"], "value": "2026-11-01T00:28:50"}');
+
 SELECT pg_temp.is(
-  pg_temp.ingest_as('collector_sqltest_st', pg_temp.changed(
-    pg_temp.renamed(:'basic', 'd5d5d5d5-d5d5-4d5d-8d5d-d5d5d5d5d5d5'),
-    '{"path": ["meter_clock_reads", 0, "meter_time"], "value": "2026-11-01T00:28:50"}'))
+  pg_temp.ingest_as('collector_sqltest_st', (SELECT batch FROM clock_differing))
     -> 'meter_clock_reads',
   '{"received": 1, "inserted": 0, "duplicate": 0, "conflicting": 1}',
   'a meter-clock read that differs from the stored one at its address and time is conflicting');
 
 SELECT pg_temp.is(
-  (SELECT string_agg(meter_time::text, ', ') FROM store.meter_clock_reads),
-  '2026-11-01 00:28:49',
-  'and the stored read stands');
+  (SELECT format('%s / %s',
+     (SELECT string_agg(meter_time::text, ', ') FROM store.meter_clock_reads),
+     (SELECT string_agg(format('%s %s %s %s %s', collector_id, collector_at, meter_serial,
+                               meter_time, batch_id), ', ')
+      FROM store.meter_clock_read_conflicts))),
+  '2026-11-01 00:28:49 / sqltest_st 2026-11-01 00:00:04+00 SIM-445-0001 2026-11-01 00:28:50 '
+  || 'd5d5d5d5-d5d5-4d5d-8d5d-d5d5d5d5d5d5',
+  'the stored read stands and the conflicting one is kept');
+
+SELECT pg_temp.is(
+  pg_temp.ingest_as('collector_sqltest_st', (SELECT batch FROM clock_differing))
+    -> 'meter_clock_reads',
+  '{"received": 1, "inserted": 0, "duplicate": 0, "conflicting": 1}',
+  'a resent conflicting meter-clock read is counted as conflicting again');
+
+SELECT pg_temp.is(
+  (SELECT count(*) FROM store.meter_clock_read_conflicts),
+  1::bigint,
+  'but its conflict is kept once');
 
 SELECT pg_temp.is(
   pg_temp.ingest_as('collector_sqltest_st', pg_temp.changed(
@@ -328,7 +348,8 @@ SELECT pg_temp.is(
                      ORDER BY table_name, column_name)
    FROM information_schema.columns
    WHERE table_schema = 'store'
-     AND table_name IN ('stored_entries', 'stored_entry_conflicts', 'meter_clock_reads')
+     AND table_name IN ('stored_entries', 'stored_entry_conflicts', 'meter_clock_reads',
+                        'meter_clock_read_conflicts')
      AND column_name IN ('raw_words', 'unit', 'kind', 'history_reason_raw', 'offset_s')),
   NULL,
   'stored entries and meter-clock reads carry no raw words, unit, kind, reason or offset');
@@ -343,7 +364,10 @@ FROM unnest(ARRAY[
   'TRUNCATE store.stored_entry_conflicts',
   $q$UPDATE store.meter_clock_reads SET meter_time = '2000-01-01'$q$,
   'DELETE FROM store.meter_clock_reads',
-  'TRUNCATE store.meter_clock_reads'
+  'TRUNCATE store.meter_clock_reads',
+  $q$UPDATE store.meter_clock_read_conflicts SET meter_time = '2000-01-01'$q$,
+  'DELETE FROM store.meter_clock_read_conflicts',
+  'TRUNCATE store.meter_clock_read_conflicts'
 ]) q;
 
 ROLLBACK;

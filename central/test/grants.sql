@@ -223,9 +223,12 @@ FROM unnest(ARRAY[
   'SELECT * FROM store.meter_clock_reads',
   'SELECT * FROM health.stored_entries',
   'SELECT * FROM health.meter_clock_reads',
+  'SELECT * FROM store.meter_clock_read_conflicts',
+  'SELECT * FROM health.meter_clock_read_conflicts',
   $q$INSERT INTO store.stored_entries (meter_serial, store, register_key, meter_time, value, profile, profile_version, product_code, slot, copied_at, endpoint_host, endpoint_port, unit_id, collector_id, batch_id) VALUES ('S', 'history', 'active_energy_import', '2026-11-01', 1, 'elite_440', 2, 'P', 1, now(), 'h', 1, 1, 'sqltest_grants', gen_random_uuid())$q$,
   $q$INSERT INTO store.stored_entry_conflicts (meter_serial, store, register_key, meter_time, value, profile, profile_version, product_code, slot, copied_at, endpoint_host, endpoint_port, unit_id, collector_id, batch_id, received_at) VALUES ('S', 'history', 'active_energy_import', '2026-11-01', 1, 'elite_440', 2, 'P', 1, now(), 'h', 1, 1, 'sqltest_grants', gen_random_uuid(), now())$q$,
   $q$INSERT INTO store.meter_clock_reads (collector_id, endpoint_host, endpoint_port, unit_id, collector_at, meter_serial, profile, profile_version, meter_time, batch_id) VALUES ('sqltest_grants', 'h', 1, 1, now(), 'S', 'elite_440', 2, '2026-11-01', gen_random_uuid())$q$,
+  $q$INSERT INTO store.meter_clock_read_conflicts (collector_id, endpoint_host, endpoint_port, unit_id, collector_at, meter_serial, profile, profile_version, meter_time, batch_id, received_at) VALUES ('sqltest_grants', 'h', 1, 1, now(), 'S', 'elite_440', 2, '2026-11-01', gen_random_uuid(), now())$q$,
   $q$UPDATE store.stored_entries SET value = 0$q$,
   $q$DELETE FROM store.stored_entries$q$,
   $q$UPDATE store.meter_clock_reads SET meter_time = now()$q$,
@@ -267,10 +270,11 @@ SELECT pg_temp.is(
   (SELECT string_agg(c.relname::text, ', ' ORDER BY c.relname)
    FROM pg_class c WHERE c.relnamespace = 'health'::regnamespace AND c.relkind = 'v'),
   'collector_clocks, collectors, copy_stores, copy_targets, endpoint_latency, endpoints, '
-  || 'energy_drops, meter_clock_reads, meter_firmware, meters, misplaced_serials, '
-  || 'missed_snapshots, place_serials, problems, stored_entries, stored_entry_conflicts, '
-  || 'targets, thresholds, unregistered_serial_places, unregistered_serials',
-  'health holds the twenty health views');
+  || 'energy_drops, meter_clock_read_conflicts, meter_clock_reads, meter_firmware, meters, '
+  || 'misplaced_serials, missed_snapshots, place_serials, problems, stored_entries, '
+  || 'stored_entry_conflicts, targets, thresholds, unregistered_serial_places, '
+  || 'unregistered_serials',
+  'health holds the twenty-one health views');
 
 SELECT pg_temp.is(
   (SELECT count(*) FROM pg_class c
@@ -366,6 +370,7 @@ FROM unnest(ARRAY[
   'SELECT * FROM health.stored_entries',
   'SELECT * FROM health.stored_entry_conflicts',
   'SELECT * FROM health.meter_clock_reads',
+  'SELECT * FROM health.meter_clock_read_conflicts',
   'SELECT * FROM health.copy_targets',
   'SELECT * FROM health.missed_snapshots',
   'SELECT * FROM health.copy_stores'
@@ -389,6 +394,7 @@ FROM unnest(ARRAY[
   'SELECT * FROM store.stored_entries',
   'SELECT * FROM store.stored_entry_conflicts',
   'SELECT * FROM store.meter_clock_reads',
+  'SELECT * FROM store.meter_clock_read_conflicts',
   $q$DELETE FROM store.stored_entries$q$,
   $q$SELECT admin.load_latency_buckets('{"version": 99, "bounds_ms": [1]}')$q$,
   'SELECT * FROM registry.meter_versions',
@@ -570,6 +576,8 @@ FROM unnest(ARRAY[
   'SELECT * FROM store.meter_clock_reads',
   'SELECT * FROM health.stored_entries',
   'SELECT * FROM health.meter_clock_reads',
+  'SELECT * FROM store.meter_clock_read_conflicts',
+  'SELECT * FROM health.meter_clock_read_conflicts',
   'SELECT * FROM health.copy_stores',
   'SELECT * FROM store.profile_versions',
   'SELECT * FROM store.profile_registers',
