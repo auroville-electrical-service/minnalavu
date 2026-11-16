@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+if ((BASH_VERSINFO[0] < 5)); then
+  echo "needs bash 5+, found $BASH_VERSION" >&2
+  exit 1
+fi
+set -euo pipefail
+
+# Each tools/ script's output must equal its fixture byte for byte: runs every
+# one and prints the difference for any that does not.
+#   bin/dev contract bin/check
+if (($# != 0)); then
+  printf 'usage: bin/check\n' >&2
+  exit 2
+fi
+
+contract=$(cd "$(dirname "$0")/.." && pwd -P)
+cd "$contract/.."
+
+out=$(mktemp)
+trap 'rm -f -- "$out"' EXIT
+
+declare -A fixtures=(
+  ["contract/tools/register_decode.py"]=contract/fixtures/register-decode.v1.json
+  ["contract/tools/config_digest.py"]=contract/fixtures/config.v1.digests.json
+)
+
+failed=0
+for tool in "${!fixtures[@]}"; do
+  fixture=${fixtures[$tool]}
+  uv run --quiet --script "$tool" >"$out"
+  if diff -u -- "$fixture" "$out" >&2; then
+    printf 'ok - %s gives %s\n' "$tool" "$fixture"
+  else
+    printf 'FAILED: %s does not give %s (diff above)\n' "$tool" "$fixture" >&2
+    failed=1
+  fi
+done
+exit "$failed"

@@ -39,6 +39,7 @@ bin/dev alavi mix check                # format, warnings, credo --strict, dialy
 bin/dev simulator mix check
 bin/dev kai_alavi bun install          # once, and after a dependency change
 bin/dev kai_alavi bun run check        # Biome, tsc, tests
+bin/dev contract bin/check             # each tools/ script gives its fixture
 bin/dev simulator mix simulator.run --port 5020 --framing tcp --meter 1:elite_440 --meter 3:elite_500
 
 docker compose up -d timescale postgrest mailpit   # the central store, for those below
@@ -46,12 +47,12 @@ bin/dev central bin/test               # SQL tests, on a fresh test database
 bin/dev central bin/test-alert         # the alert job, against the mailpit mail catcher
 bin/dev central bin/dev-db --apply     # migrate the dev database PostgREST serves, then:
 bin/dev alavi mix test --only e2e      # simulator -> collector -> PostgREST -> database
-bin/dev . shellcheck bin/dev central/bin/*       # shell scripts; and:
-bin/dev . shfmt -d -i 2 -ci bin central/bin
+bin/dev . shellcheck bin/dev central/bin/* contract/bin/*   # shell scripts; and:
+bin/dev . shfmt -d -i 2 -ci bin central/bin contract/bin
 ```
 
 Checks must be clean before every commit: `mix check` (which leaves out the
-end-to-end test), `bun run check`, `bin/test`, and for a change to a script, `bin/test-alert`,
+end-to-end test), `bun run check`, `bin/test`, `bin/check` in `contract/`, and for a change to a script, `bin/test-alert`,
 ShellCheck and shfmt; the end-to-end test too for a change to the uplink, the
 contract or `central/`.
 

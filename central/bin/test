@@ -19,8 +19,15 @@ url=${MINNALAVU_TEST_DB_URL:?set by compose.yaml}
 central=$(cd "$(dirname "$0")/.." && pwd -P)
 cd "$central"
 
+name=${url##*/}
+name=${name%%\?*}
+admin=${url/\/"$name"/\/postgres}
+
 dbmate --url "$url" --wait drop >/dev/null
-dbmate --url "$url" create >/dev/null
+# A language's collation, not byte order, so that a sort leaving out
+# COLLATE "C" where bytes are the contract (the config digest's keys) fails.
+psql "$admin" -X -q -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$name\" TEMPLATE template0
+  LOCALE_PROVIDER icu ICU_LOCALE 'en-US' LOCALE 'en_US.utf8'"
 bin/migrate "$url" --apply >/dev/null
 bin/load-profiles "$url" --apply >/dev/null
 

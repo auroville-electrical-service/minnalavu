@@ -49,6 +49,13 @@ CASES: tuple[tuple[str, list[dict[str, Json]]], ...] = (
         ],
     ),
     (
+        "keys in byte order, which puts B before a, unlike a language's order",
+        [
+            {"path": ["endpoints", 0, "a"], "value": 1},
+            {"path": ["endpoints", 0, "B"], "value": 2},
+        ],
+    ),
+    (
         "control characters, each escaped, and DEL, which is not",
         [
             {

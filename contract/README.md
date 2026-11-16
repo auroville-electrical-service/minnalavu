@@ -32,7 +32,8 @@ What the collector and the server share. Nothing else is shared between them.
   `register_decode.py` writes `register-decode.v1.json`
   (`uv run --script contract/tools/register_decode.py`, from the repo root),
   and `config_digest.py` writes `config.v1.digests.json` the same way; each
-  one's output must equal its fixture byte for byte.
+  one's output must equal its fixture byte for byte, which `bin/check`
+  checks (`bin/dev contract bin/check`).
 - `fixtures/`: example messages. Both sides test against them.
   `batch.v1.cases.json` lists changes to the basic batch that the schema must
   reject, and some it must accept; the collector's schema test and the

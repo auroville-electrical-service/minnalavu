@@ -47,6 +47,29 @@
       "digest": "f9ac57da428d64c7bcd15aac8113750a31052f346c791cea8b7814dd8c3278cd"
     },
     {
+      "name": "keys in byte order, which puts B before a, unlike a language's order",
+      "changes": [
+        {
+          "path": [
+            "endpoints",
+            0,
+            "a"
+          ],
+          "value": 1
+        },
+        {
+          "path": [
+            "endpoints",
+            0,
+            "B"
+          ],
+          "value": 2
+        }
+      ],
+      "canonical": "{\"endpoints\":[{\"B\":2,\"a\":1,\"busy_backoff_ms\":500,\"framing\":\"tcp\",\"host\":\"192.0.2.10\",\"interval_ms\":900000,\"max_timeouts\":3,\"meters\":[{\"profile\":\"elite_440\",\"serial\":\"EX-00001\",\"unit_id\":1},{\"interval_ms\":60000,\"profile\":\"elite_500\",\"unit_id\":3}],\"polled_by_other_system\":false,\"port\":502,\"reconnect_backoff_ms\":{\"max\":60000,\"min\":1000},\"retries\":2,\"timeout_ms\":1000},{\"busy_backoff_ms\":0,\"framing\":\"rtu_over_tcp\",\"host\":\"gateway-b.example.invalid\",\"interval_ms\":300000,\"meters\":[{\"profile\":\"elite_500\",\"serial\":\"EX-500-000000002\",\"unit_id\":2}],\"polled_by_other_system\":true,\"port\":502,\"reconnect_backoff_ms\":{\"max\":5000,\"min\":5000},\"retries\":0,\"timeout_ms\":2000}],\"schema_version\":1}",
+      "digest": "8280ee1ca63b5bd9160135e594cd22db38fbcf934895d3a1bb02236a95f70da3"
+    },
+    {
       "name": "control characters, each escaped, and DEL, which is not",
       "changes": [
         {
