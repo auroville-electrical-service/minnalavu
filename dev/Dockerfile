@@ -4,7 +4,7 @@
 FROM ghcr.io/amacneil/dbmate:2.37.0 AS dbmate
 FROM koalaman/shellcheck:v0.11.0 AS shellcheck
 FROM mvdan/shfmt:v3.12.0 AS shfmt
-FROM oven/bun:1.3.14-debian AS bun
+FROM oven/bun:1.4.4-debian AS bun
 
 FROM hexpm/elixir:1.20.5-erlang-29.1.2-debian-trixie-20261104
 
