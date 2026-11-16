@@ -42,11 +42,12 @@ CREATE TEMP VIEW user_relations AS
   FROM pg_inherits i
   JOIN pg_class c ON c.oid = i.inhrelid
   JOIN pg_namespace n ON n.oid = c.relnamespace
-  WHERE i.inhparent IN ('store.readings'::regclass, 'store.missed_reads'::regclass);
+  WHERE i.inhparent IN ('store.readings'::regclass, 'store.missed_reads'::regclass,
+                        'store.stored_entries'::regclass);
 
 SELECT pg_temp.ok(
-  (SELECT count(*) FROM user_relations WHERE nspname = '_timescaledb_internal') >= 2,
-  'the chunks of readings and missed_reads are among the tables checked');
+  (SELECT count(*) FROM user_relations WHERE nspname = '_timescaledb_internal') >= 3,
+  'the chunks of readings, missed_reads and stored_entries are among the tables checked');
 
 CREATE TEMP VIEW collector_roles AS
   SELECT role FROM postgrest_roles WHERE role <> 'authenticator';
@@ -217,6 +218,20 @@ FROM unnest(ARRAY[
   'SELECT * FROM health.endpoint_latency',
   $q$INSERT INTO store.latency_bucket_versions (version, bounds_ms) VALUES (99, '{1}')$q$,
   $q$SELECT admin.load_latency_buckets('{"version": 99, "bounds_ms": [1]}')$q$,
+  'SELECT * FROM store.stored_entries',
+  'SELECT * FROM store.stored_entry_conflicts',
+  'SELECT * FROM store.meter_clock_reads',
+  'SELECT * FROM health.stored_entries',
+  'SELECT * FROM health.meter_clock_reads',
+  $q$INSERT INTO store.stored_entries (meter_serial, store, register_key, meter_time, value, profile, profile_version, product_code, slot, copied_at, endpoint_host, endpoint_port, unit_id, collector_id, batch_id) VALUES ('S', 'history', 'active_energy_import', '2026-11-01', 1, 'elite_440', 2, 'P', 1, now(), 'h', 1, 1, 'sqltest_grants', gen_random_uuid())$q$,
+  $q$INSERT INTO store.stored_entry_conflicts (meter_serial, store, register_key, meter_time, value, profile, profile_version, product_code, slot, copied_at, endpoint_host, endpoint_port, unit_id, collector_id, batch_id, received_at) VALUES ('S', 'history', 'active_energy_import', '2026-11-01', 1, 'elite_440', 2, 'P', 1, now(), 'h', 1, 1, 'sqltest_grants', gen_random_uuid(), now())$q$,
+  $q$INSERT INTO store.meter_clock_reads (collector_id, endpoint_host, endpoint_port, unit_id, collector_at, meter_serial, profile, profile_version, meter_time, batch_id) VALUES ('sqltest_grants', 'h', 1, 1, now(), 'S', 'elite_440', 2, '2026-11-01', gen_random_uuid())$q$,
+  $q$UPDATE store.stored_entries SET value = 0$q$,
+  $q$DELETE FROM store.stored_entries$q$,
+  $q$UPDATE store.meter_clock_reads SET meter_time = now()$q$,
+  $q$DELETE FROM store.meter_clock_reads$q$,
+  $q$SELECT store.check_copied_catalog('{}')$q$,
+  $q$SELECT store.batch_stored_entries('{}')$q$,
   $q$SELECT admin.create_collector('sqltest_intruder')$q$,
   $q$SELECT admin.retire_meter('SQLREG-0001', now())$q$,
   $q$SELECT admin.register_target('e', 1, now(), 'elite_440', NULL)$q$,
@@ -251,10 +266,11 @@ CREATE TEMP VIEW monitor_roles AS
 SELECT pg_temp.is(
   (SELECT string_agg(c.relname::text, ', ' ORDER BY c.relname)
    FROM pg_class c WHERE c.relnamespace = 'health'::regnamespace AND c.relkind = 'v'),
-  'collector_clocks, collectors, endpoint_latency, endpoints, energy_drops, meter_firmware, meters, '
-  || 'misplaced_serials, place_serials, problems, targets, thresholds, unregistered_serial_places, '
+  'collector_clocks, collectors, endpoint_latency, endpoints, energy_drops, meter_clock_reads, '
+  || 'meter_firmware, meters, misplaced_serials, place_serials, problems, stored_entries, '
+  || 'stored_entry_conflicts, targets, thresholds, unregistered_serial_places, '
   || 'unregistered_serials',
-  'health holds the fourteen health views');
+  'health holds the seventeen health views');
 
 SELECT pg_temp.is(
   (SELECT count(*) FROM pg_class c
@@ -346,7 +362,10 @@ FROM unnest(ARRAY[
   'SELECT * FROM health.endpoints',
   'SELECT * FROM health.endpoint_latency',
   'SELECT * FROM health.targets',
-  'SELECT * FROM health.thresholds'
+  'SELECT * FROM health.thresholds',
+  'SELECT * FROM health.stored_entries',
+  'SELECT * FROM health.stored_entry_conflicts',
+  'SELECT * FROM health.meter_clock_reads'
 ]) q;
 
 SELECT pg_temp.is(pg_temp.sqlstate_as('monitor', q), '42501', 'monitor is refused: ' || q)
@@ -364,6 +383,10 @@ FROM unnest(ARRAY[
   'SELECT * FROM store.latency_bucket_versions',
   'SELECT * FROM store.latency_meter_days',
   'SELECT * FROM store.latency_endpoint_days',
+  'SELECT * FROM store.stored_entries',
+  'SELECT * FROM store.stored_entry_conflicts',
+  'SELECT * FROM store.meter_clock_reads',
+  $q$DELETE FROM store.stored_entries$q$,
   $q$SELECT admin.load_latency_buckets('{"version": 99, "bounds_ms": [1]}')$q$,
   'SELECT * FROM registry.meter_versions',
   'SELECT * FROM registry.meter_history',
@@ -539,6 +562,11 @@ FROM unnest(ARRAY[
   'SELECT * FROM store.ungrounded_readings',
   'SELECT * FROM store.energy_drops',
   $q$INSERT INTO store.readings VALUES ('S', 'r', now(), 1, 'p', 'h', 1, 1, 'c', gen_random_uuid(), 'P', 1)$q$,
+  'SELECT * FROM store.stored_entries',
+  'SELECT * FROM store.stored_entry_conflicts',
+  'SELECT * FROM store.meter_clock_reads',
+  'SELECT * FROM health.stored_entries',
+  'SELECT * FROM health.meter_clock_reads',
   'SELECT * FROM store.profile_versions',
   'SELECT * FROM store.profile_registers',
   'SELECT * FROM store.profile_stored',

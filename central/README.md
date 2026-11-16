@@ -46,6 +46,24 @@ The directory is not named `minnalavu/`, since that is the repo itself.
   the bucket version, retries, timeouts, the exact `max_ms` (NULL when nothing
   answered) and `buckets`, every bucket's count. The views on it are under
   *Request latency* below.
+  `stored_entries` (a hypertable on `meter_time`): each quantity of each
+  history, snapshot and load-survey entry a collector copied from a meter,
+  keyed on `(meter_serial, store, register_key, meter_time)`, the meter's own
+  stamp as a `timestamp` with no zone (a load-survey entry's is its
+  interval's start, and only it has `interval_s`), never the slot it was read
+  at. It carries its value as sent, the profile version it was decoded under
+  (a foreign key to that version's stored quantity, so its unit and kind are
+  the catalog's), the product code, the slot, `copied_at` (the collector's
+  clock), any request id as first sent, and where it was copied from; no raw
+  words, unit or kind. An entry copied again that says the same (value,
+  interval, profile version, product code) is a duplicate, whatever its slot,
+  copy time or address; one that says otherwise goes to
+  `stored_entry_conflicts`, beside the stored one, which stands.
+  `meter_clock_reads`: a meter's clock as read beside the collector's, raw,
+  keyed on `(collector_id, endpoint_host, endpoint_port, unit_id,
+  collector_at)`, with the serial, profile version and `meter_time` (no
+  zone); a read that differs from the stored one under its key is counted,
+  not kept. Offsets against true time are for views, through the clock checks.
   `batches` (one row per batch, as first received), `uploads` (every arrival of a batch, with the collector's
   backlog), `reading_conflicts` (a reading whose key was already taken by one
   with other content) and `collectors`. Nothing in `store` can be updated,
@@ -84,6 +102,9 @@ section by store and register key, with its table, address (history and
 snapshot) or parameter number (load survey), decode, unit and kind. It
 refuses a `cumulative` quantity in the load survey and an `interval` one in
 any other store: only a cumulative quantity is ever differenced as energy.
+Every stored entry names one of these rows, so a cumulative quantity can
+never be recorded as a load-survey entry, nor an interval one in a history
+or snapshot.
 
 Load it as the owner after migrating, and again whenever a profile gains a
 version:
@@ -298,6 +319,10 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
   is flagged when it arrives, and a resend neither hides nor renews it) and
   `energy_backwards` (a serial with a drop in `health.energy_drops`; each drop,
   both readings' clock signals and whether it is suspect in its detail).
+- `health.stored_entries`, `health.stored_entry_conflicts` and
+  `health.meter_clock_reads`: every row of their `store` tables, the first and
+  last with `received_at`, when the batch that brought it first arrived, so a
+  late copy is found by arrival, as readings are.
 - `health.thresholds`: the thresholds in force, from
   `registry.health_thresholds` (append-only; the last row set holds). Change
   them as the owner:
@@ -382,6 +407,10 @@ The role `minkanakku_staff` may call one function and read one view, and
 nothing else (`test/grants.sql`); no other role may call the function. It
 cannot log in; a login is a member of it, as for `monitor`.
 
+`minkanakku`'s read-only role, not built yet, will read `stored_entries`,
+`stored_entry_conflicts` and `meter_clock_reads` beside the readings and the
+catalog: a widening of that interface, to be changed with the same care.
+
     SELECT jobs.request_job(collector_id => 'pilot_01', kind => 'read_on_demand',
       meters => ARRAY['…'], requester => '…');          -- returns the request id
 
@@ -423,7 +452,11 @@ per upload in `store.uploads` and shown in `health.collectors`.
   counts readings `received`, `inserted`, `duplicate` and `conflicting`,
   missed reads `received`, `inserted` and `duplicate`, and firmware reads
   `received`, `inserted`, `duplicate` and `conflicting` (a conflicting one is
-  counted, not kept), and clock checks and latency entries the same, and `config_digest` (above). `jobs`, when the collector has
+  counted, not kept), and clock checks, latency entries, stored entries and
+  meter-clock reads the same (a conflicting stored entry is kept in
+  `store.stored_entry_conflicts`), and `config_digest` (above). Stored entries
+  and meter-clock reads are counted per upload in `store.uploads` too, as
+  readings and missed reads are. `jobs`, when the collector has
   pending requests, lists them oldest first, each with its `request_id`, `kind`,
   `meters` (serials), `requested_at` and `expires_at`; a request is listed
   until a reading or missed read for it arrives or it expires, so a collector
@@ -433,11 +466,13 @@ per upload in `store.uploads` and shown in `health.collectors`.
   no readings and no missed reads is a heartbeat: it is stored as an upload,
   and its answer lists the jobs as any other.
 - 422 (`PT422`): the batch does not match the schema, a reading or missed
-  read names a register its profile version does not, or a latency entry does
+  read names a register its profile version does not, a stored entry a
+  quantity its profile version does not hold in its store, or a latency entry does
   not fit its bucket version or itself (a count per bucket, retries at most the
   answers, `max_ms` in the last bucket counted, a poller started before its
   date ended); the message names the field.
-- 503 (`PT503`): a reading or missed read is under a profile version, or a
+- 503 (`PT503`): a reading, missed read, stored entry or meter-clock read is
+  under a profile version, or a
   latency entry under a bucket version, the store has not loaded. The collector keeps the batch and sends it again; load the
   version (`bin/load-profiles`) and it is accepted.
 - 409 (`PT409`): the batch id was already sent by another collector.

@@ -19,7 +19,9 @@ SELECT pg_temp.is((SELECT answer FROM answers WHERE name = 'first') - 'first_rec
     "missed_reads": {"received": 2, "inserted": 2, "duplicate": 0},
     "firmware_reads": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
     "clock_checks": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
-    "latency": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0}}'::jsonb,
+    "latency": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
+    "stored_entries": {"received": 3, "inserted": 3, "duplicate": 0, "conflicting": 0},
+    "meter_clock_reads": {"received": 1, "inserted": 1, "duplicate": 0, "conflicting": 0}}'::jsonb,
   'a new batch is stored, and the answer counts what was inserted');
 
 SELECT pg_temp.is(
@@ -79,7 +81,9 @@ SELECT pg_temp.is((SELECT answer FROM answers WHERE name = 'resent') - 'first_re
     "missed_reads": {"received": 2, "inserted": 0, "duplicate": 2},
     "firmware_reads": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
     "clock_checks": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
-    "latency": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0}}'::jsonb,
+    "latency": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
+    "stored_entries": {"received": 3, "inserted": 0, "duplicate": 3, "conflicting": 0},
+    "meter_clock_reads": {"received": 1, "inserted": 0, "duplicate": 1, "conflicting": 0}}'::jsonb,
   'a resent batch is accepted, and nothing in it is stored twice');
 
 SELECT pg_temp.is(
@@ -220,7 +224,9 @@ SELECT pg_temp.is(
     "missed_reads": {"received": 4, "inserted": 4, "duplicate": 0},
     "firmware_reads": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
     "clock_checks": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
-    "latency": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0}}'::jsonb,
+    "latency": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
+    "stored_entries": {"received": 3, "inserted": 0, "duplicate": 3, "conflicting": 0},
+    "meter_clock_reads": {"received": 1, "inserted": 0, "duplicate": 1, "conflicting": 0}}'::jsonb,
   'missed reads at different addresses are each stored, with or without the serial read');
 
 SELECT pg_temp.is(
@@ -490,7 +496,8 @@ SELECT pg_temp.is(
    FROM information_schema.columns
    JOIN information_schema.tables USING (table_schema, table_name)
    WHERE table_schema = 'store' AND column_name = 'value' AND table_type = 'BASE TABLE'),
-  'reading_conflicts.value numeric; readings.value numeric',
+  'reading_conflicts.value numeric; readings.value numeric; stored_entries.value numeric; '
+  || 'stored_entry_conflicts.value numeric',
   'values are stored as numeric, never float');
 
 -- Clock checks: an answer (server times at nanoseconds), a kiss-o'-death from

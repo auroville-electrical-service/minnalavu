@@ -27,9 +27,11 @@ BEGIN
     (batch_id, collector_id, received_at, sent_at, backlog_events, backlog_bytes, backlog_batches,
      backlog_oldest, backlog_max_bytes, backlog_refused, backlog_discarded_files,
      backlog_quarantined, readings_inserted, readings_duplicate, readings_conflicting,
-     missed_reads_inserted, missed_reads_duplicate)
+     missed_reads_inserted, missed_reads_duplicate, stored_entries_inserted,
+     stored_entries_duplicate, stored_entries_conflicting, meter_clock_reads_inserted,
+     meter_clock_reads_duplicate, meter_clock_reads_conflicting)
   VALUES (id, collector, now() - ago, now() - ago, 10, bytes, 1, now() - ago, 1000, refused,
-          discarded, quarantined, 0, 0, 0, 0, 0);
+          discarded, quarantined, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
   RETURN id;
 END
 $$;

@@ -84,10 +84,12 @@ LANGUAGE sql AS $$
   FROM jsonb_object_keys(after) k WHERE after -> k IS DISTINCT FROM before -> k
 $$;
 
--- A batch from the basic fixture with this id, readings and missed reads.
+-- A batch from the basic fixture with this id, readings and missed reads, and
+-- none of its copies.
 CREATE FUNCTION pg_temp.batch(basic jsonb, id text, readings jsonb, missed jsonb) RETURNS jsonb
 LANGUAGE sql AS $$
-  SELECT jsonb_set(jsonb_set(jsonb_set(basic, '{batch_id}', to_jsonb(id)),
+  SELECT jsonb_set(jsonb_set(jsonb_set(basic - 'stored_entries' - 'meter_clock_reads',
+                                       '{batch_id}', to_jsonb(id)),
                              '{readings}', readings), '{missed_reads}', missed)
 $$;
 
@@ -246,7 +248,9 @@ SELECT pg_temp.is(
     "missed_reads": {"received": 0, "inserted": 0, "duplicate": 0},
     "firmware_reads": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
     "clock_checks": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
-    "latency": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0}}'::jsonb,
+    "latency": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
+    "stored_entries": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
+    "meter_clock_reads": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0}}'::jsonb,
   'a heartbeat, a batch with no readings and no missed reads, is accepted');
 
 SELECT pg_temp.is(

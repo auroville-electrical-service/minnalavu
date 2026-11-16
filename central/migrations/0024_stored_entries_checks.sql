@@ -1,7 +1,7 @@
 -- migrate:up
 
 -- Checks of batch.v1's stored entries and meter-clock reads. A batch carrying
--- either is checked as the schema checks it; api.ingest stores neither.
+-- either is checked as the schema checks it (stored by 0025_stored_entries).
 
 -- batch.v1's meter_time: a local date-time to the second, no zone or offset,
 -- on a day that exists. The schema's pattern cannot see the day; no decoded
