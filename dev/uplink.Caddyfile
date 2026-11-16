@@ -1,0 +1,13 @@
+# Dev only, until a server exists. TLS in front of PostgREST for a collector
+# that reaches this machine through a reverse SSH tunnel (compose.yaml,
+# service uplink). The certificate is the operator's, from a local CA the
+# collector's host trusts; it is never committed (data/tls/).
+{
+	auto_https off
+	admin off
+}
+
+https://localhost:9443 {
+	tls /certs/server.crt /certs/server.key
+	reverse_proxy postgrest:3000
+}
