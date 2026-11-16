@@ -10,9 +10,22 @@ defmodule Alavi.EndToEndTest do
 
   import Alavi.PollerCase
 
-  alias Alavi.{Buffer, Clock, Collector, FakeNtp, Uplink}
+  alias Alavi.{
+    Buffer,
+    Clock,
+    Collector,
+    Config,
+    Decode,
+    FakeNtp,
+    MeterClockRead,
+    StoredEntry,
+    Uplink,
+    Wire
+  }
+
   alias Alavi.Config.{Digest, Saved}
-  alias Alavi.Uplink.Target
+  alias Alavi.Uplink.{HTTP, Target}
+  alias Simulator.Meter
 
   @moduletag :e2e
   @moduletag :tmp_dir
@@ -58,10 +71,20 @@ defmodule Alavi.EndToEndTest do
          named \\ [],
          clock \\ &DateTime.utc_now/0,
          keeper \\ :none
-       ) do
+       ),
+       do:
+         start_supervised!(
+           {Collector, collector_opts(dir, config!(endpoints), token, clock, keeper) ++ named}
+         )
+
+  defp target!(token) do
     {:ok, target} =
       Target.parse(env!("MINNALAVU_API_URL"), token, allow_http: true, cacerts: [])
 
+    target
+  end
+
+  defp collector_opts(dir, config, token, clock, keeper) do
     buffer = [
       dir: dir,
       max_bytes: 1_000_000,
@@ -71,15 +94,15 @@ defmodule Alavi.EndToEndTest do
     ]
 
     uplink = [
-      target: target,
+      target: target!(token),
       clock: &DateTime.utc_now/0,
       idle_ms: 50,
       backoff_ms: %{min: 50, max: 500},
       timeout_ms: 5_000
     ]
 
-    opts = [
-      config: config!(endpoints),
+    [
+      config: config,
       buffer: buffer,
       clock: clock,
       uplink: uplink,
@@ -89,8 +112,6 @@ defmodule Alavi.EndToEndTest do
       clock_check: :none,
       status: no_status()
     ]
-
-    start_supervised!({Collector, opts ++ named})
   end
 
   defp await!(what, check, tries \\ 200) do
@@ -294,9 +315,7 @@ defmodule Alavi.EndToEndTest do
 
   # A buffer and an uplink with no pollers: what is stored is what the test records.
   defp start_uplink!(dir, id, token) do
-    {:ok, target} =
-      Target.parse(env!("MINNALAVU_API_URL"), token, allow_http: true, cacerts: [])
-
+    target = target!(token)
     buffer = :"buffer_#{id}"
 
     start_supervised!(
@@ -723,5 +742,366 @@ defmodule Alavi.EndToEndTest do
     assert {_id, pid} = poller.(changed)
     assert is_pid(pid) and pid != changed_pid
     assert Process.alive?(collector)
+  end
+
+  # The simulated meters' host clock starts here and runs at real speed, so
+  # what they hold is known exactly. Their clocks are 1,725 s ahead (as .13's
+  # was), at 09:35:45: the next load-survey interval ends minutes away, so
+  # the intervals of the current day that have ended stay the same throughout.
+  @sim_at ~U[2026-11-16 09:07:00Z]
+  @meter_offset_s 1_725
+
+  defp sim_clock do
+    start = DateTime.to_unix(@sim_at, :millisecond)
+    mono = System.monotonic_time(:millisecond)
+    {start, fn -> start + System.monotonic_time(:millisecond) - mono end}
+  end
+
+  # Random, so no earlier run's entries share a key with this one's; 8 characters, as a 440 holds.
+  defp serial, do: Base.encode16(:crypto.strong_rand_bytes(4))
+
+  defp copying_meter(unit, profile, stores) do
+    unit
+    |> Meter.new(Simulator.Profile.load!(profile), %{
+      "active_energy_import" => Decimal.new("123456.000")
+    })
+    |> Meter.clock(@meter_offset_s, 0)
+    |> Meter.stores(stores)
+  end
+
+  # Starts the chain on the simulated clock; returns its port and the host time it started at.
+  defp start_copy_chain!(meters) do
+    {start, now} = sim_clock()
+    {sim, port} = start_chain!(:tcp, Enum.map(meters, &elem(&1, 0)), now: now)
+
+    for {meter, serial} <- meters,
+        do: :ok = Simulator.identify(sim, meter.unit_id, :serial, serial)
+
+    {sim, port, start}
+  end
+
+  # The collector's clock: real time, moved on by what `shift!` adds.
+  defp shifted_clock! do
+    {:ok, shift} = Agent.start_link(fn -> 0 end)
+    {shift, fn -> DateTime.add(DateTime.utc_now(), Agent.get(shift, & &1)) end}
+  end
+
+  defp shift!(shift, seconds), do: Agent.update(shift, fn _ -> seconds end)
+
+  # Open from ten minutes before the collector's local time to fifty after.
+  defp window(utc) do
+    at =
+      utc
+      |> DateTime.to_naive()
+      |> NaiveDateTime.truncate(:second)
+      |> NaiveDateTime.to_erl()
+      |> :calendar.universal_time_to_local_time()
+      |> NaiveDateTime.from_erl!()
+
+    %{"start" => hhmm(NaiveDateTime.add(at, -600)), "end" => hhmm(NaiveDateTime.add(at, 3000))}
+  end
+
+  defp hhmm(at), do: at |> NaiveDateTime.to_time() |> Time.to_string() |> binary_part(0, 5)
+
+  # A collector copying `endpoint`, its copy events cast to the test process.
+  defp start_copying!(dir, endpoint, token, clock, changes) do
+    document = Map.put(document([endpoint]), "copy_window", window(clock.()))
+    {:ok, config} = Config.parse(document, profiles())
+    opts = Keyword.merge(collector_opts(dir, config, token, clock, :none), changes)
+    start_supervised!({Collector, Keyword.put(opts, :status, self())})
+  end
+
+  defp copy_ended!(port, outcome) do
+    receive do
+      {:"$gen_cast", {:copy, %{port: ^port}, {:finished, ^outcome}}} -> :ok
+    after
+      120_000 -> flunk("no copy ended: #{outcome}")
+    end
+  end
+
+  # What the copy of `meter` must keep, computed from the simulator's own
+  # model: {store, register_key, meter_time} => {value, interval_s}. Every
+  # entry the meter holds of a quantity it supports and the profile names;
+  # of the current day, each interval its clock has ended.
+  defp held(meter, start) do
+    meter = Meter.anchor(meter, start)
+    blocks(meter, start) |> Map.merge(survey(meter, start))
+  end
+
+  defp blocks(meter, start) do
+    stores = meter.stores
+
+    for {store, slots} <- [
+          history: 1..stores.histories//1,
+          snapshot: 0..(stores.snapshots - 1)//1
+        ],
+        n <- slots,
+        {:ok, %{stamp: at, values: values}} <- [Meter.stored(meter, store, n, start)],
+        {key, %Decimal{} = value} <- values,
+        into: %{},
+        do: {{Atom.to_string(store), key, NaiveDateTime.to_string(at)}, {f32(value), nil}}
+  end
+
+  defp survey(meter, start) do
+    now = Meter.time(meter, start)
+    stores = meter.stores
+
+    for n <- 0..(stores.days - 1)//1,
+        %{number: number, key: key} <- meter.profile.stored.load_survey.parameters,
+        MapSet.member?(stores.parameters, number),
+        {:ok, %{stamp: day, interval: minutes, values: values}} <-
+          [Meter.stored(meter, :load_survey, {n, number}, start)],
+        {%Decimal{} = value, i} <- Enum.with_index(values),
+        at <- [NaiveDateTime.add(day, i * minutes * 60)],
+        not NaiveDateTime.after?(NaiveDateTime.add(at, minutes * 60), now),
+        into: %{},
+        do: {{"load_survey", key, NaiveDateTime.to_string(at)}, {f32(value), minutes * 60}}
+  end
+
+  # The simulator's value as the meter's f32 holds it, in the store's text.
+  defp f32(value) do
+    words = Simulator.Encode.words(%{type: :f32, word_order: :low_first, decimals: nil}, value)
+    {:ok, decoded} = Decode.words(:f32, :low_first, nil, words)
+    text(decoded)
+  end
+
+  defp text(%Decimal{} = d), do: d |> Decimal.normalize() |> Decimal.to_string(:normal)
+  defp text(value) when is_binary(value), do: value |> Decimal.new() |> text()
+
+  # As `role`: monitor has no rights on store, and reads copies through health.
+  defp entries!(view, serial, role \\ "postgres") do
+    sql!("""
+    SET ROLE #{role};
+    SELECT coalesce(json_agg(t), '[]') FROM (
+      SELECT store::text AS store, register_key, meter_time::text AS at, value::text AS value,
+             interval_s
+      FROM #{view} WHERE meter_serial = '#{serial}') t
+    """)
+    |> Map.new(
+      &{{&1["store"], &1["register_key"], &1["at"]}, {text(&1["value"]), &1["interval_s"]}}
+    )
+  end
+
+  # Each copied entry's kind, as the store's catalog holds it for the entry's profile version.
+  defp kinds!(serial) do
+    rows!("""
+    SELECT DISTINCT e.store::text AS store, e.register_key, p.kind::text AS kind,
+           e.profile_version, e.product_code
+    FROM store.stored_entries e
+    JOIN store.profile_stored p
+      ON (p.profile, p.version, p.store, p.register_key)
+         = (e.profile, e.profile_version, e.store, e.register_key)
+    WHERE e.meter_serial = '#{serial}'
+    """)
+  end
+
+  # The kind the profile gives each quantity of each store.
+  defp profile_kinds(name) do
+    stored = profiles()[name].stored
+
+    for {store, entries} <- [
+          history: stored.history.registers,
+          snapshot: stored.snapshot.registers,
+          load_survey: stored.load_survey.parameters
+        ],
+        %{key: key, kind: kind} <- entries,
+        into: %{},
+        do: {{Atom.to_string(store), key}, Atom.to_string(kind)}
+  end
+
+  defp meter_clocks!(serial) do
+    sql!("""
+    SET ROLE monitor;
+    SELECT coalesce(json_agg(t), '[]') FROM (
+      SELECT meter_time::text AS at, profile, profile_version, unit_id
+      FROM health.meter_clock_reads
+      WHERE meter_serial = '#{serial}' AND received_at IS NOT NULL) t
+    """)
+  end
+
+  defp upload_totals!(id) do
+    [totals] =
+      rows!("""
+      SELECT sum(stored_entries_inserted) AS inserted, sum(stored_entries_duplicate) AS duplicate,
+             sum(stored_entries_conflicting) AS conflicting,
+             sum(meter_clock_reads_inserted) AS clocks
+      FROM store.uploads WHERE collector_id = '#{id}'
+      """)
+
+    totals
+  end
+
+  defp count!(table, serial),
+    do: sql!("SELECT count(*) FROM store.#{table} WHERE meter_serial = '#{serial}'")
+
+  test "a 440's and a 500's copied entries land in the store exactly, kinds from the catalog, " <>
+         "meter-clock reads beside them, and monitor reads both through health",
+       ctx do
+    {id, token} = new_collector!()
+    {s440, s500} = {serial(), serial()}
+    m440 = copying_meter(1, "elite_440", [])
+    m500 = copying_meter(3, "elite_500", days: 2, snapshots: 3)
+    {_sim, port, start} = start_copy_chain!([{m440, s440}, {m500, s500}])
+
+    units = [
+      meter(1, "elite_440", %{"serial" => s440}),
+      meter(3, "elite_500", %{"serial" => s500})
+    ]
+
+    {_shift, clock} = shifted_clock!()
+    start_copying!(ctx.tmp_dir, endpoint(port, "tcp", units, %{"copy" => true}), token, clock, [])
+
+    copy_ended!(port, :done)
+    await!("the buffer emptied", fn -> Buffer.backlog(Buffer).events == 0 end)
+
+    for {meter, serial, profile, product} <- [
+          {m440, s440, "elite_440", "ELITE440-445"},
+          {m500, s500, "elite_500", "E500C-5102"}
+        ] do
+      held = held(meter, start)
+      assert entries!("store.stored_entries", serial) == held
+
+      kinds = profile_kinds(profile)
+      rows = kinds!(serial)
+      assert Enum.all?(rows, &(&1["kind"] == kinds[{&1["store"], &1["register_key"]}]))
+      assert Enum.all?(rows, &match?(%{"profile_version" => 2, "product_code" => ^product}, &1))
+
+      # Once riding the first round's names, then at the visit's start and end: the
+      # meter's own clock, read within the test's run of its start.
+      at_start = meter |> Meter.anchor(start) |> Meter.time(start)
+      clocks = meter_clocks!(serial)
+      assert length(clocks) == 3
+
+      assert Enum.all?(clocks, fn %{"at" => at} = read ->
+               read["profile"] == profile and read["profile_version"] == 2 and
+                 NaiveDateTime.diff(NaiveDateTime.from_iso8601!(at), at_start) in 0..300
+             end)
+
+      # What was copied, and when it arrived, as monitor reads it.
+      view = "(SELECT * FROM health.stored_entries WHERE received_at IS NOT NULL) e"
+      assert entries!(view, serial, "monitor") == held
+    end
+
+    assert Enum.sort(Enum.uniq(for r <- kinds!(s440), do: {r["store"], r["kind"]})) == [
+             {"history", "cumulative"},
+             {"load_survey", "instantaneous"},
+             {"load_survey", "interval"},
+             {"snapshot", "cumulative"}
+           ]
+
+    rows = count!("stored_entries", s440) + count!("stored_entries", s500)
+
+    assert %{"inserted" => ^rows, "duplicate" => 0, "conflicting" => 0, "clocks" => 6} =
+             upload_totals!(id)
+  end
+
+  defp post!(target, batch) do
+    body =
+      batch |> Wire.batch(DateTime.utc_now(), Buffer.backlog(Buffer), :none) |> JSON.encode!()
+
+    assert {:ok, status, _answer} = HTTP.post(target, body, 10_000)
+    assert status in 200..299
+  end
+
+  # Sends every batch the buffer holds, as the uplink would, acknowledging each.
+  defp drain!(target, sent \\ []) do
+    case Buffer.take(Buffer) do
+      {:ok, batch} ->
+        post!(target, batch)
+        :ok = Buffer.ack(Buffer, batch.id)
+        drain!(target, [batch | sent])
+
+      :empty ->
+        Enum.reverse(sent)
+    end
+  end
+
+  defp copied_in(batch), do: Enum.count(batch.events, &match?(%StoredEntry{}, &1))
+
+  test "a copy's batches sent again, their acknowledgement lost, add nothing: " <>
+         "every stored entry and meter-clock read a duplicate, counted on the upload",
+       ctx do
+    {id, token} = new_collector!()
+    s440 = serial()
+    m440 = copying_meter(1, "elite_440", [])
+    {_sim, port, start} = start_copy_chain!([{m440, s440}])
+    units = [meter(1, "elite_440", %{"serial" => s440})]
+    {_shift, clock} = shifted_clock!()
+
+    start_copying!(ctx.tmp_dir, endpoint(port, "tcp", units, %{"copy" => true}), token, clock,
+      uplink: :none
+    )
+
+    copy_ended!(port, :done)
+    target = target!(token)
+    batches = drain!(target)
+    held = held(m440, start)
+    assert entries!("store.stored_entries", s440) == held
+    assert Enum.sum_by(batches, &copied_in/1) == map_size(held)
+
+    for batch <- batches, do: post!(target, batch)
+
+    assert entries!("store.stored_entries", s440) == held
+    assert count!("meter_clock_reads", s440) == 3
+
+    uploads =
+      rows!("""
+      SELECT batch_id::text AS batch, stored_entries_inserted AS inserted,
+             stored_entries_duplicate AS duplicate, stored_entries_conflicting AS conflicting,
+             meter_clock_reads_inserted AS clocks, meter_clock_reads_duplicate AS clocks_again
+      FROM store.uploads WHERE collector_id = '#{id}' ORDER BY upload_id
+      """)
+
+    for batch <- batches do
+      n = copied_in(batch)
+      clocks = Enum.count(batch.events, &match?(%MeterClockRead{}, &1))
+
+      assert [
+               %{"inserted" => ^n, "duplicate" => 0, "clocks" => ^clocks, "clocks_again" => 0},
+               %{"inserted" => 0, "duplicate" => ^n, "clocks" => 0, "clocks_again" => ^clocks}
+             ] = Enum.filter(uploads, &(&1["batch"] == batch.id))
+    end
+
+    assert Enum.all?(uploads, &(&1["conflicting"] == 0))
+  end
+
+  test "a copy the window closes on resumes the next night, and the store ends with every " <>
+         "entry once, the re-copied ones counted as duplicates",
+       ctx do
+    {id, token} = new_collector!()
+    s440 = serial()
+    m440 = copying_meter(1, "elite_440", [])
+    {sim, port, start} = start_copy_chain!([{m440, s440}])
+    # Slow enough that the window can close mid-copy; polls often, so the closing is soon seen.
+    Simulator.faults(sim, delay_ms: 20)
+    units = [meter(1, "elite_440", %{"serial" => s440})]
+    {shift, clock} = shifted_clock!()
+    changes = %{"copy" => true, "interval_ms" => 300, "timeout_ms" => 500}
+    start_copying!(ctx.tmp_dir, endpoint(port, "tcp", units, changes), token, clock, [])
+
+    # Into the load survey: the histories and the snapshot are copied, the survey is not.
+    assert_receive {:"$gen_cast", {:copy, %{port: ^port}, {:at, 1, :load_survey, :copying, n, _}}}
+                   when n >= 3,
+                   60_000
+
+    shift!(shift, 3_600)
+    copy_ended!(port, :window)
+    await!("the buffer emptied", fn -> Buffer.backlog(Buffer).events == 0 end)
+
+    held = held(m440, start)
+    first = entries!("store.stored_entries", s440)
+    assert map_size(first) < map_size(held)
+    assert Map.take(held, Map.keys(first)) == first
+
+    shift!(shift, 86_400)
+    copy_ended!(port, :done)
+    await!("the buffer emptied", fn -> Buffer.backlog(Buffer).events == 0 end)
+
+    assert entries!("store.stored_entries", s440) == held
+
+    # Only load-survey days are copied again: the one the window closed in, and the current day.
+    rows = map_size(held)
+    %{"inserted" => ^rows, "duplicate" => again, "conflicting" => 0} = upload_totals!(id)
+    assert again in 1..(2 * 7 * 48)
   end
 end

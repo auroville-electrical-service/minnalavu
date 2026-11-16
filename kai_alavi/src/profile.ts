@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { err, ok, type Result } from "./result";
+import { meterClock, stored, storedSources } from "./stored-profile";
 
 const text = z.string().min(1);
 // An ID from the profile's `sources`; what each ID stands for is recorded outside the repo.
@@ -76,12 +77,15 @@ const usedSources = (p: {
   };
   readonly firmware?: Readonly<Record<string, { readonly source: string }>> | undefined;
   readonly registers: readonly { readonly source: string | null }[];
+  readonly meter_clock?: Parameters<typeof storedSources>[0];
+  readonly stored?: Parameters<typeof storedSources>[1];
 }): string[] => [
   ...[p.identity.product_code, p.identity.serial, p.identity.energy_unit].flatMap((check) =>
     check ? [check.source] : [],
   ),
   ...Object.values(p.firmware ?? {}).map((name) => name.source),
   ...p.registers.flatMap((r) => (r.source === null ? [] : [r.source])),
+  ...storedSources(p.meter_clock, p.stored),
 ];
 
 const profile = z
@@ -95,6 +99,8 @@ const profile = z
     identity,
     firmware: firmware.optional(),
     registers: z.array(register).min(1),
+    meter_clock: meterClock.optional(),
+    stored: stored.optional(),
   })
   .readonly()
   .refine((p) => new Set(p.registers.map((r) => r.key)).size === p.registers.length, {

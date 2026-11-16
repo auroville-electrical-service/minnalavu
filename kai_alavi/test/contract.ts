@@ -212,3 +212,71 @@ const roundFixture = z.object({
 });
 
 export const loadRoundFixture = () => roundFixture.parse(json("fixtures/read-round.v1.json"));
+
+const head = { profile: z.string(), profile_version: z.int() };
+const localTime = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/);
+
+const storedFixture = z.strictObject({
+  format: z.literal("stored-decode/1"),
+  description: z.string(),
+  stamps: z.array(
+    z.strictObject({
+      ...head,
+      field: z.enum(["meter_clock", "history.stamp", "snapshot.stamp", "load_survey.stamp"]),
+      raw_words: words,
+      meter_time: localTime,
+      why: z.string(),
+    }),
+  ),
+  masks: z.array(
+    z.strictObject({
+      ...head,
+      field: z.enum(["history.mask", "snapshot.mask", "load_survey.mask"]),
+      raw_words: words,
+      named: z.array(z.strictObject({ bit: z.int(), register_key: z.string() })),
+      unnamed: z.array(z.int()),
+      why: z.string(),
+    }),
+  ),
+  blocks: z.array(
+    z.strictObject({
+      ...head,
+      store: z.enum(["history", "snapshot"]),
+      stamp_words: words,
+      mask_words: words.optional(),
+      registers: z.record(z.string(), words),
+      meter_time: localTime,
+      entries: z.array(z.strictObject({ register_key: z.string(), value: z.string() })),
+      unsupported: z.array(z.string()),
+      not_finite: z.array(z.string()),
+      why: z.string(),
+    }),
+  ),
+  load_survey: z.array(
+    z.strictObject({
+      ...head,
+      parameter: z.int(),
+      register_key: z.string(),
+      stamp_words: words,
+      interval_words: words,
+      clock_words: words.optional(),
+      values_words: words,
+      interval_s: z.int(),
+      entries: z.array(z.strictObject({ meter_time: localTime, value: z.string() })),
+      not_finite: z.array(localTime),
+      not_ended: z.int(),
+      why: z.string(),
+    }),
+  ),
+  no_value: z.array(
+    z.strictObject({
+      ...head,
+      field: z.string(),
+      raw_words: words,
+      error: z.enum(["wrong_word_count", "zero_interval", "interval_not_dividing_a_day"]),
+      why: z.string(),
+    }),
+  ),
+});
+
+export const loadStoredFixture = () => storedFixture.parse(json("fixtures/stored-decode.v1.json"));

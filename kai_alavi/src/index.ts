@@ -14,6 +14,7 @@ export {
   readRegister,
   type StoredEntry,
 } from "./batch";
+export { blockEntries, dayEntries, meterClockRead } from "./copied";
 export { crc16 } from "./crc";
 export { type DecodeError, type Decoding, decodeValue, wordCount } from "./decode";
 export { decodeName, firmwareReads, type NameError, type NameRead } from "./firmware";
@@ -72,3 +73,15 @@ export {
   takeReply,
 } from "./response";
 export { err, ok, type Result } from "./result";
+export {
+  type BlockEntry,
+  decodeBlock,
+  decodeDay,
+  decodeInterval,
+  decodeMask,
+  decodeStamp,
+  type StoredError,
+  type SurveyDay,
+  supportedParameters,
+} from "./stored-decode";
+export type { Block, Mask, Parameter, Stamp, Stored, StoredRegister, Survey } from "./stored-profile";

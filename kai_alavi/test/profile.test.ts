@@ -134,3 +134,60 @@ describe("parseProfile", () => {
     });
   });
 });
+
+describe("parseProfile stored sections", () => {
+  const p = parsed("elite_440");
+  if (!p.ok || !p.value.stored) throw new Error("elite_440 has no stored section");
+  const { value } = p;
+  const { stored } = p.value;
+  const [first, ...rest] = stored.history.registers;
+  const [parameter, ...others] = stored.load_survey.parameters;
+  if (!first || !parameter) throw new Error("elite_440's stored sections are empty");
+  const withHistory = (changes: object) =>
+    parseProfile({ ...value, stored: { ...stored, history: { ...stored.history, ...changes } } });
+  const withParameter = (changes: object) =>
+    parseProfile({
+      ...value,
+      stored: {
+        ...stored,
+        load_survey: { ...stored.load_survey, parameters: [{ ...parameter, ...changes }, ...others] },
+      },
+    });
+
+  test("both contract profiles have a meter clock and every store", () => {
+    const both = [parsed("elite_440"), parsed("elite_500")].map((r) =>
+      r.ok ? [r.value.meter_clock !== undefined, Object.keys(r.value.stored ?? {}).sort()] : null,
+    );
+    expect(both).toEqual([
+      [true, ["history", "load_survey", "snapshot"]],
+      [true, ["history", "load_survey", "snapshot"]],
+    ]);
+  });
+
+  test("the catalog's kind rules: no cumulative load-survey quantity, no per-interval one elsewhere", () => {
+    expect([
+      withParameter({ kind: "cumulative" }).ok,
+      withParameter({ kind: "demand" }).ok,
+      withHistory({ registers: [{ ...first, kind: "interval" }, ...rest] }).ok,
+    ]).toEqual([false, true, false]);
+  });
+
+  test("a mask_bit on every register exactly when there is a mask, each bit once", () => {
+    const { mask_bit: _bit, ...unmasked } = first;
+    const { mask: _mask, ...noMask } = stored.history;
+    expect([
+      withHistory({ registers: [unmasked, ...rest] }).ok,
+      parseProfile({ ...value, stored: { ...stored, history: noMask } }).ok,
+      withHistory({ registers: [{ ...first, mask_bit: rest[0]?.mask_bit }, ...rest] }).ok,
+    ]).toEqual([false, false, false]);
+  });
+
+  test("a stored entry cites a listed source, and names its selector, never an address", () => {
+    expect([
+      withParameter({ source: "other" }).ok,
+      withHistory({ selector: "snapshot" }).ok,
+      withHistory({ selector: 520 }).ok,
+      parseProfile({ ...value, meter_clock: { ...value.meter_clock, epoch: "1988-02-30T00:00:00" } }).ok,
+    ]).toEqual([false, false, false, false]);
+  });
+});
