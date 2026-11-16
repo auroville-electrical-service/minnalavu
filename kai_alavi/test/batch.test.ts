@@ -76,6 +76,9 @@ const exceptionMiss: MissedRead = {
   attempts: 3,
 };
 
+const sim445 = identified(1, "SIM-445-0001", "elite_440", "ELITE440-445");
+const sim500 = identified(3, "SIM-500-0001", "elite_500", "E500C-5102");
+
 /** The events of `contract/fixtures/batch.v1.basic.json`, as kai_alavi holds them. */
 const basic: Batch = {
   id: "0b6f8d2e-5c1a-4e7b-9a3d-2f4c6e8a0b1c",
@@ -92,13 +95,8 @@ const basic: Batch = {
     quarantined: 0,
   },
   readings: [
-    reading(identified(1, "SIM-445-0001", "elite_440", "ELITE440-445"), "active_energy_import", [20480, 17562], "0"),
-    reading(
-      identified(3, "SIM-500-0001", "elite_500", "E500C-5102"),
-      "active_energy_export",
-      [0, 0, 18944, 16531],
-      "1",
-    ),
+    reading(sim445, "active_energy_import", [20480, 17562], "0"),
+    reading(sim500, "active_energy_export", [0, 0, 18944, 16531], "1"),
   ],
   missedReads: [
     exceptionMiss,
@@ -110,6 +108,37 @@ const basic: Batch = {
       attempts: 0,
     },
   ],
+  storedEntries: [
+    {
+      meter: sim445,
+      store: "history",
+      meterTime: "2026-11-01T00:00:00",
+      registerKey: "active_energy_import",
+      value: "1234.5",
+      slot: 1,
+      copiedAt: at("4"),
+    },
+    {
+      meter: sim445,
+      store: "load_survey",
+      meterTime: "2026-10-31T23:30:00",
+      intervalS: 1800,
+      registerKey: "active_energy_import",
+      value: "0.25",
+      slot: 1,
+      copiedAt: at("5"),
+    },
+    {
+      meter: sim500,
+      store: "snapshot",
+      meterTime: "2026-11-01T00:00:00",
+      registerKey: "active_energy_export",
+      value: "1234.5",
+      slot: 1,
+      copiedAt: at("6"),
+    },
+  ],
+  meterClockReads: [{ meter: sim445, meterTime: "2026-11-01T00:28:49", at: at("4") }],
 };
 
 describe("batchJson", () => {
@@ -210,6 +239,15 @@ describe("batchJson firmware reads", () => {
   test("are left out of a batch that has none", () => {
     expect(batchJson({ ...basic, firmwareReads: [] })).not.toHaveProperty("firmware_reads");
     expect(batchJson(basic)).not.toHaveProperty("firmware_reads");
+  });
+});
+
+describe("batchJson stored entries and meter clock reads", () => {
+  test("are left out of a batch that has none", () => {
+    const batch = batchJson({ ...basic, storedEntries: [], meterClockReads: [] });
+    expect(batch).not.toHaveProperty("stored_entries");
+    expect(batch).not.toHaveProperty("meter_clock_reads");
+    expect(validate(batch) ? [] : validate.errors).toEqual([]);
   });
 });
 

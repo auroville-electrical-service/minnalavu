@@ -100,6 +100,16 @@
       "description": "Each meter's request latency for one UTC date, as one poller counted it: one entry per endpoint, unit, date and poller start, sent once when the date ends by the collector's clock and once when the poller stops, so a restart's part of a day is an entry of its own. Counts, never percentiles: the store computes those. Ingest keys an entry on (collector, endpoint, unit_id, date, poller_started_at): a resent entry is a duplicate, not a conflict. Optional: a batch sent between days has none, and a collector that does not count latency never sends one.",
       "type": "array",
       "items": { "$ref": "#/$defs/latency_day" }
+    },
+    "stored_entries": {
+      "description": "Quantities copied from the entries a meter stores (billing histories, daily snapshots, load-survey intervals), one item per quantity per entry. An entry is identified by the meter's own stamp, never by the slot it was read at: ingest keys an item on (meter_serial, store, register_key, meter_time), a resent item is a duplicate, and a different value under a taken key is a conflict, kept beside the first. A quantity the meter reads as NaN is unsupported, as its support mask says, and is not sent. Optional: a batch with no copy in it has none.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/stored_entry" }
+    },
+    "meter_clock_reads": {
+      "description": "A meter's own clock, read beside the collector's: at the start and end of each copy visit, and once a day per meter. Raw evidence: an offset is the store's to compute, against the collector's clock checks either side of it. Optional: a batch with no read in it has none.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/meter_clock_read" }
     }
   },
   "$defs": {
@@ -141,6 +151,16 @@
       "type": "string",
       "format": "uuid"
     },
+    "decimal": {
+      "description": "A decimal string, never a JSON number, so no float ever carries energy; NaN and infinities are not decimals.",
+      "type": "string",
+      "pattern": "^-?[0-9]+(\\.[0-9]+)?$"
+    },
+    "meter_time": {
+      "description": "A meter's clock as the profile version decodes it (meter_clock, or a stored section's stamp): the meter's local time, to the second, with no zone or offset, since the meter keeps none.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$"
+    },
     "reading": {
       "type": "object",
       "additionalProperties": false,
@@ -173,9 +193,8 @@
         "register_key": { "type": "string", "minLength": 1 },
         "timestamp": { "type": "string", "format": "date-time" },
         "value": {
-          "description": "The value decoded under the profile version's entry for register_key, as a decimal string, never a JSON number, so no float ever carries energy. Its unit and kind are the entry's. An integer register's value is exact; a float register's is the shortest decimal that names its bits at the register's own width (contract/fixtures/register-decode.v1.json), so the meter's words are recoverable from it.",
-          "type": "string",
-          "pattern": "^-?[0-9]+(\\.[0-9]+)?$"
+          "description": "The value decoded under the profile version's entry for register_key. Its unit and kind are the entry's. An integer register's value is exact; a float register's is the shortest decimal that names its bits at the register's own width (contract/fixtures/register-decode.v1.json), so the meter's words are recoverable from it.",
+          "$ref": "#/$defs/decimal"
         },
         "request_id": { "$ref": "#/$defs/request_id" }
       }
@@ -443,6 +462,101 @@
       "type": "integer",
       "minimum": 0,
       "maximum": 4294967295
+    },
+    "stored_entry": {
+      "description": "One quantity of one stored entry, as copied behind the profile version's selector for its store.",
+      "type": "object",
+      "unevaluatedProperties": false,
+      "required": [
+        "endpoint",
+        "unit_id",
+        "meter_serial",
+        "product_code",
+        "profile",
+        "profile_version",
+        "store",
+        "meter_time",
+        "register_key",
+        "value",
+        "slot",
+        "copied_at"
+      ],
+      "properties": {
+        "endpoint": { "$ref": "#/$defs/endpoint" },
+        "unit_id": { "$ref": "#/$defs/unit_id" },
+        "meter_serial": {
+          "description": "The serial the meter reported in the visit the entry was copied in.",
+          "type": "string",
+          "minLength": 1
+        },
+        "product_code": {
+          "description": "The product code the meter reported in that visit, as read.",
+          "type": "string",
+          "minLength": 1
+        },
+        "profile": { "$ref": "#/$defs/profile" },
+        "profile_version": { "$ref": "#/$defs/profile_version" },
+        "store": {
+          "description": "The profile version's stored section the entry was copied from.",
+          "enum": ["history", "snapshot", "load_survey"]
+        },
+        "meter_time": {
+          "description": "The entry's stamp: a history's or snapshot's date, a load-survey interval's start.",
+          "$ref": "#/$defs/meter_time"
+        },
+        "register_key": {
+          "description": "The quantity, by its key in the store's section of the profile version, which holds its unit and kind.",
+          "type": "string",
+          "minLength": 1
+        },
+        "value": {
+          "description": "The quantity decoded under its entry in the profile version: the shortest decimal that names its bits at the register's own width (contract/fixtures/stored-decode.v1.json).",
+          "$ref": "#/$defs/decimal"
+        },
+        "slot": {
+          "description": "The selector value the entry was read at (a load survey's day selector; its parameter follows from register_key). Evidence only, never part of the entry's identity: a meter's slots shift as it stores new entries.",
+          "$ref": "#/$defs/word"
+        },
+        "copied_at": {
+          "description": "When the reply arrived, by the collector's clock.",
+          "$ref": "#/$defs/collector_time"
+        },
+        "request_id": { "$ref": "#/$defs/request_id" }
+      },
+      "if": { "required": ["store"], "properties": { "store": { "const": "load_survey" } } },
+      "then": {
+        "required": ["interval_s"],
+        "properties": {
+          "interval_s": {
+            "description": "The interval's length in seconds, as the meter's interval register gave it; meter_time is its start. Only a load-survey entry has one.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 86400
+          }
+        }
+      }
+    },
+    "meter_clock_read": {
+      "description": "A read of a meter's clock register, and the collector's clock when the reply arrived.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["endpoint", "unit_id", "meter_serial", "profile", "profile_version", "meter_time", "collector_at"],
+      "properties": {
+        "endpoint": { "$ref": "#/$defs/endpoint" },
+        "unit_id": { "$ref": "#/$defs/unit_id" },
+        "meter_serial": {
+          "description": "The serial the meter reported in the visit the clock was read in.",
+          "type": "string",
+          "minLength": 1
+        },
+        "profile": { "$ref": "#/$defs/profile" },
+        "profile_version": {
+          "description": "The version whose meter_clock section the time was decoded under.",
+          "$ref": "#/$defs/profile_version"
+        },
+        "meter_time": { "$ref": "#/$defs/meter_time" },
+        "collector_at": { "$ref": "#/$defs/collector_time" }
+      }
     }
   }
 }

@@ -66,5 +66,61 @@
       "attempts": 0,
       "raw_words": null
     }
+  ],
+  "stored_entries": [
+    {
+      "endpoint": { "host": "10.0.0.21", "port": 502 },
+      "unit_id": 1,
+      "meter_serial": "SIM-445-0001",
+      "product_code": "ELITE440-445",
+      "profile": "elite_440",
+      "profile_version": 2,
+      "store": "history",
+      "meter_time": "2026-11-01T00:00:00",
+      "register_key": "active_energy_import",
+      "value": "1234.5",
+      "slot": 1,
+      "copied_at": "2026-11-01T00:00:04Z"
+    },
+    {
+      "endpoint": { "host": "10.0.0.21", "port": 502 },
+      "unit_id": 1,
+      "meter_serial": "SIM-445-0001",
+      "product_code": "ELITE440-445",
+      "profile": "elite_440",
+      "profile_version": 2,
+      "store": "load_survey",
+      "meter_time": "2026-10-31T23:30:00",
+      "interval_s": 1800,
+      "register_key": "active_energy_import",
+      "value": "0.25",
+      "slot": 1,
+      "copied_at": "2026-11-01T00:00:05Z"
+    },
+    {
+      "endpoint": { "host": "10.0.0.21", "port": 502 },
+      "unit_id": 3,
+      "meter_serial": "SIM-500-0001",
+      "product_code": "E500C-5102",
+      "profile": "elite_500",
+      "profile_version": 2,
+      "store": "snapshot",
+      "meter_time": "2026-11-01T00:00:00",
+      "register_key": "active_energy_export",
+      "value": "1234.5",
+      "slot": 1,
+      "copied_at": "2026-11-01T00:00:06Z"
+    }
+  ],
+  "meter_clock_reads": [
+    {
+      "endpoint": { "host": "10.0.0.21", "port": 502 },
+      "unit_id": 1,
+      "meter_serial": "SIM-445-0001",
+      "profile": "elite_440",
+      "profile_version": 2,
+      "meter_time": "2026-11-01T00:28:49",
+      "collector_at": "2026-11-01T00:00:04Z"
+    }
   ]
 }

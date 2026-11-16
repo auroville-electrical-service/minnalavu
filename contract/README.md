@@ -149,13 +149,32 @@ whose poller started after its date ended.
 Percentiles are the store's to compute, never sent. Ingest keys an entry on
 (collector, endpoint, `unit_id`, `date`, `poller_started_at`).
 
+A batch may also carry `stored_entries`: quantities copied from the entries a
+meter stores, one item per quantity per entry. An item names the meter as a
+reading does (`endpoint`, `unit_id`, `meter_serial`, `product_code`,
+`profile`, `profile_version`), the `store` (`history`, `snapshot` or
+`load_survey`), the entry's stamp `meter_time`, the `register_key` in that
+store's section of the profile, and its `value`, a decimal string as on a
+reading. `meter_time` is the meter's own local time with no zone or offset
+(`2026-11-01T00:00:00`), since the meter keeps none; a load-survey item adds
+`interval_s`, the interval's length, and its `meter_time` is the interval's
+start, and no other item has one. `slot` is the selector value the entry
+was read at, evidence only, and `copied_at` the collector's clock when the
+reply arrived. A quantity the meter reads as NaN is not sent. Ingest keys
+an item on (`meter_serial`, `store`, `register_key`, `meter_time`), never the
+slot. A batch may also carry `meter_clock_reads`: the meter's clock
+(`meter_time`, decoded under the profile version's `meter_clock`) and the
+collector's (`collector_at`), read at the start and end of each copy visit
+and once a day per meter. Offsets are the store's to compute.
+
 The backlog may carry `config`: the `digest` of the polling config the
 collector is applying, and the `refused_digest` of a served config it refused
 since, with the `reason`; both null when it has refused none. A collector that
 does not fetch its config sends no `config`.
 
-A reading or missed read taken for a request carries its `request_id`: one
-of the jobs the server's answer to an upload listed (`central/README.md`).
+A reading, missed read or stored entry taken for a request carries its
+`request_id`: one of the jobs the server's answer to an upload listed
+(`central/README.md`).
 A read the collector made of its own accord carries none; `null` is refused.
 A batch with no readings and no missed reads is a heartbeat: a collector
 with nothing to send sends one, so its answer lists the pending jobs and

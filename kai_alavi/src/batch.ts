@@ -73,6 +73,42 @@ export interface FirmwareRead {
   readonly names: { readonly [name in FirmwareName]: string | null };
 }
 
+interface CopiedEntry {
+  readonly meter: IdentifiedMeter;
+  /** The quantity's key in the store's section of the profile version, which holds its unit and kind. */
+  readonly registerKey: string;
+  /** The entry's stamp as the profile version decodes it: the meter's local time, with no zone. */
+  readonly meterTime: string;
+  /** A decimal string, never a number. */
+  readonly value: string;
+  /** The selector value the entry was read at: evidence only, never the entry's identity. */
+  readonly slot: number;
+  /** The collector's clock when the reply arrived. */
+  readonly copiedAt: Date;
+}
+
+interface DatedEntry extends CopiedEntry {
+  readonly store: "history" | "snapshot";
+}
+
+interface IntervalEntry extends CopiedEntry {
+  readonly store: "load_survey";
+  /** The interval's length; `meterTime` is its start. */
+  readonly intervalS: number;
+}
+
+/** One quantity of one entry a meter stores, as copied. */
+export type StoredEntry = DatedEntry | IntervalEntry;
+
+/** A read of a meter's own clock, beside the collector's. */
+export interface MeterClockRead {
+  readonly meter: IdentifiedMeter;
+  /** The meter's local time as the profile version's `meter_clock` decodes it, with no zone. */
+  readonly meterTime: string;
+  /** The collector's clock when the reply arrived. */
+  readonly at: Date;
+}
+
 /** The collector's clock status when every event in the batch was recorded. */
 export interface Clock {
   readonly source: "ntp" | "rtc" | "unsynced";
@@ -98,8 +134,10 @@ export interface Batch {
   readonly backlog: Backlog;
   readonly readings: readonly Reading[];
   readonly missedReads: readonly MissedRead[];
-  /** Left out of the batch when empty, as `alavi` leaves it out. */
+  /** Each of these is left out of the batch when empty, as `alavi` leaves it out. */
   readonly firmwareReads?: readonly FirmwareRead[];
+  readonly storedEntries?: readonly StoredEntry[];
+  readonly meterClockReads?: readonly MeterClockRead[];
 }
 
 // contract: test/batch.test.ts "readRegister"
@@ -174,8 +212,40 @@ const firmwareJson = (f: FirmwareRead) => ({
   modbus_version: f.names.modbus_version,
 });
 
+const storedJson = (e: StoredEntry) => ({
+  endpoint: { host: e.meter.endpoint.host, port: e.meter.endpoint.port },
+  unit_id: e.meter.unitId,
+  meter_serial: e.meter.serial,
+  product_code: e.meter.productCode,
+  profile: e.meter.profile,
+  profile_version: e.meter.profileVersion,
+  store: e.store,
+  meter_time: e.meterTime,
+  ...(e.store === "load_survey" ? { interval_s: e.intervalS } : {}),
+  register_key: e.registerKey,
+  value: e.value,
+  slot: e.slot,
+  copied_at: iso(e.copiedAt),
+});
+
+const meterClockJson = (r: MeterClockRead) => ({
+  endpoint: { host: r.meter.endpoint.host, port: r.meter.endpoint.port },
+  unit_id: r.meter.unitId,
+  meter_serial: r.meter.serial,
+  profile: r.meter.profile,
+  profile_version: r.meter.profileVersion,
+  meter_time: r.meterTime,
+  collector_at: iso(r.at),
+});
+
 const firmwareReads = (reads: readonly FirmwareRead[] = []) =>
   reads.length === 0 ? {} : { firmware_reads: reads.map(firmwareJson) };
+
+const storedEntries = (entries: readonly StoredEntry[] = []) =>
+  entries.length === 0 ? {} : { stored_entries: entries.map(storedJson) };
+
+const meterClockReads = (reads: readonly MeterClockRead[] = []) =>
+  reads.length === 0 ? {} : { meter_clock_reads: reads.map(meterClockJson) };
 
 // contract: test/batch.test.ts "batchJson"
 export const batchJson = (b: Batch) => ({
@@ -196,4 +266,6 @@ export const batchJson = (b: Batch) => ({
   readings: b.readings.map(readingJson),
   missed_reads: b.missedReads.map(missedJson),
   ...firmwareReads(b.firmwareReads),
+  ...storedEntries(b.storedEntries),
+  ...meterClockReads(b.meterClockReads),
 });

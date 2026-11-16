@@ -7,10 +7,12 @@ export {
   type FirmwareRead,
   type IdentifiedMeter,
   type Meter,
+  type MeterClockRead,
   type MissedRead,
   type MissReason,
   type Reading,
   readRegister,
+  type StoredEntry,
 } from "./batch";
 export { crc16 } from "./crc";
 export { type DecodeError, type Decoding, decodeValue, wordCount } from "./decode";
