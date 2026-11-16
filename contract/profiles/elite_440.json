@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "profile": "elite_440",
-  "version": 1,
+  "version": 2,
   "models": [
     "Elite 445",
     "Elite 446"
@@ -97,5 +97,513 @@
       "placeholder": false,
       "verified_on_device": null
     }
-  ]
+  ],
+  "meter_clock": {
+    "table": "holding",
+    "address": 173,
+    "type": "u32",
+    "word_order": "low_first",
+    "epoch": "1988-01-01T00:00:00",
+    "source": "elite_440-a",
+    "verified_on_device": null
+  },
+  "stored": {
+    "history": {
+      "selector": "history",
+      "available": {
+        "table": "holding",
+        "address": 519,
+        "type": "u16",
+        "source": "elite_440-a",
+        "verified_on_device": null
+      },
+      "stamp": {
+        "table": "holding",
+        "address": 521,
+        "type": "u32",
+        "word_order": "low_first",
+        "epoch": "1988-01-01T00:00:00",
+        "source": "elite_440-a",
+        "verified_on_device": null
+      },
+      "mask": {
+        "table": "holding",
+        "address": 523,
+        "type": "u16",
+        "source": "elite_440-a",
+        "verified_on_device": null
+      },
+      "registers": [
+        {
+          "key": "active_energy_import",
+          "table": "holding",
+          "address": 526,
+          "type": "f32",
+          "word_order": "low_first",
+          "unit": "kWh",
+          "kind": "cumulative",
+          "mask_bit": 0,
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "key": "active_energy_export",
+          "table": "holding",
+          "address": 528,
+          "type": "f32",
+          "word_order": "low_first",
+          "unit": "kWh",
+          "kind": "cumulative",
+          "mask_bit": 1,
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "key": "reactive_energy_import_while_active_import",
+          "table": "holding",
+          "address": 534,
+          "type": "f32",
+          "word_order": "low_first",
+          "unit": "kvarh",
+          "kind": "cumulative",
+          "mask_bit": 4,
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "key": "reactive_energy_export_while_active_import",
+          "table": "holding",
+          "address": 536,
+          "type": "f32",
+          "word_order": "low_first",
+          "unit": "kvarh",
+          "kind": "cumulative",
+          "mask_bit": 5,
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "key": "reactive_energy_import_while_active_export",
+          "table": "holding",
+          "address": 538,
+          "type": "f32",
+          "word_order": "low_first",
+          "unit": "kvarh",
+          "kind": "cumulative",
+          "mask_bit": 6,
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "key": "reactive_energy_export_while_active_export",
+          "table": "holding",
+          "address": 540,
+          "type": "f32",
+          "word_order": "low_first",
+          "unit": "kvarh",
+          "kind": "cumulative",
+          "mask_bit": 7,
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "key": "apparent_energy_import",
+          "table": "holding",
+          "address": 542,
+          "type": "f32",
+          "word_order": "low_first",
+          "unit": "kVAh",
+          "kind": "cumulative",
+          "mask_bit": 8,
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "key": "apparent_energy_export",
+          "table": "holding",
+          "address": 544,
+          "type": "f32",
+          "word_order": "low_first",
+          "unit": "kVAh",
+          "kind": "cumulative",
+          "mask_bit": 9,
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "key": "reactive_energy_import",
+          "table": "holding",
+          "address": 546,
+          "type": "f32",
+          "word_order": "low_first",
+          "unit": "kvarh",
+          "kind": "cumulative",
+          "mask_bit": 10,
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "key": "reactive_energy_export",
+          "table": "holding",
+          "address": 548,
+          "type": "f32",
+          "word_order": "low_first",
+          "unit": "kvarh",
+          "kind": "cumulative",
+          "mask_bit": 11,
+          "source": "elite_440-a",
+          "verified_on_device": null
+        }
+      ]
+    },
+    "snapshot": {
+      "selector": "snapshot",
+      "available": {
+        "table": "holding",
+        "address": 699,
+        "type": "u16",
+        "source": "elite_440-a",
+        "verified_on_device": null
+      },
+      "stamp": {
+        "table": "holding",
+        "address": 701,
+        "type": "u32",
+        "word_order": "low_first",
+        "epoch": "1988-01-01T00:00:00",
+        "source": "elite_440-a",
+        "verified_on_device": null
+      },
+      "mask": {
+        "table": "holding",
+        "address": 703,
+        "type": "u16",
+        "source": "elite_440-a",
+        "verified_on_device": null
+      },
+      "registers": [
+        {
+          "key": "active_energy_import",
+          "table": "holding",
+          "address": 709,
+          "type": "f32",
+          "word_order": "low_first",
+          "unit": "kWh",
+          "kind": "cumulative",
+          "mask_bit": 0,
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "key": "active_energy_export",
+          "table": "holding",
+          "address": 711,
+          "type": "f32",
+          "word_order": "low_first",
+          "unit": "kWh",
+          "kind": "cumulative",
+          "mask_bit": 1,
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "key": "reactive_energy_import_while_active_import",
+          "table": "holding",
+          "address": 717,
+          "type": "f32",
+          "word_order": "low_first",
+          "unit": "kvarh",
+          "kind": "cumulative",
+          "mask_bit": 4,
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "key": "reactive_energy_export_while_active_import",
+          "table": "holding",
+          "address": 719,
+          "type": "f32",
+          "word_order": "low_first",
+          "unit": "kvarh",
+          "kind": "cumulative",
+          "mask_bit": 5,
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "key": "reactive_energy_import_while_active_export",
+          "table": "holding",
+          "address": 721,
+          "type": "f32",
+          "word_order": "low_first",
+          "unit": "kvarh",
+          "kind": "cumulative",
+          "mask_bit": 6,
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "key": "reactive_energy_export_while_active_export",
+          "table": "holding",
+          "address": 723,
+          "type": "f32",
+          "word_order": "low_first",
+          "unit": "kvarh",
+          "kind": "cumulative",
+          "mask_bit": 7,
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "key": "apparent_energy_import",
+          "table": "holding",
+          "address": 725,
+          "type": "f32",
+          "word_order": "low_first",
+          "unit": "kVAh",
+          "kind": "cumulative",
+          "mask_bit": 8,
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "key": "apparent_energy_export",
+          "table": "holding",
+          "address": 727,
+          "type": "f32",
+          "word_order": "low_first",
+          "unit": "kVAh",
+          "kind": "cumulative",
+          "mask_bit": 9,
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "key": "reactive_energy_import",
+          "table": "holding",
+          "address": 729,
+          "type": "f32",
+          "word_order": "low_first",
+          "unit": "kvarh",
+          "kind": "cumulative",
+          "mask_bit": 10,
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "key": "reactive_energy_export",
+          "table": "holding",
+          "address": 731,
+          "type": "f32",
+          "word_order": "low_first",
+          "unit": "kvarh",
+          "kind": "cumulative",
+          "mask_bit": 11,
+          "source": "elite_440-a",
+          "verified_on_device": null
+        }
+      ]
+    },
+    "load_survey": {
+      "selectors": {
+        "day": "load_survey_day",
+        "parameter": "load_survey_parameter"
+      },
+      "available": {
+        "table": "holding",
+        "address": 799,
+        "type": "u16",
+        "source": "elite_440-a",
+        "verified_on_device": null
+      },
+      "interval": {
+        "table": "holding",
+        "address": 57,
+        "type": "u16",
+        "unit": "min",
+        "source": "elite_440-a",
+        "verified_on_device": null
+      },
+      "stamp": {
+        "table": "holding",
+        "address": 803,
+        "type": "u32",
+        "word_order": "low_first",
+        "epoch": "1988-01-01T00:00:00",
+        "source": "elite_440-a",
+        "verified_on_device": null
+      },
+      "mask": {
+        "table": "holding",
+        "address": 59,
+        "type": "u32",
+        "word_order": "low_first",
+        "source": "elite_440-a",
+        "verified_on_device": null
+      },
+      "values": {
+        "table": "holding",
+        "address": 807,
+        "type": "f32",
+        "word_order": "low_first",
+        "per_request": 48,
+        "source": "elite_440-a",
+        "verified_on_device": null
+      },
+      "parameters": [
+        {
+          "number": 0,
+          "key": "active_energy_import",
+          "unit": "kWh",
+          "kind": "interval",
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "number": 1,
+          "key": "active_energy_export",
+          "unit": "kWh",
+          "kind": "interval",
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "number": 4,
+          "key": "reactive_energy_import_while_active_import",
+          "unit": "kvarh",
+          "kind": "interval",
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "number": 5,
+          "key": "reactive_energy_export_while_active_import",
+          "unit": "kvarh",
+          "kind": "interval",
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "number": 6,
+          "key": "reactive_energy_import_while_active_export",
+          "unit": "kvarh",
+          "kind": "interval",
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "number": 7,
+          "key": "reactive_energy_export_while_active_export",
+          "unit": "kvarh",
+          "kind": "interval",
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "number": 8,
+          "key": "apparent_energy_import",
+          "unit": "kVAh",
+          "kind": "interval",
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "number": 9,
+          "key": "apparent_energy_export",
+          "unit": "kVAh",
+          "kind": "interval",
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "number": 10,
+          "key": "reactive_energy_import",
+          "unit": "kvarh",
+          "kind": "interval",
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "number": 11,
+          "key": "reactive_energy_export",
+          "unit": "kvarh",
+          "kind": "interval",
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "number": 16,
+          "key": "voltage_l1",
+          "unit": "V",
+          "kind": "instantaneous",
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "number": 17,
+          "key": "voltage_l2",
+          "unit": "V",
+          "kind": "instantaneous",
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "number": 18,
+          "key": "voltage_l3",
+          "unit": "V",
+          "kind": "instantaneous",
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "number": 19,
+          "key": "voltage_average",
+          "unit": "V",
+          "kind": "instantaneous",
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "number": 20,
+          "key": "current_l1",
+          "unit": "A",
+          "kind": "instantaneous",
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "number": 21,
+          "key": "current_l2",
+          "unit": "A",
+          "kind": "instantaneous",
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "number": 22,
+          "key": "current_l3",
+          "unit": "A",
+          "kind": "instantaneous",
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "number": 23,
+          "key": "current_average",
+          "unit": "A",
+          "kind": "instantaneous",
+          "source": "elite_440-a",
+          "verified_on_device": null
+        },
+        {
+          "number": 27,
+          "key": "frequency",
+          "unit": "Hz",
+          "kind": "instantaneous",
+          "source": "elite_440-a",
+          "verified_on_device": null
+        }
+      ]
+    }
+  }
 }

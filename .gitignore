@@ -12,3 +12,6 @@ data/
 
 # bun dependencies (a volume in the dev container)
 node_modules/
+
+# Python bytecode (contract/tools import each other)
+__pycache__/

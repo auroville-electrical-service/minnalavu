@@ -16,6 +16,22 @@ What the collector and the server share. Nothing else is shared between them.
   version never changes, and a correction is a new version. Each register
   has a `kind` (`cumulative`, `interval`, `demand` or `instantaneous`), and
   its unit and kind belong to the version, not to each reading.
+  `meter_clock` says where the meter keeps its own clock and how it counts
+  (seconds since `epoch`, local time, no zone). `stored` says what a copy
+  reads behind the selector writes, per store (`history`, `snapshot`,
+  `load_survey`): the selector by its allowlist name, the count of entries
+  held (`available`), each entry's `stamp` (decoded as the meter clock is),
+  the support `mask` where the source settles its layout, and the
+  quantities: a history's or snapshot's registers, each with its `mask_bit`
+  where there is a mask, and the load survey's `interval` (minutes), the
+  `values` register its intervals are read from, `per_request` at a time,
+  and its `parameters`, by the number the selector takes, which is also the
+  parameter's bit in the mask. Each stored quantity has a unit and a kind:
+  history and snapshot energies are `cumulative`, load-survey energies
+  `interval` (energy in that interval alone), and the store's catalog
+  refuses a `cumulative` quantity in the load survey and an `interval` one
+  anywhere else, so per-interval energy is never differenced as a meter
+  reading. A net figure is never a stored quantity.
 - `latency/buckets.v*.json`: the bounds of the request latency histogram's
   buckets, upper bounds in milliseconds, one file per version. A version never
   changes once a batch cites it; a change is a new version in a new file, and
@@ -31,7 +47,9 @@ What the collector and the server share. Nothing else is shared between them.
 - `tools/`: scripts that compute fixtures independently of any collector.
   `register_decode.py` writes `register-decode.v1.json`
   (`uv run --script contract/tools/register_decode.py`, from the repo root),
-  and `config_digest.py` writes `config.v1.digests.json` the same way; each
+  and `stored_decode.py` (which also refuses a profile whose `stored`
+  section breaks the catalog's rules) and `config_digest.py` write
+  `stored-decode.v1.json` and `config.v1.digests.json` the same way; each
   one's output must equal its fixture byte for byte, which `bin/check`
   checks (`bin/dev contract bin/check`).
 - `fixtures/`: example messages. Both sides test against them.
@@ -67,6 +85,14 @@ What the collector and the server share. Nothing else is shared between them.
   order, and words that must decode to no value. Also computed independently
   of any collector. Every implementation that decodes registers must give
   each value and refuse each input; changing a value changes what is billed.
+  `stored-decode.v1.json` gives, under each profile, words for the meter
+  clock and the stores' stamps with the meter time each must decode to;
+  masks with the bits the profile names and those it does not; history and
+  snapshot entries as read, with the entries they must give and the
+  registers that are unsupported or not finite; and load-survey days, with
+  each interval's meter time and value, those not finite and, on the current
+  day, those not yet ended by the meter's clock; and words that must give no
+  value. Every implementation that copies stored entries must give each.
   `firmware-names.v1.json` gives, under each profile, what is read for the
   names, and words with the text each must decode to or the reason it must be
   refused. Every implementation that reads names must give each.

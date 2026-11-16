@@ -39,7 +39,7 @@ CREATE FUNCTION pg_temp.reading(serial text, batch uuid, ago interval, unit inte
 LANGUAGE sql AS $$
   INSERT INTO store.readings
   SELECT serial, 'active_energy_import', now() - ago, 1.0, 'elite_440', '10.0.0.1', 502, unit,
-         b.collector_id, batch, 'ELITE440-445', 1
+         b.collector_id, batch, 'ELITE440-445', 2
   FROM store.batches b WHERE b.batch_id = batch
 $$;
 
@@ -49,7 +49,7 @@ RETURNS void
 LANGUAGE sql AS $$
   INSERT INTO store.missed_reads
   SELECT serial, 'active_energy_import', now() - ago, reason, NULL, NULL, 3, NULL, 'elite_440',
-         '10.0.0.1', 502, unit, b.collector_id, batch, 1
+         '10.0.0.1', 502, unit, b.collector_id, batch, 2
   FROM store.batches b WHERE b.batch_id = batch
 $$;
 
@@ -146,12 +146,12 @@ SELECT pg_temp.missed(NULL, (SELECT batch FROM b WHERE collector = 'sqlh_d'), '1
                       'decode', 14);
 INSERT INTO store.missed_reads
 SELECT NULL, 'active_energy_import', now() - ago, 'decode', NULL, NULL, 3, NULL, 'elite_440',
-       '10.0.0.2', 502, unit, 'sqlh_d', (SELECT batch FROM b WHERE collector = 'sqlh_d'), 1
+       '10.0.0.2', 502, unit, 'sqlh_d', (SELECT batch FROM b WHERE collector = 'sqlh_d'), 2
 FROM (VALUES (1, '40 minutes'::interval), (2, '20 minutes')) v (unit, ago);
 INSERT INTO store.readings
 SELECT 'SQLT-0002', 'active_energy_import', now() - interval '50 minutes', 1.0, 'elite_440',
        '10.0.0.2', 502, 1, 'sqlh_d', (SELECT batch FROM b WHERE collector = 'sqlh_d'),
-       'ELITE440-445', 1;
+       'ELITE440-445', 2;
 
 -- SQLH-0003 read at unit 7 of its own endpoint; SQLH-0007 read through
 -- sqlh_d at the host and port its endpoint has under sqlh_b; SQLH-0005 read
@@ -294,7 +294,7 @@ SAVEPOINT old_address;
 INSERT INTO store.readings
 SELECT 'SQLS-A', 'active_energy_import', now() - interval '11 minutes', 1.0, 'elite_440',
        '10.0.0.2', 502, 2, 'sqlh_d', (SELECT batch FROM b WHERE collector = 'sqlh_d'),
-       'ELITE440-445', 1;
+       'ELITE440-445', 2;
 SELECT pg_temp.ok(
   (SELECT silent FROM health.targets WHERE endpoint_id = 'sqlh_m_ep' AND unit_id = 2),
   'a reading at an address the endpoint no longer had does not count for its target');

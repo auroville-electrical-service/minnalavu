@@ -97,7 +97,7 @@ LANGUAGE sql AS $$
   SELECT jsonb_strip_nulls(jsonb_build_object(
     'endpoint', jsonb_build_object('host', '10.0.0.41', 'port', 502), 'unit_id', unit,
     'meter_serial', serial, 'product_code', 'ELITE440-445', 'profile', 'elite_440',
-    'profile_version', 1, 'register_key', 'active_energy_import', 'timestamp', at,
+    'profile_version', 2, 'register_key', 'active_energy_import', 'timestamp', at,
     'value', value, 'request_id', request))
 $$;
 
@@ -105,7 +105,7 @@ CREATE FUNCTION pg_temp.missed(serial text, unit integer, at text, request uuid)
 LANGUAGE sql AS $$
   SELECT jsonb_strip_nulls(jsonb_build_object(
     'endpoint', jsonb_build_object('host', '10.0.0.41', 'port', 502), 'unit_id', unit,
-    'meter_serial', serial, 'profile', 'elite_440', 'profile_version', 1,
+    'meter_serial', serial, 'profile', 'elite_440', 'profile_version', 2,
     'register_key', 'active_energy_import',
     'timestamp', at, 'reason', 'timeout', 'exception_code', NULL, 'detail', NULL,
     'attempts', 3, 'raw_words', NULL, 'request_id', request))

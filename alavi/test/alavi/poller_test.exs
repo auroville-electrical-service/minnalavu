@@ -35,7 +35,7 @@ defmodule Alavi.PollerTest do
         [import_ | _] = hd(rounds)
         assert import_.value == Decimal.new("123456")
         assert %{meter_serial: "SIM-1", product_code: "ELITE440-445"} = import_
-        assert %{profile: "elite_440", profile_version: 1} = import_
+        assert %{profile: "elite_440", profile_version: 2} = import_
         assert %{meter_serial: "SIM-3", product_code: "E500C-5102"} = hd(List.last(rounds))
         assert import_.endpoint == %{host: "127.0.0.1", port: port}
       end

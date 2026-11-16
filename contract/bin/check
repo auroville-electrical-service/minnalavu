@@ -21,6 +21,7 @@ trap 'rm -f -- "$out"' EXIT
 
 declare -A fixtures=(
   ["contract/tools/register_decode.py"]=contract/fixtures/register-decode.v1.json
+  ["contract/tools/stored_decode.py"]=contract/fixtures/stored-decode.v1.json
   ["contract/tools/config_digest.py"]=contract/fixtures/config.v1.digests.json
 )
 

@@ -1,0 +1,2171 @@
+{
+  "format": "stored-decode/1",
+  "description": "Raw words, in register-address order as read from the meter, and what each must decode to under a profile's meter_clock and stored sections. Computed independently of either collector by contract/tools/stored_decode.py, which decodes values as register_decode.py does. A stamp is an unsigned 32-bit count of seconds since the profile's epoch, in the stamp's word order, and decodes to a local date-time with no zone (YYYY-MM-DDTHH:MM:SS): the meter's own clock, never corrected. A mask is an unsigned integer in its word order; bit n set means the entry with mask_bit n (history, snapshot) or parameter number n (load survey) is supported. named lists the set bits the profile names, unnamed the set bits it does not, which are never read. blocks: a history or snapshot entry as read after its selector write: the stamp, the mask where the profile has one, and each register's words. Each register whose mask bit is clear is unsupported, whatever its words; each other register decodes to an entry, or is not_finite when its words are a NaN or an infinity, which is no value. load_survey: one parameter of one day, as read after both selector writes: the day's stamp, the interval in minutes and the day's values, two words each, from the first interval of the day. Interval i starts at the day's stamp plus i intervals, and that start is its meter_time. Where the meter's clock is given (the current day), an interval is an entry only when it has ended by that clock (its end no later than the clock); the rest are counted in not_ended, whatever their words. Values are decimal strings as in register-decode.v1.json, and their unit and kind are the profile entry's. no_value: words that must give no value at all, with the error. Every implementation that copies stored entries must give every result and refuse every no_value. Changing an expected value changes what may be billed.",
+  "stamps": [
+    {
+      "profile": "elite_440",
+      "profile_version": 2,
+      "field": "meter_clock",
+      "raw_words": [
+        0,
+        0
+      ],
+      "meter_time": "1988-01-01T00:00:00",
+      "why": "the epoch"
+    },
+    {
+      "profile": "elite_440",
+      "profile_version": 2,
+      "field": "meter_clock",
+      "raw_words": [
+        872,
+        18715
+      ],
+      "meter_time": "2026-11-12T16:25:12",
+      "why": "low word first"
+    },
+    {
+      "profile": "elite_440",
+      "profile_version": 2,
+      "field": "meter_clock",
+      "raw_words": [
+        65535,
+        65535
+      ],
+      "meter_time": "2124-02-07T06:28:15",
+      "why": "the last second a u32 holds"
+    },
+    {
+      "profile": "elite_440",
+      "profile_version": 2,
+      "field": "history.stamp",
+      "raw_words": [
+        39936,
+        18699
+      ],
+      "meter_time": "2026-11-01T00:00:00",
+      "why": "a billing date"
+    },
+    {
+      "profile": "elite_440",
+      "profile_version": 2,
+      "field": "history.stamp",
+      "raw_words": [
+        48835,
+        18658
+      ],
+      "meter_time": "2026-10-01T00:05:23",
+      "why": "a history minutes after midnight"
+    },
+    {
+      "profile": "elite_440",
+      "profile_version": 2,
+      "field": "snapshot.stamp",
+      "raw_words": [
+        49024,
+        18716
+      ],
+      "meter_time": "2026-11-14T00:00:00",
+      "why": "a midnight snapshot"
+    },
+    {
+      "profile": "elite_440",
+      "profile_version": 2,
+      "field": "load_survey.stamp",
+      "raw_words": [
+        28160,
+        18715
+      ],
+      "meter_time": "2026-11-13T00:00:00",
+      "why": "a load-survey day"
+    },
+    {
+      "profile": "elite_500",
+      "profile_version": 2,
+      "field": "meter_clock",
+      "raw_words": [
+        0,
+        0
+      ],
+      "meter_time": "2000-01-01T00:00:00",
+      "why": "the epoch"
+    },
+    {
+      "profile": "elite_500",
+      "profile_version": 2,
+      "field": "meter_clock",
+      "raw_words": [
+        12937,
+        42431
+      ],
+      "meter_time": "2026-11-13T10:41:03",
+      "why": "high word first"
+    },
+    {
+      "profile": "elite_500",
+      "profile_version": 2,
+      "field": "meter_clock",
+      "raw_words": [
+        65535,
+        65535
+      ],
+      "meter_time": "2136-02-07T06:28:15",
+      "why": "the last second a u32 holds"
+    },
+    {
+      "profile": "elite_500",
+      "profile_version": 2,
+      "field": "history.stamp",
+      "raw_words": [
+        12921,
+        15744
+      ],
+      "meter_time": "2026-11-01T00:00:00",
+      "why": "a billing date"
+    },
+    {
+      "profile": "elite_500",
+      "profile_version": 2,
+      "field": "history.stamp",
+      "raw_words": [
+        12880,
+        24617
+      ],
+      "meter_time": "2026-10-01T00:04:57",
+      "why": "a history minutes after midnight"
+    },
+    {
+      "profile": "elite_500",
+      "profile_version": 2,
+      "field": "snapshot.stamp",
+      "raw_words": [
+        12871,
+        9344
+      ],
+      "meter_time": "2026-09-24T00:00:00",
+      "why": "a midnight snapshot"
+    },
+    {
+      "profile": "elite_500",
+      "profile_version": 2,
+      "field": "load_survey.stamp",
+      "raw_words": [
+        12937,
+        3968
+      ],
+      "meter_time": "2026-11-13T00:00:00",
+      "why": "a load-survey day"
+    }
+  ],
+  "masks": [
+    {
+      "profile": "elite_440",
+      "profile_version": 2,
+      "field": "history.mask",
+      "raw_words": [
+        1011
+      ],
+      "named": [
+        {
+          "bit": 0,
+          "register_key": "active_energy_import"
+        },
+        {
+          "bit": 1,
+          "register_key": "active_energy_export"
+        },
+        {
+          "bit": 4,
+          "register_key": "reactive_energy_import_while_active_import"
+        },
+        {
+          "bit": 5,
+          "register_key": "reactive_energy_export_while_active_import"
+        },
+        {
+          "bit": 6,
+          "register_key": "reactive_energy_import_while_active_export"
+        },
+        {
+          "bit": 7,
+          "register_key": "reactive_energy_export_while_active_export"
+        },
+        {
+          "bit": 8,
+          "register_key": "apparent_energy_import"
+        },
+        {
+          "bit": 9,
+          "register_key": "apparent_energy_export"
+        }
+      ],
+      "unnamed": [],
+      "why": "a 445's energies"
+    },
+    {
+      "profile": "elite_440",
+      "profile_version": 2,
+      "field": "snapshot.mask",
+      "raw_words": [
+        3843
+      ],
+      "named": [
+        {
+          "bit": 0,
+          "register_key": "active_energy_import"
+        },
+        {
+          "bit": 1,
+          "register_key": "active_energy_export"
+        },
+        {
+          "bit": 8,
+          "register_key": "apparent_energy_import"
+        },
+        {
+          "bit": 9,
+          "register_key": "apparent_energy_export"
+        },
+        {
+          "bit": 10,
+          "register_key": "reactive_energy_import"
+        },
+        {
+          "bit": 11,
+          "register_key": "reactive_energy_export"
+        }
+      ],
+      "unnamed": [],
+      "why": "a 446's energies"
+    },
+    {
+      "profile": "elite_440",
+      "profile_version": 2,
+      "field": "history.mask",
+      "raw_words": [
+        15
+      ],
+      "named": [
+        {
+          "bit": 0,
+          "register_key": "active_energy_import"
+        },
+        {
+          "bit": 1,
+          "register_key": "active_energy_export"
+        }
+      ],
+      "unnamed": [
+        2,
+        3
+      ],
+      "why": "fundamental energies, which no 445 or 446 has: unnamed"
+    },
+    {
+      "profile": "elite_440",
+      "profile_version": 2,
+      "field": "load_survey.mask",
+      "raw_words": [
+        771,
+        2184
+      ],
+      "named": [
+        {
+          "bit": 0,
+          "register_key": "active_energy_import"
+        },
+        {
+          "bit": 1,
+          "register_key": "active_energy_export"
+        },
+        {
+          "bit": 8,
+          "register_key": "apparent_energy_import"
+        },
+        {
+          "bit": 9,
+          "register_key": "apparent_energy_export"
+        },
+        {
+          "bit": 19,
+          "register_key": "voltage_average"
+        },
+        {
+          "bit": 23,
+          "register_key": "current_average"
+        },
+        {
+          "bit": 27,
+          "register_key": "frequency"
+        }
+      ],
+      "unnamed": [],
+      "why": "energies, average voltage and current, and frequency"
+    },
+    {
+      "profile": "elite_440",
+      "profile_version": 2,
+      "field": "load_survey.mask",
+      "raw_words": [
+        1,
+        12544
+      ],
+      "named": [
+        {
+          "bit": 0,
+          "register_key": "active_energy_import"
+        }
+      ],
+      "unnamed": [
+        24,
+        28,
+        29
+      ],
+      "why": "power factor and the pulse counters: unnamed"
+    },
+    {
+      "profile": "elite_500",
+      "profile_version": 2,
+      "field": "load_survey.mask",
+      "raw_words": [
+        0,
+        0,
+        0,
+        115
+      ],
+      "named": [
+        {
+          "bit": 0,
+          "register_key": "active_energy_forwarded"
+        },
+        {
+          "bit": 1,
+          "register_key": "apparent_energy_forwarded"
+        },
+        {
+          "bit": 4,
+          "register_key": "active_energy_import"
+        },
+        {
+          "bit": 5,
+          "register_key": "active_energy_export"
+        }
+      ],
+      "unnamed": [
+        6
+      ],
+      "why": "net active (6) is unnamed"
+    },
+    {
+      "profile": "elite_500",
+      "profile_version": 2,
+      "field": "load_survey.mask",
+      "raw_words": [
+        0,
+        0,
+        1,
+        65535
+      ],
+      "named": [
+        {
+          "bit": 0,
+          "register_key": "active_energy_forwarded"
+        },
+        {
+          "bit": 1,
+          "register_key": "apparent_energy_forwarded"
+        },
+        {
+          "bit": 2,
+          "register_key": "reactive_energy_lag"
+        },
+        {
+          "bit": 3,
+          "register_key": "reactive_energy_lead"
+        },
+        {
+          "bit": 4,
+          "register_key": "active_energy_import"
+        },
+        {
+          "bit": 5,
+          "register_key": "active_energy_export"
+        },
+        {
+          "bit": 7,
+          "register_key": "reactive_energy_import"
+        },
+        {
+          "bit": 8,
+          "register_key": "reactive_energy_export"
+        },
+        {
+          "bit": 9,
+          "register_key": "apparent_energy_import"
+        },
+        {
+          "bit": 10,
+          "register_key": "apparent_energy_export"
+        }
+      ],
+      "unnamed": [
+        6,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16
+      ],
+      "why": "codes 0 to 16"
+    },
+    {
+      "profile": "elite_500",
+      "profile_version": 2,
+      "field": "load_survey.mask",
+      "raw_words": [
+        32768,
+        0,
+        0,
+        1
+      ],
+      "named": [
+        {
+          "bit": 0,
+          "register_key": "active_energy_forwarded"
+        }
+      ],
+      "unnamed": [
+        63
+      ],
+      "why": "the top bit of the u64"
+    }
+  ],
+  "blocks": [
+    {
+      "profile": "elite_440",
+      "profile_version": 2,
+      "store": "history",
+      "stamp_words": [
+        39936,
+        18699
+      ],
+      "mask_words": [
+        1011
+      ],
+      "registers": {
+        "active_energy_import": [
+          46137,
+          16560
+        ],
+        "active_energy_export": [
+          26650,
+          18232
+        ],
+        "reactive_energy_import_while_active_import": [
+          0,
+          0
+        ],
+        "reactive_energy_export_while_active_import": [
+          0,
+          16288
+        ],
+        "reactive_energy_import_while_active_export": [
+          16384,
+          17308
+        ],
+        "reactive_energy_export_while_active_export": [
+          52429,
+          15820
+        ],
+        "apparent_energy_import": [
+          0,
+          16576
+        ],
+        "apparent_energy_export": [
+          50662,
+          18232
+        ],
+        "reactive_energy_import": [
+          65535,
+          65535
+        ],
+        "reactive_energy_export": [
+          65535,
+          65535
+        ]
+      },
+      "meter_time": "2026-11-01T00:00:00",
+      "entries": [
+        {
+          "register_key": "active_energy_import",
+          "value": "5.522"
+        },
+        {
+          "register_key": "active_energy_export",
+          "value": "47208.1"
+        },
+        {
+          "register_key": "reactive_energy_import_while_active_import",
+          "value": "0"
+        },
+        {
+          "register_key": "reactive_energy_export_while_active_import",
+          "value": "1.25"
+        },
+        {
+          "register_key": "reactive_energy_import_while_active_export",
+          "value": "312.5"
+        },
+        {
+          "register_key": "reactive_energy_export_while_active_export",
+          "value": "0.1"
+        },
+        {
+          "register_key": "apparent_energy_import",
+          "value": "6"
+        },
+        {
+          "register_key": "apparent_energy_export",
+          "value": "47301.9"
+        }
+      ],
+      "unsupported": [
+        "reactive_energy_import",
+        "reactive_energy_export"
+      ],
+      "not_finite": [],
+      "why": "a 445's history: its two reactive registers outside the mask read NaN and are unsupported"
+    },
+    {
+      "profile": "elite_440",
+      "profile_version": 2,
+      "store": "snapshot",
+      "stamp_words": [
+        49024,
+        18716
+      ],
+      "mask_words": [
+        1011
+      ],
+      "registers": {
+        "active_energy_import": [
+          52429,
+          16556
+        ],
+        "active_energy_export": [
+          40653,
+          18234
+        ],
+        "reactive_energy_import_while_active_import": [
+          65535,
+          65535
+        ],
+        "reactive_energy_export_while_active_import": [
+          65535,
+          65535
+        ],
+        "reactive_energy_import_while_active_export": [
+          65535,
+          65535
+        ],
+        "reactive_energy_export_while_active_export": [
+          65535,
+          65535
+        ],
+        "apparent_energy_import": [
+          0,
+          32704
+        ],
+        "apparent_energy_export": [
+          65535,
+          65535
+        ],
+        "reactive_energy_import": [
+          65535,
+          65535
+        ],
+        "reactive_energy_export": [
+          65535,
+          65535
+        ]
+      },
+      "meter_time": "2026-11-14T00:00:00",
+      "entries": [
+        {
+          "register_key": "active_energy_import",
+          "value": "5.4"
+        },
+        {
+          "register_key": "active_energy_export",
+          "value": "47774.8"
+        }
+      ],
+      "unsupported": [
+        "reactive_energy_import",
+        "reactive_energy_export"
+      ],
+      "not_finite": [
+        "reactive_energy_import_while_active_import",
+        "reactive_energy_export_while_active_import",
+        "reactive_energy_import_while_active_export",
+        "reactive_energy_export_while_active_export",
+        "apparent_energy_import",
+        "apparent_energy_export"
+      ],
+      "why": "a NaN under a supported bit is not_finite, not an entry"
+    },
+    {
+      "profile": "elite_440",
+      "profile_version": 2,
+      "store": "history",
+      "stamp_words": [
+        59009,
+        18497
+      ],
+      "mask_words": [
+        1
+      ],
+      "registers": {
+        "active_energy_import": [
+          23593,
+          15759
+        ],
+        "active_energy_export": [
+          0,
+          16320
+        ],
+        "reactive_energy_import_while_active_import": [
+          65535,
+          65535
+        ],
+        "reactive_energy_export_while_active_import": [
+          65535,
+          65535
+        ],
+        "reactive_energy_import_while_active_export": [
+          65535,
+          65535
+        ],
+        "reactive_energy_export_while_active_export": [
+          65535,
+          65535
+        ],
+        "apparent_energy_import": [
+          65535,
+          65535
+        ],
+        "apparent_energy_export": [
+          65535,
+          65535
+        ],
+        "reactive_energy_import": [
+          65535,
+          65535
+        ],
+        "reactive_energy_export": [
+          65535,
+          65535
+        ]
+      },
+      "meter_time": "2026-06-01T00:00:01",
+      "entries": [
+        {
+          "register_key": "active_energy_import",
+          "value": "0.07"
+        }
+      ],
+      "unsupported": [
+        "active_energy_export",
+        "reactive_energy_import_while_active_import",
+        "reactive_energy_export_while_active_import",
+        "reactive_energy_import_while_active_export",
+        "reactive_energy_export_while_active_export",
+        "apparent_energy_import",
+        "apparent_energy_export",
+        "reactive_energy_import",
+        "reactive_energy_export"
+      ],
+      "not_finite": [],
+      "why": "a register outside the mask is unsupported even when its words are a number"
+    },
+    {
+      "profile": "elite_500",
+      "profile_version": 2,
+      "store": "history",
+      "stamp_words": [
+        12921,
+        15744
+      ],
+      "registers": {
+        "active_energy_import": [
+          452,
+          19249
+        ],
+        "active_energy_export": [
+          28198,
+          18344
+        ],
+        "apparent_energy_import": [
+          65535,
+          65535
+        ],
+        "apparent_energy_export": [
+          65535,
+          65535
+        ],
+        "reactive_energy_import": [
+          2176,
+          18255
+        ],
+        "reactive_energy_export": [
+          65535,
+          65535
+        ],
+        "active_energy_forwarded": [
+          65535,
+          65535
+        ],
+        "apparent_energy_forwarded": [
+          65535,
+          65535
+        ],
+        "reactive_energy_lag": [
+          65535,
+          65535
+        ],
+        "reactive_energy_lead": [
+          65535,
+          65535
+        ],
+        "active_energy_import_l1": [
+          65535,
+          65535
+        ],
+        "active_energy_import_l2": [
+          65535,
+          65535
+        ],
+        "active_energy_import_l3": [
+          65535,
+          65535
+        ],
+        "active_energy_export_l1": [
+          65535,
+          65535
+        ],
+        "active_energy_export_l2": [
+          65535,
+          65535
+        ],
+        "active_energy_export_l3": [
+          65535,
+          65535
+        ]
+      },
+      "meter_time": "2026-11-01T00:00:00",
+      "entries": [
+        {
+          "register_key": "active_energy_import",
+          "value": "11600324"
+        },
+        {
+          "register_key": "active_energy_export",
+          "value": "86236.3"
+        },
+        {
+          "register_key": "reactive_energy_import",
+          "value": "53000.5"
+        }
+      ],
+      "unsupported": [],
+      "not_finite": [
+        "apparent_energy_import",
+        "apparent_energy_export",
+        "reactive_energy_export",
+        "active_energy_forwarded",
+        "apparent_energy_forwarded",
+        "reactive_energy_lag",
+        "reactive_energy_lead",
+        "active_energy_import_l1",
+        "active_energy_import_l2",
+        "active_energy_import_l3",
+        "active_energy_export_l1",
+        "active_energy_export_l2",
+        "active_energy_export_l3"
+      ],
+      "why": "a 500's history has no mask in the profile: every NaN is not_finite"
+    },
+    {
+      "profile": "elite_500",
+      "profile_version": 2,
+      "store": "snapshot",
+      "stamp_words": [
+        12937,
+        3968
+      ],
+      "registers": {
+        "active_energy_import": [
+          34458,
+          19250
+        ],
+        "active_energy_export": [
+          22082,
+          18345
+        ],
+        "apparent_energy_import": [
+          65535,
+          65535
+        ],
+        "apparent_energy_export": [
+          65535,
+          65535
+        ],
+        "reactive_energy_import": [
+          65535,
+          65535
+        ],
+        "reactive_energy_export": [
+          65535,
+          65535
+        ],
+        "active_energy_forwarded": [
+          65535,
+          65535
+        ],
+        "apparent_energy_forwarded": [
+          65535,
+          65535
+        ],
+        "reactive_energy_lag": [
+          65535,
+          65535
+        ],
+        "reactive_energy_lead": [
+          65535,
+          65535
+        ],
+        "active_energy_import_l1": [
+          0,
+          32768
+        ],
+        "active_energy_import_l2": [
+          65535,
+          65535
+        ],
+        "active_energy_import_l3": [
+          65535,
+          65535
+        ],
+        "active_energy_export_l1": [
+          65535,
+          65535
+        ],
+        "active_energy_export_l2": [
+          65535,
+          65535
+        ],
+        "active_energy_export_l3": [
+          65535,
+          65535
+        ]
+      },
+      "meter_time": "2026-11-13T00:00:00",
+      "entries": [
+        {
+          "register_key": "active_energy_import",
+          "value": "11699866"
+        },
+        {
+          "register_key": "active_energy_export",
+          "value": "86700.516"
+        },
+        {
+          "register_key": "active_energy_import_l1",
+          "value": "-0"
+        }
+      ],
+      "unsupported": [],
+      "not_finite": [
+        "apparent_energy_import",
+        "apparent_energy_export",
+        "reactive_energy_import",
+        "reactive_energy_export",
+        "active_energy_forwarded",
+        "apparent_energy_forwarded",
+        "reactive_energy_lag",
+        "reactive_energy_lead",
+        "active_energy_import_l2",
+        "active_energy_import_l3",
+        "active_energy_export_l1",
+        "active_energy_export_l2",
+        "active_energy_export_l3"
+      ],
+      "why": "a snapshot; negative zero keeps its sign"
+    }
+  ],
+  "load_survey": [
+    {
+      "profile": "elite_440",
+      "profile_version": 2,
+      "parameter": 1,
+      "register_key": "active_energy_export",
+      "stamp_words": [
+        28160,
+        18715
+      ],
+      "interval_words": [
+        60
+      ],
+      "values_words": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        7864,
+        16197,
+        7864,
+        16325,
+        55050,
+        16403,
+        7864,
+        16453,
+        26214,
+        16502,
+        55050,
+        16531,
+        26214,
+        16502,
+        7864,
+        16453,
+        55050,
+        16403,
+        7864,
+        16325,
+        7864,
+        16197,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "interval_s": 3600,
+      "entries": [
+        {
+          "meter_time": "2026-11-13T00:00:00",
+          "value": "0"
+        },
+        {
+          "meter_time": "2026-11-13T01:00:00",
+          "value": "0"
+        },
+        {
+          "meter_time": "2026-11-13T02:00:00",
+          "value": "0"
+        },
+        {
+          "meter_time": "2026-11-13T03:00:00",
+          "value": "0"
+        },
+        {
+          "meter_time": "2026-11-13T04:00:00",
+          "value": "0"
+        },
+        {
+          "meter_time": "2026-11-13T05:00:00",
+          "value": "0"
+        },
+        {
+          "meter_time": "2026-11-13T06:00:00",
+          "value": "0"
+        },
+        {
+          "meter_time": "2026-11-13T07:00:00",
+          "value": "0.77"
+        },
+        {
+          "meter_time": "2026-11-13T08:00:00",
+          "value": "1.54"
+        },
+        {
+          "meter_time": "2026-11-13T09:00:00",
+          "value": "2.31"
+        },
+        {
+          "meter_time": "2026-11-13T10:00:00",
+          "value": "3.08"
+        },
+        {
+          "meter_time": "2026-11-13T11:00:00",
+          "value": "3.85"
+        },
+        {
+          "meter_time": "2026-11-13T12:00:00",
+          "value": "4.62"
+        },
+        {
+          "meter_time": "2026-11-13T13:00:00",
+          "value": "3.85"
+        },
+        {
+          "meter_time": "2026-11-13T14:00:00",
+          "value": "3.08"
+        },
+        {
+          "meter_time": "2026-11-13T15:00:00",
+          "value": "2.31"
+        },
+        {
+          "meter_time": "2026-11-13T16:00:00",
+          "value": "1.54"
+        },
+        {
+          "meter_time": "2026-11-13T17:00:00",
+          "value": "0.77"
+        },
+        {
+          "meter_time": "2026-11-13T18:00:00",
+          "value": "0"
+        },
+        {
+          "meter_time": "2026-11-13T19:00:00",
+          "value": "0"
+        },
+        {
+          "meter_time": "2026-11-13T20:00:00",
+          "value": "0"
+        },
+        {
+          "meter_time": "2026-11-13T21:00:00",
+          "value": "0"
+        },
+        {
+          "meter_time": "2026-11-13T22:00:00",
+          "value": "0"
+        },
+        {
+          "meter_time": "2026-11-13T23:00:00",
+          "value": "0"
+        }
+      ],
+      "not_finite": [],
+      "not_ended": 0,
+      "why": "a past day's export per hour; zero intervals are entries"
+    },
+    {
+      "profile": "elite_440",
+      "profile_version": 2,
+      "parameter": 27,
+      "register_key": "frequency",
+      "stamp_words": [
+        45824,
+        18691
+      ],
+      "interval_words": [
+        30
+      ],
+      "values_words": [
+        49807,
+        16966,
+        7864,
+        16967,
+        31457,
+        16967,
+        55050,
+        16967,
+        13107,
+        16968,
+        0,
+        32704,
+        60293,
+        16968,
+        49807,
+        16966,
+        7864,
+        16967,
+        31457,
+        16967,
+        55050,
+        16967,
+        13107,
+        16968,
+        36700,
+        16968,
+        60293,
+        16968,
+        49807,
+        16966,
+        7864,
+        16967,
+        31457,
+        16967,
+        55050,
+        16967,
+        13107,
+        16968,
+        36700,
+        16968,
+        60293,
+        16968,
+        49807,
+        16966,
+        7864,
+        16967,
+        31457,
+        16967,
+        55050,
+        16967,
+        13107,
+        16968,
+        36700,
+        16968,
+        60293,
+        16968,
+        49807,
+        16966,
+        7864,
+        16967,
+        31457,
+        16967,
+        55050,
+        16967,
+        13107,
+        16968,
+        36700,
+        16968,
+        60293,
+        16968,
+        49807,
+        16966,
+        7864,
+        16967,
+        31457,
+        16967,
+        55050,
+        16967,
+        13107,
+        16968,
+        36700,
+        16968,
+        60293,
+        16968,
+        49807,
+        16966,
+        7864,
+        16967,
+        31457,
+        16967,
+        55050,
+        16967,
+        13107,
+        16968,
+        36700,
+        16968
+      ],
+      "interval_s": 1800,
+      "entries": [
+        {
+          "meter_time": "2026-10-26T00:00:00",
+          "value": "49.69"
+        },
+        {
+          "meter_time": "2026-10-26T00:30:00",
+          "value": "49.78"
+        },
+        {
+          "meter_time": "2026-10-26T01:00:00",
+          "value": "49.87"
+        },
+        {
+          "meter_time": "2026-10-26T01:30:00",
+          "value": "49.96"
+        },
+        {
+          "meter_time": "2026-10-26T02:00:00",
+          "value": "50.05"
+        },
+        {
+          "meter_time": "2026-10-26T03:00:00",
+          "value": "50.23"
+        },
+        {
+          "meter_time": "2026-10-26T03:30:00",
+          "value": "49.69"
+        },
+        {
+          "meter_time": "2026-10-26T04:00:00",
+          "value": "49.78"
+        },
+        {
+          "meter_time": "2026-10-26T04:30:00",
+          "value": "49.87"
+        },
+        {
+          "meter_time": "2026-10-26T05:00:00",
+          "value": "49.96"
+        },
+        {
+          "meter_time": "2026-10-26T05:30:00",
+          "value": "50.05"
+        },
+        {
+          "meter_time": "2026-10-26T06:00:00",
+          "value": "50.14"
+        },
+        {
+          "meter_time": "2026-10-26T06:30:00",
+          "value": "50.23"
+        },
+        {
+          "meter_time": "2026-10-26T07:00:00",
+          "value": "49.69"
+        },
+        {
+          "meter_time": "2026-10-26T07:30:00",
+          "value": "49.78"
+        },
+        {
+          "meter_time": "2026-10-26T08:00:00",
+          "value": "49.87"
+        },
+        {
+          "meter_time": "2026-10-26T08:30:00",
+          "value": "49.96"
+        },
+        {
+          "meter_time": "2026-10-26T09:00:00",
+          "value": "50.05"
+        },
+        {
+          "meter_time": "2026-10-26T09:30:00",
+          "value": "50.14"
+        },
+        {
+          "meter_time": "2026-10-26T10:00:00",
+          "value": "50.23"
+        },
+        {
+          "meter_time": "2026-10-26T10:30:00",
+          "value": "49.69"
+        },
+        {
+          "meter_time": "2026-10-26T11:00:00",
+          "value": "49.78"
+        },
+        {
+          "meter_time": "2026-10-26T11:30:00",
+          "value": "49.87"
+        },
+        {
+          "meter_time": "2026-10-26T12:00:00",
+          "value": "49.96"
+        },
+        {
+          "meter_time": "2026-10-26T12:30:00",
+          "value": "50.05"
+        },
+        {
+          "meter_time": "2026-10-26T13:00:00",
+          "value": "50.14"
+        },
+        {
+          "meter_time": "2026-10-26T13:30:00",
+          "value": "50.23"
+        },
+        {
+          "meter_time": "2026-10-26T14:00:00",
+          "value": "49.69"
+        },
+        {
+          "meter_time": "2026-10-26T14:30:00",
+          "value": "49.78"
+        },
+        {
+          "meter_time": "2026-10-26T15:00:00",
+          "value": "49.87"
+        },
+        {
+          "meter_time": "2026-10-26T15:30:00",
+          "value": "49.96"
+        },
+        {
+          "meter_time": "2026-10-26T16:00:00",
+          "value": "50.05"
+        },
+        {
+          "meter_time": "2026-10-26T16:30:00",
+          "value": "50.14"
+        },
+        {
+          "meter_time": "2026-10-26T17:00:00",
+          "value": "50.23"
+        },
+        {
+          "meter_time": "2026-10-26T17:30:00",
+          "value": "49.69"
+        },
+        {
+          "meter_time": "2026-10-26T18:00:00",
+          "value": "49.78"
+        },
+        {
+          "meter_time": "2026-10-26T18:30:00",
+          "value": "49.87"
+        },
+        {
+          "meter_time": "2026-10-26T19:00:00",
+          "value": "49.96"
+        },
+        {
+          "meter_time": "2026-10-26T19:30:00",
+          "value": "50.05"
+        },
+        {
+          "meter_time": "2026-10-26T20:00:00",
+          "value": "50.14"
+        },
+        {
+          "meter_time": "2026-10-26T20:30:00",
+          "value": "50.23"
+        },
+        {
+          "meter_time": "2026-10-26T21:00:00",
+          "value": "49.69"
+        },
+        {
+          "meter_time": "2026-10-26T21:30:00",
+          "value": "49.78"
+        },
+        {
+          "meter_time": "2026-10-26T22:00:00",
+          "value": "49.87"
+        },
+        {
+          "meter_time": "2026-10-26T22:30:00",
+          "value": "49.96"
+        },
+        {
+          "meter_time": "2026-10-26T23:00:00",
+          "value": "50.05"
+        },
+        {
+          "meter_time": "2026-10-26T23:30:00",
+          "value": "50.14"
+        }
+      ],
+      "not_finite": [
+        "2026-10-26T02:30:00"
+      ],
+      "not_ended": 0,
+      "why": "frequency at 30 minutes; a NaN interval is not_finite"
+    },
+    {
+      "profile": "elite_440",
+      "profile_version": 2,
+      "parameter": 0,
+      "register_key": "active_energy_import",
+      "stamp_words": [
+        49024,
+        18716
+      ],
+      "interval_words": [
+        60
+      ],
+      "clock_words": [
+        4318,
+        18717
+      ],
+      "values_words": [
+        0,
+        0,
+        0,
+        16000,
+        0,
+        16128,
+        0,
+        16192,
+        0,
+        16256,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "interval_s": 3600,
+      "entries": [
+        {
+          "meter_time": "2026-11-14T00:00:00",
+          "value": "0"
+        },
+        {
+          "meter_time": "2026-11-14T01:00:00",
+          "value": "0.25"
+        },
+        {
+          "meter_time": "2026-11-14T02:00:00",
+          "value": "0.5"
+        },
+        {
+          "meter_time": "2026-11-14T03:00:00",
+          "value": "0.75"
+        },
+        {
+          "meter_time": "2026-11-14T04:00:00",
+          "value": "1"
+        }
+      ],
+      "not_finite": [],
+      "not_ended": 19,
+      "why": "the current day: by the meter's clock five intervals have ended; the rest read 0 and are not entries"
+    },
+    {
+      "profile": "elite_440",
+      "profile_version": 2,
+      "parameter": 19,
+      "register_key": "voltage_average",
+      "stamp_words": [
+        49024,
+        18716
+      ],
+      "interval_words": [
+        60
+      ],
+      "clock_words": [
+        59824,
+        18716
+      ],
+      "values_words": [
+        58982,
+        17263,
+        58982,
+        17264,
+        58982,
+        17265,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "interval_s": 3600,
+      "entries": [
+        {
+          "meter_time": "2026-11-14T00:00:00",
+          "value": "239.9"
+        },
+        {
+          "meter_time": "2026-11-14T01:00:00",
+          "value": "240.9"
+        },
+        {
+          "meter_time": "2026-11-14T02:00:00",
+          "value": "241.9"
+        }
+      ],
+      "not_finite": [],
+      "not_ended": 21,
+      "why": "an interval ending exactly at the meter's clock has ended"
+    },
+    {
+      "profile": "elite_500",
+      "profile_version": 2,
+      "parameter": 4,
+      "register_key": "active_energy_import",
+      "stamp_words": [
+        12937,
+        3968
+      ],
+      "interval_words": [
+        30
+      ],
+      "values_words": [
+        36831,
+        17055,
+        32768,
+        17008,
+        0,
+        17009,
+        32768,
+        17009,
+        0,
+        17010,
+        32768,
+        17010,
+        0,
+        17011,
+        32768,
+        17011,
+        0,
+        17012,
+        32768,
+        17012,
+        0,
+        17013,
+        32768,
+        17013,
+        0,
+        17014,
+        32768,
+        17014,
+        0,
+        17015,
+        32768,
+        17015,
+        0,
+        17016,
+        32768,
+        17016,
+        0,
+        17017,
+        32768,
+        17017,
+        0,
+        17018,
+        32768,
+        17018,
+        0,
+        17019,
+        32768,
+        17019,
+        0,
+        17020,
+        32768,
+        17020,
+        0,
+        17021,
+        32768,
+        17021,
+        0,
+        17022,
+        32768,
+        17022,
+        0,
+        17023,
+        32768,
+        17023,
+        0,
+        17024,
+        16384,
+        17024,
+        32768,
+        17024,
+        49152,
+        17024,
+        0,
+        17025,
+        16384,
+        17025,
+        32768,
+        17025,
+        49152,
+        17025,
+        0,
+        17026,
+        16384,
+        17026,
+        32768,
+        17026,
+        49152,
+        17026,
+        0,
+        17027,
+        16384,
+        17027,
+        32768,
+        17027,
+        49152,
+        17027
+      ],
+      "interval_s": 1800,
+      "entries": [
+        {
+          "meter_time": "2026-11-13T00:00:00",
+          "value": "79.781"
+        },
+        {
+          "meter_time": "2026-11-13T00:30:00",
+          "value": "60.125"
+        },
+        {
+          "meter_time": "2026-11-13T01:00:00",
+          "value": "60.25"
+        },
+        {
+          "meter_time": "2026-11-13T01:30:00",
+          "value": "60.375"
+        },
+        {
+          "meter_time": "2026-11-13T02:00:00",
+          "value": "60.5"
+        },
+        {
+          "meter_time": "2026-11-13T02:30:00",
+          "value": "60.625"
+        },
+        {
+          "meter_time": "2026-11-13T03:00:00",
+          "value": "60.75"
+        },
+        {
+          "meter_time": "2026-11-13T03:30:00",
+          "value": "60.875"
+        },
+        {
+          "meter_time": "2026-11-13T04:00:00",
+          "value": "61"
+        },
+        {
+          "meter_time": "2026-11-13T04:30:00",
+          "value": "61.125"
+        },
+        {
+          "meter_time": "2026-11-13T05:00:00",
+          "value": "61.25"
+        },
+        {
+          "meter_time": "2026-11-13T05:30:00",
+          "value": "61.375"
+        },
+        {
+          "meter_time": "2026-11-13T06:00:00",
+          "value": "61.5"
+        },
+        {
+          "meter_time": "2026-11-13T06:30:00",
+          "value": "61.625"
+        },
+        {
+          "meter_time": "2026-11-13T07:00:00",
+          "value": "61.75"
+        },
+        {
+          "meter_time": "2026-11-13T07:30:00",
+          "value": "61.875"
+        },
+        {
+          "meter_time": "2026-11-13T08:00:00",
+          "value": "62"
+        },
+        {
+          "meter_time": "2026-11-13T08:30:00",
+          "value": "62.125"
+        },
+        {
+          "meter_time": "2026-11-13T09:00:00",
+          "value": "62.25"
+        },
+        {
+          "meter_time": "2026-11-13T09:30:00",
+          "value": "62.375"
+        },
+        {
+          "meter_time": "2026-11-13T10:00:00",
+          "value": "62.5"
+        },
+        {
+          "meter_time": "2026-11-13T10:30:00",
+          "value": "62.625"
+        },
+        {
+          "meter_time": "2026-11-13T11:00:00",
+          "value": "62.75"
+        },
+        {
+          "meter_time": "2026-11-13T11:30:00",
+          "value": "62.875"
+        },
+        {
+          "meter_time": "2026-11-13T12:00:00",
+          "value": "63"
+        },
+        {
+          "meter_time": "2026-11-13T12:30:00",
+          "value": "63.125"
+        },
+        {
+          "meter_time": "2026-11-13T13:00:00",
+          "value": "63.25"
+        },
+        {
+          "meter_time": "2026-11-13T13:30:00",
+          "value": "63.375"
+        },
+        {
+          "meter_time": "2026-11-13T14:00:00",
+          "value": "63.5"
+        },
+        {
+          "meter_time": "2026-11-13T14:30:00",
+          "value": "63.625"
+        },
+        {
+          "meter_time": "2026-11-13T15:00:00",
+          "value": "63.75"
+        },
+        {
+          "meter_time": "2026-11-13T15:30:00",
+          "value": "63.875"
+        },
+        {
+          "meter_time": "2026-11-13T16:00:00",
+          "value": "64"
+        },
+        {
+          "meter_time": "2026-11-13T16:30:00",
+          "value": "64.125"
+        },
+        {
+          "meter_time": "2026-11-13T17:00:00",
+          "value": "64.25"
+        },
+        {
+          "meter_time": "2026-11-13T17:30:00",
+          "value": "64.375"
+        },
+        {
+          "meter_time": "2026-11-13T18:00:00",
+          "value": "64.5"
+        },
+        {
+          "meter_time": "2026-11-13T18:30:00",
+          "value": "64.625"
+        },
+        {
+          "meter_time": "2026-11-13T19:00:00",
+          "value": "64.75"
+        },
+        {
+          "meter_time": "2026-11-13T19:30:00",
+          "value": "64.875"
+        },
+        {
+          "meter_time": "2026-11-13T20:00:00",
+          "value": "65"
+        },
+        {
+          "meter_time": "2026-11-13T20:30:00",
+          "value": "65.125"
+        },
+        {
+          "meter_time": "2026-11-13T21:00:00",
+          "value": "65.25"
+        },
+        {
+          "meter_time": "2026-11-13T21:30:00",
+          "value": "65.375"
+        },
+        {
+          "meter_time": "2026-11-13T22:00:00",
+          "value": "65.5"
+        },
+        {
+          "meter_time": "2026-11-13T22:30:00",
+          "value": "65.625"
+        },
+        {
+          "meter_time": "2026-11-13T23:00:00",
+          "value": "65.75"
+        },
+        {
+          "meter_time": "2026-11-13T23:30:00",
+          "value": "65.875"
+        }
+      ],
+      "not_finite": [],
+      "not_ended": 0,
+      "why": "a 500's import per half hour"
+    },
+    {
+      "profile": "elite_500",
+      "profile_version": 2,
+      "parameter": 9,
+      "register_key": "apparent_energy_import",
+      "stamp_words": [
+        12938,
+        24832
+      ],
+      "interval_words": [
+        15
+      ],
+      "clock_words": [
+        12938,
+        26692
+      ],
+      "values_words": [
+        0,
+        16712,
+        0,
+        16728,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "interval_s": 900,
+      "entries": [
+        {
+          "meter_time": "2026-11-14T00:00:00",
+          "value": "12.5"
+        },
+        {
+          "meter_time": "2026-11-14T00:15:00",
+          "value": "13.5"
+        }
+      ],
+      "not_finite": [],
+      "not_ended": 94,
+      "why": "the current day at 15 minutes: two intervals have ended"
+    }
+  ],
+  "no_value": [
+    {
+      "profile": "elite_440",
+      "profile_version": 2,
+      "field": "meter_clock",
+      "raw_words": [
+        1
+      ],
+      "error": "wrong_word_count",
+      "why": "one word for a stamp"
+    },
+    {
+      "profile": "elite_500",
+      "profile_version": 2,
+      "field": "history.stamp",
+      "raw_words": [
+        0,
+        0,
+        0
+      ],
+      "error": "wrong_word_count",
+      "why": "three words for a stamp"
+    },
+    {
+      "profile": "elite_440",
+      "profile_version": 2,
+      "field": "history.mask",
+      "raw_words": [
+        0,
+        0
+      ],
+      "error": "wrong_word_count",
+      "why": "two words for a u16 mask"
+    },
+    {
+      "profile": "elite_500",
+      "profile_version": 2,
+      "field": "load_survey.mask",
+      "raw_words": [
+        0,
+        115
+      ],
+      "error": "wrong_word_count",
+      "why": "two words for a u64 mask"
+    },
+    {
+      "profile": "elite_440",
+      "profile_version": 2,
+      "field": "load_survey.interval",
+      "raw_words": [
+        0
+      ],
+      "error": "zero_interval",
+      "why": "an interval of 0 minutes"
+    },
+    {
+      "profile": "elite_440",
+      "profile_version": 2,
+      "field": "load_survey.interval",
+      "raw_words": [
+        7
+      ],
+      "error": "interval_not_dividing_a_day",
+      "why": "7 minutes does not divide a day"
+    },
+    {
+      "profile": "elite_440",
+      "profile_version": 2,
+      "field": "load_survey.values",
+      "raw_words": [
+        0,
+        0,
+        0
+      ],
+      "error": "wrong_word_count",
+      "why": "an odd number of words for f32 values"
+    }
+  ]
+}

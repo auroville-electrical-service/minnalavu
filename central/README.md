@@ -79,6 +79,12 @@ Every reading and missed read names a profile version and a register of it
 raw words are recoverable from the value and the decode. Nothing in the
 catalog is ever updated or deleted (triggers refuse it, even for the owner).
 
+`store.profile_stored`: per version, each stored quantity of its `stored`
+section by store and register key, with its table, address (history and
+snapshot) or parameter number (load survey), decode, unit and kind. It
+refuses a `cumulative` quantity in the load survey and an `interval` one in
+any other store: only a cumulative quantity is ever differenced as energy.
+
 Load it as the owner after migrating, and again whenever a profile gains a
 version:
 
@@ -88,10 +94,11 @@ version:
 Every file, profiles and bucket versions, is loaded in one transaction. A
 bucket version already loaded is left as it is when its bounds are the same,
 and refused otherwise. A profile version already loaded is left as
-it is when its file still names the same registers with the same decode,
-address, unit and kind (a change to `verified_on_device` or a source is no
-change), and refused otherwise, loading nothing: a loaded version never
-changes, so a correction is a new version.
+it is when its file still names the same registers and stored quantities
+with the same decode, address or parameter, unit and kind (a change to
+`verified_on_device` or a source is no change), and refused otherwise,
+loading nothing: a loaded version never changes, so a correction is a new
+version.
 
 ## Request latency
 

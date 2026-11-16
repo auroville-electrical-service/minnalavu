@@ -133,7 +133,7 @@ CREATE FUNCTION pg_temp.reading(collector text, serial text, at timestamptz) RET
 LANGUAGE sql AS $$
   INSERT INTO store.readings
   SELECT serial, 'active_energy_import', at, 1.0, 'elite_440', '10.0.0.1', 502, 1, collector,
-         b.bid, 'ELITE440-445', 1
+         b.bid, 'ELITE440-445', 2
   FROM b WHERE b.cid = collector
 $$;
 

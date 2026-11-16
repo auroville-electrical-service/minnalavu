@@ -34,7 +34,7 @@ LANGUAGE sql AS $$
     (meter_serial, register_key, read_at, value, profile, profile_version, endpoint_host,
      endpoint_port, unit_id, product_code, collector_id, batch_id)
   SELECT 'SQLP-' || host, 'active_energy_import', now() - ago - i * interval '1 minute', 1,
-         'elite_440', 1, host, 502, 1, 'ELITE440-445', who, b.bid
+         'elite_440', 2, host, 502, 1, 'ELITE440-445', who, b.bid
   FROM generate_series(0, n - 1) i
   JOIN b ON b.collector = who
 $$;
@@ -48,7 +48,7 @@ LANGUAGE sql AS $$
     (meter_serial, register_key, read_at, reason, attempts, profile, profile_version,
      endpoint_host, endpoint_port, unit_id, collector_id, batch_id)
   SELECT NULL, 'active_energy_import', now() - ago - i * interval '1 minute' - interval '1 second',
-         reason, 3, 'elite_440', 1, host, 502, 1, who, b.bid
+         reason, 3, 'elite_440', 2, host, 502, 1, who, b.bid
   FROM generate_series(0, n - 1) i
   JOIN b ON b.collector = who
 $$;

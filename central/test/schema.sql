@@ -11,7 +11,7 @@
 BEGIN;
 
 SELECT admin.create_collector('sqltest_schema');
-SELECT admin.load_profile(jsonb_set(:'p440', '{version}', '2'));
+SELECT admin.load_profile(jsonb_set(:'p440', '{version}', '3'));
 
 SELECT pg_temp.ok(
   pg_temp.ingest_error('collector_sqltest_schema', :'basic') = 'ok',

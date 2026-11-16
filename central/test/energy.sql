@@ -50,7 +50,7 @@ FROM b WHERE name = 'a_old';
 -- A reading `after` 2026-11-01 00:00Z, in batch `batch` and by its collector.
 CREATE FUNCTION pg_temp.reading(serial text, register text, after interval, value numeric,
                                 batch text, profile text DEFAULT 'elite_440',
-                                version bigint DEFAULT 1)
+                                version bigint DEFAULT 2)
 RETURNS void
 LANGUAGE sql AS $$
   INSERT INTO store.readings
