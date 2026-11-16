@@ -12,9 +12,9 @@ BEGIN;
 
 SELECT admin.create_collector('sqltest_cfg');
 
--- Register the config's first endpoint, its first meter's unit as a target,
--- and the serial there as a meter placed at it when the config names one, as
--- the polling config would be held here, and undo it; the SQLSTATE, '00000'
+-- Register the config's first endpoint, its copy window, its first meter's
+-- unit as a target, and the serial there as a meter placed at it when the
+-- config names one, as the polling config would be held here, and undo it; the SQLSTATE, '00000'
 -- if it held.
 CREATE FUNCTION pg_temp.register(config jsonb) RETURNS text
 LANGUAGE plpgsql AS $$
@@ -31,7 +31,11 @@ BEGIN
     retries => (e ->> 'retries')::integer, busy_backoff_ms => (e ->> 'busy_backoff_ms')::integer,
     reconnect_backoff_min_ms => (e #>> '{reconnect_backoff_ms,min}')::integer,
     reconnect_backoff_max_ms => (e #>> '{reconnect_backoff_ms,max}')::integer,
-    interval_ms => (e ->> 'interval_ms')::integer);
+    interval_ms => (e ->> 'interval_ms')::integer, copy => (e ->> 'copy')::boolean);
+  PERFORM admin.set_copy_window(
+    collector_id => 'sqltest_cfg', valid_from => '2026-01-01Z',
+    start_time => (config #>> '{copy_window,start}')::time,
+    end_time => (config #>> '{copy_window,end}')::time);
   PERFORM admin.register_target(
     endpoint_id => 'sqltest_cfg_ep', unit_id => (m ->> 'unit_id')::integer,
     valid_from => '2026-01-01Z', profile => m ->> 'profile',

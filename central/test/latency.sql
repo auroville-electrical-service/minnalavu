@@ -313,7 +313,7 @@ SELECT admin.change_endpoint(
   collector_id => 'sqltest_lat_b', host => '10.0.9.1', port => 502, framing => 'tcp',
   polled_by_other_system => false, timeout_ms => 1000, max_timeouts => 3, retries => 2,
   busy_backoff_ms => 500, reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000,
-  interval_ms => 600000);
+  interval_ms => 600000, copy => false);
 
 CREATE FUNCTION pg_temp.latency_on(host text, unit integer, days_ago integer, ms integer)
 RETURNS void

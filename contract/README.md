@@ -42,8 +42,11 @@ What the collector and the server share. Nothing else is shared between them.
   ranges and patterns from it when it compiles; the registry's checks are
   tested against it. Rules a schema cannot state (each endpoint and serial
   once, each unit id once per endpoint, a backoff's max no less than its min,
-  a profile the collector loaded, a serial that fits its profile) are in its
-  description, and in the cases below.
+  a profile the collector loaded, a serial that fits its profile, a copy
+  window whose start and end differ) are in its description, and in the
+  cases below. Its `copy_window` is in the collector's local wall-clock time,
+  and may cross midnight; each endpoint's `copy` says whether its meters'
+  stored entries are copied in it.
 - `tools/`: scripts that compute fixtures independently of any collector.
   `register_decode.py` writes `register-decode.v1.json`
   (`uv run --script contract/tools/register_decode.py`, from the repo root),

@@ -9,8 +9,8 @@ defmodule Alavi.ConfigKeeperTest do
   @moduletag :tmp_dir
   @moduletag :capture_log
 
-  defp document(port, meters \\ [meter(1, "elite_440")]),
-    do: %{"schema_version" => 1, "endpoints" => [endpoint(port, "tcp", meters)]}
+  defp served_document(port, meters \\ [meter(1, "elite_440")]),
+    do: document([endpoint(port, "tcp", meters)])
 
   defp digest!(document) do
     {:ok, digest} = Digest.digest(document)
@@ -21,7 +21,7 @@ defmodule Alavi.ConfigKeeperTest do
   # applied (the test subscribes) and report cast to the status, is sent to the test.
   defp keeper!(dir, served) do
     test = self()
-    start = document(5020)
+    start = served_document(5020)
     {:ok, config} = Config.parse(start, profiles())
 
     fetch = fn ->
@@ -63,7 +63,7 @@ defmodule Alavi.ConfigKeeperTest do
 
     test "another digest: the served config is fetched, saved, applied and reported",
          %{tmp_dir: dir} do
-      new = document(5021)
+      new = served_document(5021)
       {keeper, _digest} = keeper!(dir, served!({:ok, new}))
       digest = digest!(new)
 
@@ -80,7 +80,7 @@ defmodule Alavi.ConfigKeeperTest do
 
     test "a config that does not parse is refused, kept from, and not fetched again",
          %{tmp_dir: dir} do
-      bad = document(5021, [meter(1, "no_such_profile")])
+      bad = served_document(5021, [meter(1, "no_such_profile")])
       {keeper, digest} = keeper!(dir, served!({:ok, bad}))
       refused = digest!(bad)
 
@@ -99,7 +99,7 @@ defmodule Alavi.ConfigKeeperTest do
 
     test "a refusal is cleared by a config applied in its place, or by the server serving the one applied again",
          %{tmp_dir: dir} do
-      bad = document(5021, [meter(1, "no_such_profile")])
+      bad = served_document(5021, [meter(1, "no_such_profile")])
       served = served!({:ok, bad})
       {keeper, digest} = keeper!(dir, served)
 
@@ -107,13 +107,13 @@ defmodule Alavi.ConfigKeeperTest do
       assert answer(keeper, digest) == %{digest: digest, refused: nil}
 
       assert %{refused: %{}} = answer(keeper, digest!(bad))
-      good = document(5022)
+      good = served_document(5022)
       serve(served, {:ok, good})
       assert answer(keeper, digest!(good)) == %{digest: digest!(good), refused: nil}
     end
 
     test "the config fetched is judged by its own digest, not the answer's", %{tmp_dir: dir} do
-      new = document(5021)
+      new = served_document(5021)
       {keeper, _digest} = keeper!(dir, served!({:ok, new}))
       stale = String.duplicate("0", 64)
 
@@ -123,7 +123,7 @@ defmodule Alavi.ConfigKeeperTest do
     test "a fetch that fails is no refusal: the next answer fetches again", %{tmp_dir: dir} do
       served = served!({:error, "HTTP 503: down"})
       {keeper, digest} = keeper!(dir, served)
-      new = document(5021)
+      new = served_document(5021)
 
       assert answer(keeper, digest!(new)) == %{digest: digest, refused: nil}
       assert_received :fetched
@@ -146,7 +146,7 @@ defmodule Alavi.ConfigKeeperTest do
     test "a config that cannot be saved is not applied, and fetched again on the next answer",
          %{tmp_dir: dir} do
       File.write!(Path.join(dir, "config"), "a file, not a directory")
-      new = document(5021)
+      new = served_document(5021)
       {keeper, digest} = keeper!(dir, served!({:ok, new}))
 
       assert answer(keeper, digest!(new)) == %{digest: digest, refused: nil}
@@ -160,7 +160,7 @@ defmodule Alavi.ConfigKeeperTest do
   describe "subscribe/1" do
     test "each subscriber is given the config applied now, then each one applied after it",
          %{tmp_dir: dir} do
-      new = document(5021)
+      new = served_document(5021)
       {keeper, digest} = keeper!(dir, served!({:ok, new}))
       test = self()
 
@@ -177,14 +177,14 @@ defmodule Alavi.ConfigKeeperTest do
 
     test "a subscriber that exits is sent nothing more, and subscribing twice sends once",
          %{tmp_dir: dir} do
-      served = served!({:ok, document(5021)})
+      served = served!({:ok, served_document(5021)})
       {keeper, _digest} = keeper!(dir, served)
       ConfigKeeper.subscribe(keeper)
       gone = spawn(fn -> ConfigKeeper.subscribe(keeper) end)
       ref = Process.monitor(gone)
       assert_receive {:DOWN, ^ref, :process, ^gone, _}
 
-      answer(keeper, digest!(document(5021)))
+      answer(keeper, digest!(served_document(5021)))
       assert_received {:alavi_config, _, _}
       refute_received {:alavi_config, _, _}
       assert Process.alive?(keeper)

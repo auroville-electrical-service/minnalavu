@@ -54,8 +54,17 @@ LANGUAGE sql AS $$
     retries => (e ->> 'retries')::integer, busy_backoff_ms => (e ->> 'busy_backoff_ms')::integer,
     reconnect_backoff_min_ms => (e #>> '{reconnect_backoff_ms,min}')::integer,
     reconnect_backoff_max_ms => (e #>> '{reconnect_backoff_ms,max}')::integer,
-    interval_ms => (e ->> 'interval_ms')::integer)
+    interval_ms => (e ->> 'interval_ms')::integer, copy => (e ->> 'copy')::boolean)
 $$;
+
+-- The config's copy window, two days ago, and another from tomorrow.
+SELECT admin.set_copy_window(collector_id => 'sqltest_srv_a', valid_from => now() - interval '2 days',
+  start_time => (:'basic'::jsonb #>> '{copy_window,start}')::time,
+  end_time => (:'basic'::jsonb #>> '{copy_window,end}')::time);
+SELECT admin.set_copy_window(collector_id => 'sqltest_srv_a', valid_from => now() + interval '1 day',
+  start_time => '04:00', end_time => '05:00');
+SELECT admin.set_copy_window(collector_id => 'sqltest_srv_b', valid_from => now() - interval '2 days',
+  start_time => '23:30', end_time => '00:05');
 
 -- Each of a config's endpoints as sqltest_srv_<i>, with its meters as
 -- targets and their serials as meters placed there, two days ago.
@@ -111,9 +120,13 @@ SELECT admin.register_target(endpoint_id => 'sqltest_srv_b1', unit_id => 9,
 -- Serving
 
 SELECT pg_temp.is(pg_temp.config_as('collector_sqltest_srv_a'), :'basic'::jsonb,
-  'a collector is served the config the registry holds for it now: its endpoints and targets '
-  || 'in service, the serial placed at each, an interval only where a target has its own, '
-  || 'and an endpoint another system polls as it is');
+  'a collector is served the config the registry holds for it now: its copy window in force, '
+  || 'its endpoints and targets in service, whether each copies, the serial placed at each, '
+  || 'an interval only where a target has its own, and an endpoint another system polls as it is');
+
+SELECT pg_temp.is(pg_temp.config_as('collector_sqltest_srv_b') -> 'copy_window',
+  '{"start": "23:30", "end": "00:05"}'::jsonb,
+  'a copy window is served in hours and minutes, one across midnight as it is');
 
 SELECT pg_temp.is(
   pg_temp.config_as('collector_sqltest_srv_b') #>> '{endpoints,0,host}'
@@ -136,7 +149,8 @@ SELECT pg_temp.is(
 
 SELECT pg_temp.is(pg_temp.config_as('collector_sqltest_srv_c'),
   '{"schema_version": 1, "endpoints": []}'::jsonb,
-  'a collector with no endpoint in service is served a config with none, for it to refuse');
+  'a collector with no endpoint in service and no copy window is served a config with neither, '
+  || 'for it to refuse');
 
 SELECT pg_temp.endpoint('sqltest_srv_c1', 'sqltest_srv_c', :'basic'::jsonb #> '{endpoints,1}',
   now() - interval '1 day');
@@ -183,8 +197,8 @@ SELECT pg_temp.ok(
 
 -- The backlog's config, and config_refused
 
-\set applied '"89b20b78a45d85313e9e7ef0fe3772808a642480722d0e36f04e6b8d58ed2333"'
-\set refused '"9ac24ff085fb90434c2ce98647cce379a3de2df6d941206cead503702fa1d0d0"'
+\set applied '"2c388b5c1378b6a36c1f728314a7fbe63c02fb5a86a3ce3cf6ccbf9cfacbdbf7"'
+\set refused '"2cf772dc2fe3fa41bcb78fc199dbecc33367d586949aff93180095504be3205d"'
 
 SELECT pg_temp.ingest_as('collector_sqltest_srv_a',
   pg_temp.heartbeat(:'batch', 'd0000000-0000-4000-8000-000000000004',

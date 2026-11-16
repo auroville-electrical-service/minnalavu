@@ -40,6 +40,13 @@ defmodule Alavi.EndToEndTest do
   defp collector!(id) do
     role = "collector_" <> id
     ^role = sql!("SELECT to_json(admin.create_collector('#{id}'))")
+
+    # The copy window of `Alavi.PollerCase.document/1`, so a local config can match the served one.
+    sql!("""
+    SELECT to_json(admin.set_copy_window(collector_id => '#{id}', valid_from => '2026-01-01Z',
+      start_time => '02:00', end_time => '03:00'))
+    """)
+
     {token, 0} = System.cmd("bash", [@token_script, id, "1"])
     String.trim(token)
   end
@@ -519,7 +526,7 @@ defmodule Alavi.EndToEndTest do
     {id, token} = new_collector!()
     {_sim, port} = start_sim!(:tcp)
     endpoints = [endpoint(port, "tcp", [meter(1, "elite_440")], %{"interval_ms" => 300})]
-    {:ok, local} = Digest.digest(%{"schema_version" => 1, "endpoints" => endpoints})
+    {:ok, local} = Digest.digest(document(endpoints))
 
     sql!("""
     SELECT to_json(admin.register_endpoint(
@@ -642,7 +649,7 @@ defmodule Alavi.EndToEndTest do
     end
 
     local = [endpoint(kept, "tcp", [meter(1, "elite_440")], %{"interval_ms" => 300})]
-    {:ok, digest} = Digest.digest(%{"schema_version" => 1, "endpoints" => local})
+    {:ok, digest} = Digest.digest(document(local))
     keeper = [digest: digest, profiles: profiles(), name: Alavi.ConfigKeeper]
 
     collector =

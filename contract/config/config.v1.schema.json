@@ -2,16 +2,31 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://minnalavu.invalid/contract/config.v1.schema.json",
   "title": "Collector polling config, schema version 1",
-  "description": "What a collector polls and how: the collector's local file and the config the server serves are this one format. The collector takes its fields and limits from this file, and the registry's checks are tested against it. Rules a JSON Schema cannot state are the parser's (and the registry's, where it stores the value): an endpoint's host and port once per config, a unit_id once per endpoint, a serial once per config, reconnect_backoff_ms.max no less than its min, a profile among those the collector loaded that reads the serial and the product code, and a serial no longer than its profile's serial registers hold.",
+  "description": "What a collector polls and how: the collector's local file and the config the server serves are this one format. The collector takes its fields and limits from this file, and the registry's checks are tested against it. Rules a JSON Schema cannot state are the parser's (and the registry's, where it stores the value): an endpoint's host and port once per config, a unit_id once per endpoint, a serial once per config, reconnect_backoff_ms.max no less than its min, a profile among those the collector loaded that reads the serial and the product code, a serial no longer than its profile's serial registers hold, and a copy window whose start and end differ.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "endpoints"],
+  "required": ["schema_version", "copy_window", "endpoints"],
   "properties": {
     "schema_version": { "const": 1 },
+    "copy_window": {
+      "description": "When the collector copies the stored entries of the endpoints whose copy is true, each day by its own local wall clock: from start until end. An end before the start crosses midnight: 23:30 to 00:30 is an hour.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end"],
+      "properties": {
+        "start": { "$ref": "#/$defs/wall_time" },
+        "end": { "$ref": "#/$defs/wall_time" }
+      }
+    },
     "endpoints": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/endpoint" } }
   },
   "$defs": {
     "ms": { "type": "integer", "minimum": 1, "maximum": 86400000 },
+    "wall_time": {
+      "description": "A time of day, hours and minutes, on a 24-hour clock.",
+      "type": "string",
+      "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+    },
     "endpoint": {
       "description": "One IP endpoint in front of an RS-485 chain.",
       "type": "object",
@@ -26,6 +41,7 @@
         "busy_backoff_ms",
         "reconnect_backoff_ms",
         "interval_ms",
+        "copy",
         "meters"
       ],
       "properties": {
@@ -75,6 +91,10 @@
         "interval_ms": {
           "description": "How often each meter is read, unless the meter gives its own.",
           "$ref": "#/$defs/ms"
+        },
+        "copy": {
+          "description": "Copy its meters' stored entries (billing histories, daily snapshots, load-survey days) within the copy window.",
+          "type": "boolean"
         },
         "meters": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/meter" } }
       },

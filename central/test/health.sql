@@ -115,7 +115,7 @@ SELECT admin.change_endpoint(endpoint_id => 'sqlh_m_ep', valid_from => now() - i
   collector_id => 'sqlh_d', host => '10.0.0.3', port => 502, framing => 'tcp',
   polled_by_other_system => false, timeout_ms => 1000, max_timeouts => 3, retries => 2,
   busy_backoff_ms => 500, reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000,
-  interval_ms => 900000);
+  interval_ms => 900000, copy => false);
 SELECT pg_temp.target('sqlh_m_ep', u, '2 days', NULL) FROM unnest(ARRAY[1, 2]) u;
 SELECT admin.register_meter(serial => 'SQLT-0002', valid_from => now() - interval '2 days',
   endpoint_id => 'sqlh_m_ep', unit_id => 1);

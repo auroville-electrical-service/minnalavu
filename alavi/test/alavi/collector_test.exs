@@ -309,9 +309,9 @@ defmodule Alavi.CollectorTest do
       # Polled often, so the uplink started again has batches, and answers, soon.
       often = %{"interval_ms" => 200}
       start = [endpoint(port, "tcp", [meter(1, "elite_440")], often)]
-      {:ok, local} = Digest.digest(%{"schema_version" => 1, "endpoints" => start})
+      {:ok, local} = Digest.digest(document(start))
       new = endpoint(added, "tcp", [meter(1, "elite_440", %{"serial" => "NEW-1"})], often)
-      served = %{"schema_version" => 1, "endpoints" => start ++ [new]}
+      served = document(start ++ [new])
       {:ok, digest} = Digest.digest(served)
       id = "7d2c1f0e-4b3a-4c5d-8e6f-1a2b3c4d5e6f"
       tag = System.unique_integer([:positive])
@@ -554,10 +554,7 @@ defmodule Alavi.CollectorTest do
 
   describe "load/2" do
     setup %{tmp_dir: dir} do
-      config = %{
-        "schema_version" => 1,
-        "endpoints" => [endpoint(5020, "tcp", [meter(1, "elite_440")])]
-      }
+      config = document([endpoint(5020, "tcp", [meter(1, "elite_440")])])
 
       path = Path.join(dir, "polling.json")
       File.write!(path, JSON.encode!(config))
@@ -667,10 +664,7 @@ defmodule Alavi.CollectorTest do
 
     test "the config last served, saved under the buffer's dir, wins over the local file",
          %{settings: settings} do
-      served = %{
-        "schema_version" => 1,
-        "endpoints" => [endpoint(5021, "tcp", [meter(2, "elite_500")])]
-      }
+      served = document([endpoint(5021, "tcp", [meter(2, "elite_500")])])
 
       :ok = Saved.save(settings.buffer.dir, served)
       assert {:ok, opts} = Collector.load(settings, @linux)
@@ -680,10 +674,7 @@ defmodule Alavi.CollectorTest do
 
     test "a saved config the loaded profiles refuse stops startup, naming the file",
          %{settings: settings} do
-      served = %{
-        "schema_version" => 1,
-        "endpoints" => [endpoint(5021, "tcp", [meter(2, "no_such_profile")])]
-      }
+      served = document([endpoint(5021, "tcp", [meter(2, "no_such_profile")])])
 
       :ok = Saved.save(settings.buffer.dir, served)
       assert {:error, message} = Collector.load(settings, @linux)

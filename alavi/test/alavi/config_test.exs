@@ -6,9 +6,9 @@ defmodule Alavi.ConfigTest do
   alias Alavi.ConfigCases
 
   alias Alavi.Config
-  alias Alavi.Config.{Endpoint, Meter}
+  alias Alavi.Config.{CopyWindow, Endpoint, Meter}
 
-  defp doc(endpoints), do: %{"schema_version" => 1, "endpoints" => endpoints}
+  defp doc(endpoints), do: document(endpoints)
 
   defp valid,
     do:
@@ -31,6 +31,17 @@ defmodule Alavi.ConfigTest do
       assert hd(tcp.meters).profile.name == "elite_440"
     end
 
+    test "parses the copy window into times of day, and each endpoint's copy" do
+      json = valid() |> put_in(["endpoints", Access.at(1), "copy"], true)
+      json = put_in(json, ["copy_window"], %{"start" => "23:30", "end" => "00:30"})
+
+      assert {:ok, %Config{copy_window: window, endpoints: [tcp, rtu]}} =
+               Config.parse(json, profiles())
+
+      assert window == %CopyWindow{start: ~T[23:30:00], end: ~T[00:30:00]}
+      assert {tcp.copy, rtu.copy} == {false, true}
+    end
+
     # {name, path into the valid document, new value or :delete, expected error fragment}.
     @broken [
       {"schema version 2", ["schema_version"], 2, "schema_version 2"},
@@ -44,6 +55,15 @@ defmodule Alavi.ConfigTest do
        "max_timeouts must be"},
       {"rtu with max_timeouts", ["endpoints", 1, "max_timeouts"], 3,
        "endpoints[1]: max_timeouts applies only to framing tcp"},
+      {"no copy window", ["copy_window"], :delete,
+       "copy_window must be an object with start and end"},
+      {"a copy window time without its leading zero", ["copy_window", "start"], "2:00",
+       ~s(copy_window: start "2:00" is not a time of day as HH:MM on a 24-hour clock)},
+      {"a copy window at 24:00", ["copy_window", "end"], "24:00", ~s(copy_window: end "24:00")},
+      {"an empty copy window", ["copy_window", "end"], "02:00",
+       "copy_window: start and end are both 02:00"},
+      {"an endpoint without copy", ["endpoints", 1, "copy"], :delete,
+       "endpoints[1]: copy must be true or false"},
       {"a string flag", ["endpoints", 0, "polled_by_other_system"], "no",
        "polled_by_other_system must be true or false"},
       {"backoff max below min", ["endpoints", 0, "reconnect_backoff_ms", "max"], 5,

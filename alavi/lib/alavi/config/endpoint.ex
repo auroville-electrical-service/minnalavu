@@ -19,6 +19,7 @@ defmodule Alavi.Config.Endpoint do
     :retries,
     :busy_backoff_ms,
     :reconnect_backoff_ms,
+    :copy,
     :meters
   ]
   defstruct @enforce_keys
@@ -33,6 +34,7 @@ defmodule Alavi.Config.Endpoint do
           retries: non_neg_integer(),
           busy_backoff_ms: non_neg_integer(),
           reconnect_backoff_ms: %{min: pos_integer(), max: pos_integer()},
+          copy: boolean(),
           meters: [Meter.t(), ...]
         }
 
@@ -66,6 +68,7 @@ defmodule Alavi.Config.Endpoint do
          {:ok, busy} <- Fields.integer(entry, "busy_backoff_ms", @busy),
          {:ok, backoff} <- backoff(entry),
          {:ok, interval} <- Fields.integer(entry, "interval_ms", @interval),
+         {:ok, copy} <- Fields.boolean(entry, "copy"),
          {:ok, meters} <- Fields.each(entry, "meters", &Meter.parse(&1, interval, profiles)),
          :ok <- Fields.unique(meters, & &1.unit_id, "unit_id") do
       {:ok,
@@ -79,6 +82,7 @@ defmodule Alavi.Config.Endpoint do
          retries: retries,
          busy_backoff_ms: busy,
          reconnect_backoff_ms: backoff,
+         copy: copy,
          meters: meters
        }}
     end

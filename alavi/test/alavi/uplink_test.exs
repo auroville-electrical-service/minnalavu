@@ -7,6 +7,7 @@ defmodule Alavi.UplinkTest do
       eventually!: 1,
       refused: 0,
       endpoint: 4,
+      document: 1,
       meter: 2,
       profiles: 0
     ]
@@ -420,12 +421,10 @@ defmodule Alavi.UplinkTest do
       {:ok, target} =
         Target.parse("http://127.0.0.1:#{port}", @token, allow_http: true, cacerts: [])
 
-      start = %{
-        "schema_version" => 1,
-        "endpoints" => [
+      start =
+        document([
           endpoint(5020, "tcp", [meter(1, "elite_440")], %{"interval_ms" => interval_ms})
-        ]
-      }
+        ])
 
       {:ok, config} = Config.parse(start, profiles())
       {:ok, digest} = Digest.digest(start)
@@ -457,10 +456,7 @@ defmodule Alavi.UplinkTest do
 
     test "a new digest in an answer is fetched with the token, and the next backlog reports it",
          ctx do
-      served = %{
-        "schema_version" => 1,
-        "endpoints" => [endpoint(5021, "tcp", [meter(1, "elite_440")], %{"interval_ms" => 50})]
-      }
+      served = document([endpoint(5021, "tcp", [meter(1, "elite_440")], %{"interval_ms" => 50})])
 
       {:ok, new} = Digest.digest(served)
       server = server!([serving(served)])
@@ -487,10 +483,7 @@ defmodule Alavi.UplinkTest do
 
     test "a config applied sets the heartbeat interval, and with it a heartbeat is its config's",
          ctx do
-      served = %{
-        "schema_version" => 1,
-        "endpoints" => [endpoint(5021, "tcp", [meter(1, "elite_440")], %{"interval_ms" => 50})]
-      }
+      served = document([endpoint(5021, "tcp", [meter(1, "elite_440")], %{"interval_ms" => 50})])
 
       server = server!([serving(served)])
       {keeper, _start} = keeper!(ctx.tmp_dir, TestServer.port(server), 60_000)
@@ -507,7 +500,7 @@ defmodule Alavi.UplinkTest do
     end
 
     test "a refused config is reported in each backlog and not fetched again", ctx do
-      served = %{"schema_version" => 1, "endpoints" => []}
+      served = document([])
       {:ok, refused} = Digest.digest(served)
       server = server!([serving(served)])
       {keeper, start} = keeper!(ctx.tmp_dir, TestServer.port(server))

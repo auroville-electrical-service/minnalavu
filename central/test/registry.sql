@@ -109,7 +109,7 @@ SELECT admin.change_endpoint(
   endpoint_id => 'sqltest_ep_2', valid_from => '2026-05-01Z', collector_id => 'sqltest_reg_b',
   host => '10.1.0.5', port => 502, framing => 'rtu_over_tcp', polled_by_other_system => false,
   timeout_ms => 1000, max_timeouts => NULL, retries => 2, busy_backoff_ms => 500,
-  reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000, interval_ms => 900000);
+  reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000, interval_ms => 900000, copy => false);
 
 SELECT pg_temp.is(
   (SELECT string_agg(format('%s %s %s:%s %s', valid_from::date, collector_id, host, port, framing),
@@ -117,6 +117,44 @@ SELECT pg_temp.is(
    FROM registry.endpoint_history WHERE endpoint_id = 'sqltest_ep_2'),
   '2026-01-01 sqltest_reg_a 10.0.0.22:502 tcp, 2026-05-01 sqltest_reg_b 10.1.0.5:502 rtu_over_tcp',
   'an endpoint keeps its identity and history across a move to another collector');
+
+-- Copying: off for a new endpoint unless switched on, and stated by every change.
+SELECT pg_temp.endpoint('sqltest_ep_copy', '2026-01-01Z', 'sqltest_reg_a', '10.0.0.29');
+SELECT admin.change_endpoint(
+  endpoint_id => 'sqltest_ep_copy', valid_from => '2026-03-01Z', collector_id => 'sqltest_reg_a',
+  host => '10.0.0.29', port => 502, framing => 'tcp', polled_by_other_system => false,
+  timeout_ms => 1000, max_timeouts => 3, retries => 2, busy_backoff_ms => 500,
+  reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000, interval_ms => 900000,
+  copy => true);
+SELECT admin.retire_endpoint(endpoint_id => 'sqltest_ep_copy', valid_from => '2026-04-01Z');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s %s %s', valid_from::date,
+                            CASE WHEN in_service THEN 'in' ELSE 'retired' END,
+                            CASE WHEN copy THEN 'copies' ELSE 'copies nothing' END),
+                     ', ' ORDER BY valid_from)
+   FROM registry.endpoint_history WHERE endpoint_id = 'sqltest_ep_copy'),
+  '2026-01-01 in copies nothing, 2026-03-01 in copies, 2026-04-01 retired copies',
+  'an endpoint registered without copy copies nothing; a change switches copying on from '
+  || 'its valid_from; a retired endpoint keeps whether it copied');
+
+SELECT pg_temp.is(pg_temp.sqlstate_as('postgres', $q$SELECT admin.change_endpoint(
+    endpoint_id => 'sqltest_ep_copy', valid_from => '2026-05-01Z', collector_id => 'sqltest_reg_a',
+    host => '10.0.0.29', port => 502, framing => 'tcp', polled_by_other_system => false,
+    timeout_ms => 1000, max_timeouts => 3, retries => 2, busy_backoff_ms => 500,
+    reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000,
+    interval_ms => 900000)$q$),
+  '42883',
+  'a change that leaves copy out is refused, so it cannot switch copying off unseen');
+
+SELECT pg_temp.is(pg_temp.sqlstate_as('postgres', $q$SELECT admin.change_endpoint(
+    endpoint_id => 'sqltest_ep_copy', valid_from => '2026-05-01Z', collector_id => 'sqltest_reg_a',
+    host => '10.0.0.29', port => 502, framing => 'tcp', polled_by_other_system => false,
+    timeout_ms => 1000, max_timeouts => 3, retries => 2, busy_backoff_ms => 500,
+    reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000,
+    interval_ms => 900000, copy => NULL)$q$),
+  '23502',
+  'a change with copy NULL is refused');
 
 SELECT admin.register_meter(serial => 'SQLREG-0002', valid_from => '2026-01-01Z',
   endpoint_id => 'sqltest_ep_1', unit_id => 2);
@@ -211,7 +249,36 @@ FROM unnest(ARRAY[
        endpoint_id => 'sqltest_ep_2', valid_from => '2026-07-01Z', collector_id => 'sqltest_reg_b',
        host => '10.1.0.5', port => 502, framing => 'rtu_over_tcp', polled_by_other_system => false,
        timeout_ms => 1000, max_timeouts => 3, retries => 2, busy_backoff_ms => 500,
-       reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000, interval_ms => 900000)$q$
+       reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000, interval_ms => 900000, copy => false)$q$
+]) q;
+
+-- A collector's copy window, by its local wall clock.
+SELECT admin.set_copy_window(collector_id => 'sqltest_reg_a', valid_from => '2026-01-01Z',
+  start_time => '02:00', end_time => '03:00');
+SELECT admin.set_copy_window(collector_id => 'sqltest_reg_a', valid_from => '2026-03-01Z',
+  start_time => '23:30', end_time => '00:30');
+SELECT admin.set_copy_window(collector_id => 'sqltest_reg_a', valid_from => '2026-03-01Z',
+  start_time => '23:00', end_time => '00:30');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('[%s, %s) %s-%s', valid_from::date,
+                            coalesce(valid_to::date::text, 'open'), start_time, end_time),
+                     ', ' ORDER BY valid_from)
+   FROM registry.copy_window_history WHERE collector_id = 'sqltest_reg_a'),
+  '[2026-01-01, 2026-03-01) 02:00:00-03:00:00, [2026-03-01, open) 23:00:00-00:30:00',
+  'a collector''s copy window holds from its valid_from until the next, across midnight too; '
+  || 'of two from one valid_from, the one recorded last');
+
+SELECT pg_temp.is(pg_temp.sqlstate_as('postgres', q), '23514', 'out of range: ' || q)
+FROM unnest(ARRAY[
+  $q$SELECT admin.set_copy_window(collector_id => 'sqltest_reg_b', valid_from => '2026-01-01Z',
+       start_time => '24:00', end_time => '03:00')$q$,
+  $q$SELECT admin.set_copy_window(collector_id => 'sqltest_reg_b', valid_from => '2026-01-01Z',
+       start_time => '02:00', end_time => '03:00:30')$q$,
+  $q$SELECT admin.set_copy_window(collector_id => 'sqltest_reg_b', valid_from => '2026-01-01Z',
+       start_time => '02:00', end_time => '02:00')$q$,
+  $q$SELECT admin.set_copy_window(collector_id => 'sqltest_reg_b', valid_from => 'infinity',
+       start_time => '02:00', end_time => '03:00')$q$
 ]) q;
 
 SELECT pg_temp.is(pg_temp.sqlstate_as('postgres', q), 'P0001', 'the owner is refused: ' || q)
@@ -227,7 +294,10 @@ FROM unnest(ARRAY[
   'DELETE FROM registry.endpoint_versions',
   'DELETE FROM registry.meters',
   'DELETE FROM registry.endpoints',
-  'DELETE FROM registry.meter_swaps'
+  'DELETE FROM registry.meter_swaps',
+  'UPDATE registry.copy_window_versions SET start_time = $$04:00$$',
+  'DELETE FROM registry.copy_window_versions',
+  'TRUNCATE registry.copy_window_versions'
 ]) q;
 
 ROLLBACK;

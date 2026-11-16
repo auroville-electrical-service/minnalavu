@@ -206,7 +206,7 @@ holds from, which may be in the past:
       collector_id => 'pilot_01', host => '10.0.0.21', port => 502, framing => 'tcp',
       polled_by_other_system => false, timeout_ms => 1000, max_timeouts => 3, retries => 2,
       busy_backoff_ms => 500, reconnect_backoff_min_ms => 1000,
-      reconnect_backoff_max_ms => 60000, interval_ms => 900000);
+      reconnect_backoff_max_ms => 60000, interval_ms => 900000);   -- copies nothing
     SELECT admin.register_target(endpoint_id => 'site_a_chain_1', unit_id => 1,
       valid_from => '…', profile => 'elite_440', interval_ms => NULL);   -- NULL: the endpoint's
     SELECT admin.register_meter(serial => '…', valid_from => '…', endpoint_id => 'site_a_chain_1',
@@ -214,7 +214,15 @@ holds from, which may be in the past:
 
 - `admin.change_endpoint(…)`, `admin.change_target(…)`, `admin.change_meter(…)`:
   the same arguments as register; the whole new state (readdress, move,
-  reprofile, retime, correct).
+  reprofile, retime, correct). An endpoint copies its meters' stored entries
+  only when `copy => true`: `register_endpoint` takes it optionally, off when
+  left out, and `change_endpoint` requires it, so a change cannot switch
+  copying off unseen.
+- `admin.set_copy_window(collector_id, valid_from, start_time, end_time)`:
+  the window of the collector's local wall clock that copies run in, in
+  whole minutes, from `valid_from`; an end before the start crosses
+  midnight. A collector with no window in force is served a config without
+  one, which it refuses.
 - `admin.retire_endpoint(endpoint_id, valid_from)` (its targets must be
   retired first), `admin.retire_target(endpoint_id, unit_id, valid_from)` (its
   meter must be moved or retired first), `admin.retire_meter(serial, valid_from)`.
@@ -430,12 +438,13 @@ notice says only "look again": read `jobs.request_status`.
 
 `GET /rpc/collector_config` (or `POST` with `{}`), with a collector's token,
 answers with that collector's polling config as of now, in
-`contract/config/config.v1.schema.json`'s schema version 1: its endpoints in
-service, ordered by host (by its bytes) and port, `polled_by_other_system`
-as registered, each with its targets in service by unit id, each target's
+`contract/config/config.v1.schema.json`'s schema version 1: its copy window
+in force, as `HH:MM`; its endpoints in service, ordered by host (by its
+bytes) and port, `polled_by_other_system` and `copy` as registered, each with its targets in service by unit id, each target's
 profile, its interval only when it has its own, and the serial of the meter
 placed there when there is one. It is served as the registry holds it, valid
-or not: a collector with no endpoint in service gets none, and an endpoint
+or not: a collector with no copy window in force gets none, one with no
+endpoint in service gets none, and an endpoint
 with no target in service no meters, which the collector refuses. Nor is a
 serial checked against its profile's serial registers here; that is the
 collector's parser's. Any other role gets 403.

@@ -2,15 +2,18 @@ defmodule Alavi.Pollers.Applier do
   @moduledoc """
   Keeps an `Alavi.Pollers`' pollers to the config its keeper applies
   (`Alavi.ConfigKeeper.subscribe/1`), per endpoint by host and port: a poller
-  whose endpoint is unchanged carries on untouched; an endpoint new to the
-  config gets a poller; a poller whose endpoint changed or went is retired
-  (`Alavi.Poller.retire/2`), so it stops at its next round boundary, and a
-  changed one is then started again with its new settings. Each config
-  applied also goes to the status (`Alavi.Status.polling/2`).
+  whose endpoint and copy window are unchanged carries on untouched; an
+  endpoint new to the config gets a poller; a poller whose endpoint changed
+  or went, or whose copy window changed, is retired (`Alavi.Poller.retire/2`),
+  so it stops at its next round boundary, and a changed one is then started
+  again with its new settings. A change to the copy window alone so restarts
+  every poller. Each config applied also goes to the status
+  (`Alavi.Status.polling/2`).
 
-  What it compares is the endpoint each poller was started with, which the
-  supervisor holds, so a restart of either loses nothing: started again, it
-  retires afresh whatever polls what the config no longer says.
+  What it compares is the endpoint and copy window each poller was started
+  with, which the supervisor holds, so a restart of either loses nothing:
+  started again, it retires afresh whatever polls what the config no longer
+  says.
   """
 
   # contract: test/alavi/pollers/applier_test.exs "start_link/1"
@@ -22,7 +25,7 @@ defmodule Alavi.Pollers.Applier do
   alias Alavi.{Config, ConfigKeeper, Poller, Pollers, Status}
   alias Alavi.Config.Endpoint
 
-  @typedoc "`shared` is every poller's options but its `endpoint`."
+  @typedoc "`shared` is every poller's options but its `endpoint` and `copy_window`."
   @type option ::
           {:pollers, Supervisor.supervisor()}
           | {:keeper, GenServer.server()}
@@ -72,7 +75,8 @@ defmodule Alavi.Pollers.Applier do
   end
 
   defp settled(state) do
-    wanted = Map.new(state.config.endpoints, &{{&1.host, &1.port}, &1})
+    window = state.config.copy_window
+    wanted = Map.new(state.config.endpoints, &{{&1.host, &1.port}, {&1, window}})
     state = state.pollers |> Pollers.pollers() |> Enum.reduce(state, &settle(&1, &2, wanted))
 
     present =
@@ -83,10 +87,10 @@ defmodule Alavi.Pollers.Applier do
   end
 
   defp settle({{Poller, host, port} = id, child}, state, wanted) do
-    case {Map.fetch(wanted, {host, port}), child, endpoint(state.pollers, id)} do
+    case {Map.fetch(wanted, {host, port}), child, started(state.pollers, id)} do
       {{:ok, same}, pid, same} when is_pid(pid) -> kept(state, pid, id)
       {{:ok, same}, :restarting, same} -> state
-      {{:ok, %Endpoint{polled_by_other_system: true} = same}, :undefined, same} -> state
+      {{:ok, {%Endpoint{polled_by_other_system: true}, _} = same}, :undefined, same} -> state
       {{:ok, _new}, pid, _old} when is_pid(pid) -> retire(state, pid, id, :replaced)
       {:error, pid, _old} when is_pid(pid) -> retire(state, pid, id, :removed)
       {_wanted, _not_running, _old} -> remove(state, id)
@@ -122,15 +126,15 @@ defmodule Alavi.Pollers.Applier do
     state
   end
 
-  defp start(%Endpoint{host: host, port: port} = endpoint, state) do
-    {:ok, _child} =
-      Supervisor.start_child(state.pollers, {Poller, [{:endpoint, endpoint} | state.shared]})
+  defp start({%Endpoint{host: host, port: port} = endpoint, window}, state) do
+    opts = [{:endpoint, endpoint}, {:copy_window, window} | state.shared]
+    {:ok, _child} = Supervisor.start_child(state.pollers, {Poller, opts})
 
     Logger.info("alavi pollers: #{host}:#{port} started")
   end
 
-  defp endpoint(pollers, id) do
+  defp started(pollers, id) do
     {:ok, %{start: {Poller, :start_link, [opts]}}} = :supervisor.get_childspec(pollers, id)
-    Keyword.fetch!(opts, :endpoint)
+    {Keyword.fetch!(opts, :endpoint), Keyword.fetch!(opts, :copy_window)}
   end
 end

@@ -1,5 +1,6 @@
 {
   "schema_version": 1,
+  "copy_window": { "start": "02:00", "end": "03:00" },
   "endpoints": [
     {
       "host": "192.0.2.10",
@@ -12,6 +13,7 @@
       "busy_backoff_ms": 500,
       "reconnect_backoff_ms": { "min": 1000, "max": 60000 },
       "interval_ms": 900000,
+      "copy": true,
       "meters": [
         { "unit_id": 1, "serial": "EX-00001", "profile": "elite_440" },
         { "unit_id": 3, "profile": "elite_500", "interval_ms": 60000 }
@@ -27,6 +29,7 @@
       "busy_backoff_ms": 0,
       "reconnect_backoff_ms": { "min": 5000, "max": 5000 },
       "interval_ms": 300000,
+      "copy": false,
       "meters": [{ "unit_id": 2, "serial": "EX-500-000000002", "profile": "elite_500" }]
     }
   ]

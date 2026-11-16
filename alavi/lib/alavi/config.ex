@@ -9,15 +9,15 @@ defmodule Alavi.Config do
   when alavi compiles. `contract/fixtures/config.v1.basic.json` is an example.
   """
 
-  alias Alavi.Config.{Endpoint, Fields, Schema}
+  alias Alavi.Config.{CopyWindow, Endpoint, Fields, Schema}
   alias Alavi.Profile
 
   @fields Schema.fields([])
 
-  @enforce_keys [:endpoints]
+  @enforce_keys [:copy_window, :endpoints]
   defstruct @enforce_keys
 
-  @type t :: %__MODULE__{endpoints: [Endpoint.t(), ...]}
+  @type t :: %__MODULE__{copy_window: CopyWindow.t(), endpoints: [Endpoint.t(), ...]}
 
   # contract: test/alavi/config_test.exs "read/1"
   @doc "The document in a local file, decoded but not parsed."
@@ -30,10 +30,11 @@ defmodule Alavi.Config do
   @spec parse(term(), %{String.t() => Profile.t()}) :: {:ok, t()} | {:error, String.t()}
   def parse(%{"schema_version" => 1} = json, profiles) do
     with :ok <- Fields.only(json, @fields),
+         {:ok, window} <- CopyWindow.parse(Map.get(json, "copy_window")),
          {:ok, endpoints} <- Fields.each(json, "endpoints", &Endpoint.parse(&1, profiles)),
          :ok <- Fields.unique(endpoints, &{&1.host, &1.port}, "endpoint"),
          :ok <- Fields.unique(expected_serials(endpoints), & &1, "serial") do
-      {:ok, %__MODULE__{endpoints: endpoints}}
+      {:ok, %__MODULE__{copy_window: window, endpoints: endpoints}}
     end
   end
 
@@ -41,7 +42,7 @@ defmodule Alavi.Config do
     do: {:error, "unsupported config schema_version #{inspect(version)}"}
 
   def parse(_json, _profiles),
-    do: {:error, "expected an object with schema_version and endpoints"}
+    do: {:error, "expected an object with schema_version, copy_window and endpoints"}
 
   defp expected_serials(endpoints),
     do: for(%{meters: meters} <- endpoints, %{serial: s} <- meters, s != nil, do: s)

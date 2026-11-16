@@ -26,6 +26,7 @@ defmodule Alavi.PollerCase do
       "busy_backoff_ms" => 10,
       "reconnect_backoff_ms" => %{"min" => 10, "max" => 40},
       "interval_ms" => 60_000,
+      "copy" => false,
       "meters" => meters
     }
 
@@ -43,9 +44,18 @@ defmodule Alavi.PollerCase do
         changes
       )
 
+  @doc "A config document of these endpoint entries, copying from 02:00 to 03:00."
+  @spec document([map()]) :: map()
+  def document(endpoints),
+    do: %{
+      "schema_version" => 1,
+      "copy_window" => %{"start" => "02:00", "end" => "03:00"},
+      "endpoints" => endpoints
+    }
+
   @spec config!([map()]) :: Config.t()
   def config!(endpoints) do
-    {:ok, config} = Config.parse(%{"schema_version" => 1, "endpoints" => endpoints}, profiles())
+    {:ok, config} = Config.parse(document(endpoints), profiles())
     config
   end
 

@@ -12,7 +12,7 @@ defmodule Alavi.ApplicationTest do
   defp settings!(dir, sim_port, status_port) do
     polling = Path.join(dir, "polling.json")
     endpoints = [endpoint(sim_port, "tcp", [meter(1, "elite_440")])]
-    File.write!(polling, JSON.encode!(%{"schema_version" => 1, "endpoints" => endpoints}))
+    File.write!(polling, JSON.encode!(document(endpoints)))
     log = dir |> Path.join("log") |> tap(&File.mkdir_p!/1)
 
     json = %{

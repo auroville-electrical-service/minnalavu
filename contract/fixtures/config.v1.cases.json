@@ -1,9 +1,19 @@
 {
-  "description": "Changes to config.v1.basic.json. Each of cases breaks one rule of the polling config (set value at path, or remove the field when delete is true); each of valid applies its changes and keeps the config valid. by names the sides that must give that verdict: schema (contract/config/config.v1.schema.json), parser (the collector's) and registry (central's checks, for a value it stores of the first endpoint and its first meter). A rule the schema cannot state leaves schema out.",
+  "description": "Changes to config.v1.basic.json. Each of cases breaks one rule of the polling config (set value at path, or remove the field when delete is true); each of valid applies its changes and keeps the config valid. by names the sides that must give that verdict: schema (contract/config/config.v1.schema.json), parser (the collector's) and registry (central's checks, for a value it stores of the copy window, the first endpoint and its first meter). A rule the schema cannot state leaves schema out.",
   "cases": [
     { "name": "schema version 2", "path": ["schema_version"], "value": 2, "by": ["schema", "parser"] },
     { "name": "no endpoints", "path": ["endpoints"], "value": [], "by": ["schema", "parser"] },
     { "name": "an unknown top-level field", "path": ["collector_id"], "value": "x", "by": ["schema", "parser"] },
+    { "name": "no copy window", "path": ["copy_window"], "delete": true, "by": ["schema", "parser"] },
+    { "name": "a copy window as a string", "path": ["copy_window"], "value": "02:00-03:00", "by": ["schema", "parser"] },
+    { "name": "an unknown copy window field", "path": ["copy_window", "zone"], "value": "+05:30", "by": ["schema", "parser"] },
+    { "name": "a copy window without its end", "path": ["copy_window", "end"], "delete": true, "by": ["schema", "parser"] },
+    { "name": "a copy window starting at 24:00", "path": ["copy_window", "start"], "value": "24:00", "by": ["schema", "parser", "registry"] },
+    { "name": "a copy window ending at minute 60", "path": ["copy_window", "end"], "value": "03:60", "by": ["schema", "parser", "registry"] },
+    { "name": "a copy window time with seconds", "path": ["copy_window", "start"], "value": "02:00:30", "by": ["schema", "parser", "registry"] },
+    { "name": "a copy window time without its leading zero", "path": ["copy_window", "start"], "value": "2:00", "by": ["schema", "parser"] },
+    { "name": "a copy window time as a number", "path": ["copy_window", "end"], "value": 3, "by": ["schema", "parser"] },
+    { "name": "a copy window that ends as it starts", "path": ["copy_window", "end"], "value": "02:00", "by": ["parser", "registry"] },
     { "name": "an unknown endpoint field", "path": ["endpoints", 0, "intervall"], "value": 5, "by": ["schema", "parser"] },
     { "name": "a missing endpoint field", "path": ["endpoints", 0, "retries"], "delete": true, "by": ["schema", "parser"] },
     { "name": "an empty host", "path": ["endpoints", 0, "host"], "value": "", "by": ["schema", "parser", "registry"] },
@@ -15,6 +25,8 @@
     { "name": "an unknown framing", "path": ["endpoints", 0, "framing"], "value": "udp", "by": ["schema", "parser", "registry"] },
     { "name": "tcp without max_timeouts", "path": ["endpoints", 0, "max_timeouts"], "delete": true, "by": ["schema", "parser", "registry"] },
     { "name": "RTU over TCP with max_timeouts", "path": ["endpoints", 0, "framing"], "value": "rtu_over_tcp", "by": ["schema", "parser", "registry"] },
+    { "name": "an endpoint without copy", "path": ["endpoints", 0, "copy"], "delete": true, "by": ["schema", "parser"] },
+    { "name": "copy as a string", "path": ["endpoints", 0, "copy"], "value": "yes", "by": ["schema", "parser"] },
     { "name": "a string flag", "path": ["endpoints", 0, "polled_by_other_system"], "value": "no", "by": ["schema", "parser"] },
     { "name": "retries 11", "path": ["endpoints", 0, "retries"], "value": 11, "by": ["schema", "parser", "registry"] },
     { "name": "a fractional timeout", "path": ["endpoints", 0, "timeout_ms"], "value": 1.5, "by": ["schema", "parser"] },
@@ -77,6 +89,27 @@
       "name": "a profile name of 40 characters",
       "changes": [{ "path": ["endpoints", 0, "meters", 0, "profile"], "value": "elite_440_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }],
       "by": ["schema", "registry"]
+    },
+    {
+      "name": "copies switched off",
+      "changes": [{ "path": ["endpoints", 0, "copy"], "value": false }],
+      "by": ["schema", "parser", "registry"]
+    },
+    {
+      "name": "a copy window across midnight",
+      "changes": [
+        { "path": ["copy_window", "start"], "value": "23:30" },
+        { "path": ["copy_window", "end"], "value": "00:30" }
+      ],
+      "by": ["schema", "parser", "registry"]
+    },
+    {
+      "name": "a copy window from the first minute of the day to the last",
+      "changes": [
+        { "path": ["copy_window", "start"], "value": "00:00" },
+        { "path": ["copy_window", "end"], "value": "23:59" }
+      ],
+      "by": ["schema", "parser", "registry"]
     },
     {
       "name": "a repeated unit id on another endpoint",

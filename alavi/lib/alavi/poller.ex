@@ -49,7 +49,7 @@ defmodule Alavi.Poller do
 
   require Logger
 
-  alias Alavi.Config.{Endpoint, Meter}
+  alias Alavi.Config.{CopyWindow, Endpoint, Meter}
   alias Alavi.{Decode, FirmwareRead, LatencyDay, MissedRead, Reading, Sink, Status, Uplink}
   alias Alavi.Modbus.Client
   alias Alavi.Poller.{Job, Latency, Names, Policy, RawLog, Schedule}
@@ -59,8 +59,10 @@ defmodule Alavi.Poller do
   @typedoc "Wall clock for reading timestamps, UTC."
   @type clock :: (-> DateTime.t())
 
+  @typedoc "`copy_window` is the config's, for its endpoint's `copy`."
   @type option ::
           {:endpoint, Endpoint.t()}
+          | {:copy_window, CopyWindow.t()}
           | {:sink, Sink.t()}
           | {:clock, clock()}
           | {:raw_log, RawLog.limits()}
@@ -138,7 +140,8 @@ defmodule Alavi.Poller do
     clock = Keyword.fetch!(opts, :clock)
     raw_log = RawLog.new("#{endpoint.host}:#{endpoint.port}", Keyword.fetch!(opts, :raw_log))
     feeds = {sink, Keyword.fetch!(opts, :status), Keyword.fetch!(opts, :uplink)}
-    start(endpoint, feeds, clock, {raw_log, Keyword.fetch!(opts, :selectors_dir)})
+    local = {raw_log, Keyword.fetch!(opts, :selectors_dir), Keyword.fetch!(opts, :copy_window)}
+    start(endpoint, feeds, clock, local)
   end
 
   @impl true
@@ -191,11 +194,12 @@ defmodule Alavi.Poller do
 
   defp start(%Endpoint{polled_by_other_system: true}, _feeds, _clock, _logs), do: :ignore
 
-  defp start(endpoint, {sink, status, uplink}, clock, {raw_log, selectors_dir}) do
+  defp start(endpoint, {sink, status, uplink}, clock, {raw_log, selectors_dir, copy_window}) do
     now = now()
 
     state = %{
       endpoint: endpoint,
+      copy_window: copy_window,
       sink: sink,
       status: status,
       uplink: uplink,

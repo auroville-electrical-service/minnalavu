@@ -34,8 +34,11 @@ defmodule Alavi.Pollers do
 
     # No uplink to nudge (tests that read the sink) unless one is named.
     shared = [{:uplink, Keyword.get(opts, :uplink, :none)} | shared]
-    {%Config{endpoints: endpoints}, follow} = config(Keyword.fetch!(opts, :config), shared)
-    children = Enum.map(endpoints, &{Poller, [{:endpoint, &1} | shared]})
+
+    {%Config{endpoints: endpoints, copy_window: window}, follow} =
+      config(Keyword.fetch!(opts, :config), shared)
+
+    children = Enum.map(endpoints, &{Poller, [{:endpoint, &1}, {:copy_window, window} | shared]})
     Supervisor.init(children ++ follow, strategy: :one_for_one)
   end
 

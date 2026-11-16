@@ -9,8 +9,6 @@ defmodule Alavi.Pollers.ApplierTest do
   @moduletag :capture_log
   @moduletag :tmp_dir
 
-  defp document(endpoints), do: %{"schema_version" => 1, "endpoints" => endpoints}
-
   defp digest!(document) do
     {:ok, digest} = Digest.digest(document)
     digest
@@ -56,6 +54,19 @@ defmodule Alavi.Pollers.ApplierTest do
 
   defp running(sup),
     do: Map.new(Pollers.pollers(sup), fn {{Poller, _, port}, pid} -> {port, pid} end)
+
+  defp restarted?(sup, port, before) do
+    pid = running(sup)[port]
+    is_pid(pid) and pid != before[port]
+  end
+
+  # The endpoint and copy window the poller at `port` was started with.
+  defp started(sup, port) do
+    {:ok, %{start: {Poller, :start_link, [opts]}}} =
+      :supervisor.get_childspec(sup, {Poller, "127.0.0.1", port})
+
+    {Keyword.fetch!(opts, :endpoint), Keyword.fetch!(opts, :copy_window)}
+  end
 
   defp at(port, meters, changes \\ %{}),
     do: endpoint(port, "tcp", meters, Map.merge(%{"interval_ms" => 50}, changes))
@@ -130,6 +141,38 @@ defmodule Alavi.Pollers.ApplierTest do
       refute Process.alive?(before[removed])
       flush()
       none_from!(removed, 300)
+    end
+
+    test "a change to an endpoint's copy restarts its poller alone; one to the copy window, every poller",
+         %{tmp_dir: dir} do
+      [{_, copying}, {_, other}] = for _ <- 1..2, do: start_sim!(:tcp)
+
+      endpoints = fn copy ->
+        [
+          at(copying, [unit(1, "elite_440")], %{"copy" => copy}),
+          at(other, [unit(1, "elite_440")])
+        ]
+      end
+
+      keeper = keeper!(dir, document(endpoints.(false)))
+      sup = pollers!(keeper)
+      for port <- [copying, other], do: from!(port)
+      start = running(sup)
+
+      apply!(keeper, document(endpoints.(true)))
+      :ok = eventually!(fn -> restarted?(sup, copying, start) end)
+      switched = running(sup)
+
+      assert switched[other] == start[other]
+      assert {%{copy: true}, %{start: ~T[02:00:00]}} = started(sup, copying)
+
+      night = %{"start" => "23:30", "end" => "00:30"}
+      apply!(keeper, %{document(endpoints.(true)) | "copy_window" => night})
+
+      :ok = eventually!(fn -> Enum.all?([copying, other], &restarted?(sup, &1, switched)) end)
+
+      assert {%{copy: false}, %{start: ~T[23:30:00], end: ~T[00:30:00]}} = started(sup, other)
+      from!(other)
     end
 
     test "a poller removed mid-round finishes the round, then stops", %{tmp_dir: dir} do
