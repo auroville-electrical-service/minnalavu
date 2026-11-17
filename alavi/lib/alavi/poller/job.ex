@@ -162,10 +162,10 @@ defmodule Alavi.Poller.Job do
 
   # contract: test/alavi/poller/job_test.exs "unreached/2"
   @doc """
-  The meter at `unit` gave no reading in its step for want of an answer: a
-  timeout, a lost or refused connection, or a busy or gateway exception
-  that ended the meter's reads (`Alavi.Poller.Policy`), not exception
-  replies alone.
+  The meter at `unit` missed reads in its step for want of an answer, before
+  or after readings: a timeout, a lost or refused connection, or a busy or
+  gateway exception that ended the meter's reads (`Alavi.Poller.Policy`),
+  not exception replies alone.
   """
   @spec unreached(t(), 1..247) :: t()
   def unreached(%__MODULE__{} = job, unit), do: %{job | unreached: [unit | job.unreached]}

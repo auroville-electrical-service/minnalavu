@@ -11,9 +11,9 @@ defmodule Alavi.Poller.Schedule do
   the slot now is later than the last one a round was started in, so slots
   passed by a clock set forward, or by a long round, come to one round, and
   after a clock set back nothing is due until a later slot. A meter whose
-  round got no reading from it, for want of an answer (`after_round/3`), is
+  round missed reads from it for want of an answer (`after_round/3`), is
   due again a retry interval after that round ended, on the monotonic clock,
-  or at its next slot if that comes first, until a round reads it.
+  or at its next slot if that comes first, until a round reads it whole.
   """
 
   # contract: test/alavi/poller/schedule_test.exs "next/4"

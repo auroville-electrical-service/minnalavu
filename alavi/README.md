@@ -109,6 +109,17 @@ with the endpoint and unit, so a misbehaving device can be diagnosed from the
 log alone. `raw_bytes_log` in the settings caps this per endpoint: bytes shown
 per line, and lines per window, then one line counting what was suppressed.
 
+A meter's rounds fall on slots of the collector's local clock: multiples of
+its `interval_ms`, which divides a day, from local midnight (at 6 h, 00:00,
+06:00, 12:00, 18:00). It is read once at start, then at each slot; slots
+passed while the clock was set forward, or during a long round, come to one
+round, and after the clock is set back nothing is read until a later slot.
+A meter whose round missed reads for want of an answer (no answer, link
+down, busy), before or after some readings, is read again `retry_ms` after
+that round, or at its next slot if that comes first, until a round reads it
+whole; a meter that answers with exception replies, or is not the meter
+configured, is not.
+
 A meter's identity (product code, serial, energy unit setting) is read every
 round, before its registers. Readings carry the serial and product code read.
 A serial in the polling config is optional and only an expectation: a
@@ -116,15 +127,6 @@ different one read is logged as a warning, and the readings still go under
 the serial read. A meter whose identity read fails, or whose serial is empty
 or not printable, gives missed reads for that round, with no serial if none
 was read.
-A meter's rounds fall on slots of the collector's local clock: multiples of
-its `interval_ms`, which divides a day, from local midnight (at 6 h, 00:00,
-06:00, 12:00, 18:00). It is read once at start, then at each slot; slots
-passed while the clock was set forward, or during a long round, come to one
-round, and after the clock is set back nothing is read until a later slot.
-A meter a round could not reach (no answer, link down, busy) is read again
-`retry_ms` after that round, or at its next slot if that comes first, until
-it answers; a meter that answers with exception replies is not.
-
 
 A meter's software and firmware names and Modbus protocol version (its
 profile's `firmware` section) are read after every meter's readings in the

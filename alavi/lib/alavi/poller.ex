@@ -546,8 +546,7 @@ defmodule Alavi.Poller do
         {events, skip, state} = read_registers(meter, seen, state)
         recorded(events, state)
 
-        {events, {meter, seen, skip}, skip == nil or Enum.any?(events, &match?(%Reading{}, &1)),
-         state}
+        {events, {meter, seen, skip}, skip == nil, state}
 
       {{tag, reason, n, serial}, state} ->
         state = serial_read(state, meter, serial)

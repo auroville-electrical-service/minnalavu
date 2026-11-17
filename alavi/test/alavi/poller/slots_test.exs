@@ -158,6 +158,25 @@ defmodule Alavi.Poller.SlotsTest do
       end
     end
 
+    test "a meter that stops answering after some readings is retried until a round reads it whole" do
+      {sim, port} = start_sim!(:tcp)
+      :ok = Simulator.faults(sim, silent_reads: [{1, 201}])
+      {_agent, clock} = clock!(~N[2026-11-17 10:07:00])
+      poll!(port, clock, %{"interval_ms" => @day, "retry_ms" => 300})
+
+      assert {events, %{retrying: true}} = round!()
+      assert read?(events)
+      assert Enum.any?(events, &match?(%MissedRead{}, &1))
+
+      assert {events, %{retrying: true}} = round!()
+      assert Enum.any?(events, &match?(%MissedRead{}, &1))
+
+      Simulator.clear_faults(sim)
+      assert {events, %{retrying: false, next_due_at: "2026-11-18T00:00:00" <> _}} = round!()
+      refute Enum.any?(events, &match?(%MissedRead{}, &1))
+      no_round!(700)
+    end
+
     test "a meter that answers only with exception replies is not retried before its slot" do
       {sim, port} = start_sim!(:tcp)
       :ok = Simulator.faults(sim, refused_reads: [{{1, 199}, 2}, {{1, 201}, 2}])
