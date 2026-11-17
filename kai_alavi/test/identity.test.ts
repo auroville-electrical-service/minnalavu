@@ -88,6 +88,19 @@ describe("identityRequests", () => {
     ]);
   });
 
+  test("a unit setting the meter may lack is a request of its own", () => {
+    const id = (absent_ok: boolean) => ({
+      serial: { ...located, address: 0, count: 4 },
+      energy_unit: { ...located, address: 4, part: "word" as const, expect: 1, absent_ok },
+    });
+    const shape = (absent_ok: boolean) => identityRequests(id(absent_ok)).map((r) => [r.address, r.count]);
+    expect(shape(false)).toEqual([[0, 5]]);
+    expect(shape(true)).toEqual([
+      [0, 4],
+      [4, 1],
+    ]);
+  });
+
   test("a request never passes 125 registers, nor joins reads in another table", () => {
     const id = (count: number, table: "holding" | "input" = "holding") => ({
       serial: { ...located, count: 110 },

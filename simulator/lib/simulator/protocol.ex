@@ -73,6 +73,7 @@ defmodule Simulator.Protocol do
           | :silent
   def respond(meters, %Faults{} = faults, unit_id, <<fc, _::binary>> = pdu, missing \\ :silent) do
     read = read_at(unit_id, pdu)
+    span = span_at(unit_id, pdu)
 
     cond do
       MapSet.member?(faults.silent_units, unit_id) ->
@@ -86,6 +87,9 @@ defmodule Simulator.Protocol do
 
       is_map_key(faults.refused_reads, read) ->
         {:reply, exception(fc, faults.refused_reads[read])}
+
+      is_map_key(faults.refused_spans, span) ->
+        {:reply, exception(fc, faults.refused_spans[span])}
 
       faults.busy ->
         {:reply, exception(fc, @busy)}
@@ -115,6 +119,11 @@ defmodule Simulator.Protocol do
 
   defp read_at(unit_id, <<_fc, address::16, _::binary>>), do: {unit_id, address}
   defp read_at(_unit_id, _pdu), do: nil
+
+  defp span_at(unit_id, <<fc, address::16, count::16>>) when fc in [3, 4],
+    do: {unit_id, address, count}
+
+  defp span_at(_unit_id, _pdu), do: nil
 
   defp answer(nil, _pdu, :silent), do: :silent
 

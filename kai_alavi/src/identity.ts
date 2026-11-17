@@ -88,18 +88,27 @@ const asRequest = (group: readonly IdentityRead[], reads: readonly IdentityRead[
   };
 };
 
+// A gateway answers a merged read across a missing unit setting with 0B, not 02 (three Elite
+// 440s, 2026-11-17), so a unit setting the meter may lack is never merged.
+const mayBeAbsent = (identity: Identity, read: IdentityRead): boolean =>
+  read.check === "energy_unit" && identity.energy_unit?.absent_ok === true;
+
 // contract: test/identity.test.ts "identityRequests"
 // Reads in one table join a request when at most `maxGap` unread registers lie between them and
-// it stays within `maxCount` registers; in the order of each request's first read.
+// it stays within `maxCount` registers; a unit setting the meter may lack is a request of its
+// own; in the order of each request's first read.
 export const identityRequests = (identity: Identity): readonly IdentityRequest[] => {
   const reads = identityReads(identity);
-  const sorted = [...reads].sort((a, b) => a.table.localeCompare(b.table) || a.address - b.address);
+  const sorted = reads
+    .filter((r) => !mayBeAbsent(identity, r))
+    .sort((a, b) => a.table.localeCompare(b.table) || a.address - b.address);
   const groups: IdentityRead[][] = [];
   for (const read of sorted) {
     const current = groups.at(-1);
     if (current && joins(current, read)) current.push(read);
     else groups.push([read]);
   }
+  groups.push(...reads.filter((r) => mayBeAbsent(identity, r)).map((r) => [r]));
   const position = (r: IdentityRequest): number => (r.reads[0] ? reads.indexOf(r.reads[0]) : -1);
   return groups.map((g) => asRequest(g, reads)).sort((a, b) => position(a) - position(b));
 };

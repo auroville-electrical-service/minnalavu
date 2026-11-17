@@ -104,9 +104,12 @@ describe("nextRead", () => {
     const [first, ...rest] = base.registers;
     if (!first) throw new Error("no register");
     const input = { ...base, registers: [{ ...first, table: "input" as const }, ...rest] };
-    const [identity] = fixture.cases[0]?.steps ?? [];
-    if (!identity) throw new Error("no step");
-    const step = nextRead(startRound(endpoint, [{ unitId: 1, profile: input }], policy).round, event(identity.event));
+    const identity = fixture.cases[0]?.steps.slice(0, 2) ?? [];
+    if (identity.length !== 2) throw new Error("no identity steps");
+    const step = identity.reduce(
+      (step, s) => nextRead(step.round, event(s.event)),
+      startRound(endpoint, [{ unitId: 1, profile: input }], policy),
+    );
     expect(readOf(step)).toEqual({ read: [1, "input", 199, 2], attempt: 1, wait_ms: 0, fc: 4 });
   });
 

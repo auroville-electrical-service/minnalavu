@@ -7,6 +7,10 @@ defmodule Simulator.Faults do
     go unanswered; the unit's other reads are answered.
   - `refused_reads`: requests that start at one of these `{unit_id, address}`
     get the exception code mapped to it.
+  - `refused_spans`: read requests for exactly these
+    `{unit_id, address, count}` get the exception code mapped to it, and
+    other reads from the same address are answered: a gateway answering
+    exception 11 for a merged read the meter stays silent for.
   - `two_byte_replies`: requests for these units get the PDU `0B` alone, the
     gateway exception code with no function code, as some Modbus TCP
     gateways send, framed under the unit byte mapped to the unit, which need
@@ -23,6 +27,7 @@ defmodule Simulator.Faults do
   defstruct silent_units: MapSet.new(),
             silent_reads: MapSet.new(),
             refused_reads: %{},
+            refused_spans: %{},
             two_byte_replies: %{},
             lost_writes: MapSet.new(),
             busy: false,
@@ -34,6 +39,7 @@ defmodule Simulator.Faults do
           silent_units: MapSet.t(1..247),
           silent_reads: MapSet.t({1..247, 0..0xFFFF}),
           refused_reads: %{optional({1..247, 0..0xFFFF}) => 1..255},
+          refused_spans: %{optional({1..247, 0..0xFFFF, 1..125}) => 1..255},
           two_byte_replies: %{optional(1..247) => 0..255},
           lost_writes: MapSet.t({1..247, 0..0xFFFF}),
           busy: boolean(),

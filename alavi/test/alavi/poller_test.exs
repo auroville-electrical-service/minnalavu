@@ -261,34 +261,51 @@ defmodule Alavi.PollerTest do
       :ok = eventually!(fn -> latency(status, 3) != nil end)
 
       today = Date.to_iso8601(Date.utc_today())
-      # Its identity in one request, 2 registers and 4 firmware names, each reply 20 ms late.
-      assert %{since: ^today, answered: 7, retries: 0, timeouts: 0} = l1 = latency(status, 1)
+      # Its identity in two requests, 2 registers and 4 firmware names, each reply 20 ms late.
+      assert %{since: ^today, answered: 8, retries: 0, timeouts: 0} = l1 = latency(status, 1)
       assert l1.p50 >= 20 and l1.p50 <= l1.p99 and l1.p99 <= l1.max and l1.max < 100
       assert %{answered: 0, timeouts: 3, p50: nil, max: nil} = latency(status, 2)
       # Its identity in two requests, 4 registers and 4 names.
       assert %{answered: 10, timeouts: 0} = latency(status, 3)
     end
 
+    test "an Elite 440 without the unit setting is read where a gateway answers a merged read of it with 0B",
+         ctx do
+      # As a real gateway answered holding 0-35 from three such meters, 2026-11-17.
+      faults = [refused_spans: [{{1, 0, 36}, 11}]]
+      status = start_440!(faults, ctx)
+
+      assert [%Reading{unit_id: 1} | _] = recorded!()
+      :ok = eventually!(fn -> latency(status, 1) != nil end)
+      # Its identity in two requests, the unit setting refused with 02, 2 registers and 4 names.
+      assert %{answered: 8, retries: 0, timeouts: 0} = latency(status, 1)
+    end
+
     test "an Elite 440 that refuses its merged identity request is read a register at a time",
          ctx do
+      status = start_440!([refused_spans: [{{1, 0, 25}, 2}]], ctx)
+
+      assert [%Reading{unit_id: 1} | _] = await_unit!(1, &match?([%Reading{} | _], &1))
+      :ok = eventually!(fn -> latency(status, 1) != nil end)
+      # The refused request, its two reads alone, the unit setting, 2 registers and 4 names.
+      assert %{answered: 10, retries: 0, timeouts: 0} = latency(status, 1)
+    end
+
+    # An Elite 440 at unit 1 with no unit setting, alone on its endpoint.
+    defp start_440!(faults, ctx) do
       profile = Simulator.Profile.load!("elite_440")
 
       no_unit =
         1 |> Simulator.Meter.new(profile) |> Simulator.Meter.identify(:energy_unit, :absent)
 
-      {_sim, port} = start_chain!(:tcp, [no_unit])
+      {sim, port} = start_chain!(:tcp, [no_unit])
+      :ok = Simulator.faults(sim, faults)
 
-      status =
-        start_with_status!(
-          [endpoint(port, "tcp", [meter(1, "elite_440")])],
-          &DateTime.utc_now/0,
-          ctx.tmp_dir
-        )
-
-      assert [%Reading{unit_id: 1} | _] = await_unit!(1, &match?([%Reading{} | _], &1))
-      :ok = eventually!(fn -> latency(status, 1) != nil end)
-      # The refused request, then the three identity reads alone, 2 registers and 4 names.
-      assert %{answered: 10, retries: 0, timeouts: 0} = latency(status, 1)
+      start_with_status!(
+        [endpoint(port, "tcp", [meter(1, "elite_440")])],
+        &DateTime.utc_now/0,
+        ctx.tmp_dir
+      )
     end
 
     test "each meter's day is logged when the UTC day ends", ctx do

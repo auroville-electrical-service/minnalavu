@@ -106,15 +106,20 @@ defmodule Alavi.Profile.Identity do
   @doc """
   The reads merged into requests: reads in one table join a request when at
   most #{@max_gap} unread registers lie between them and it stays within
-  #{@max_count} registers. In the order of each request's first read.
+  #{@max_count} registers. A unit setting the meter may lack (`absent_ok`)
+  is always a request of its own. In the order of each request's first read.
   """
   @spec requests(t()) :: [request()]
   def requests(%__MODULE__{} = identity) do
     reads = reads(identity)
+    # A gateway answers a merged read across a missing unit setting with 0B,
+    # not 02 (three Elite 440s, 2026-11-17), so it could not be told apart.
+    {alone, merged} = Enum.split_with(reads, &maybe_absent?(identity, &1))
 
-    reads
+    merged
     |> Enum.sort_by(fn {_, table, address, _} -> {table, address} end)
     |> Enum.chunk_while(nil, &join/2, &close/1)
+    |> Enum.concat(Enum.map(alone, &[&1]))
     |> Enum.map(&request(&1, reads))
     |> Enum.sort_by(fn {_, _, _, [first | _]} -> Enum.find_index(reads, &(&1 == first)) end)
   end
@@ -149,6 +154,9 @@ defmodule Alavi.Profile.Identity do
       end
     end)
   end
+
+  defp maybe_absent?(identity, {:energy_unit, _, _, _}), do: identity.energy_unit.absent_ok
+  defp maybe_absent?(_identity, _read), do: false
 
   defp join(read, nil), do: {:cont, [read]}
 

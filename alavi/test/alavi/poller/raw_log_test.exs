@@ -77,13 +77,13 @@ defmodule Alavi.Poller.RawLogTest do
     end
 
     test "logs the corrupted frame when RTU replies fail their CRC" do
-      limits = %{max_frame_bytes: 64, max_lines: 100, window_ms: 60_000}
+      limits = %{max_frame_bytes: 32, max_lines: 100, window_ms: 60_000}
       {lines, _port} = poll!(:rtu_over_tcp, [bad_crc: true], limits, 300)
       assert [line | _] = lines
 
-      # The first read of each round is the identity check: the 36 registers 0-35, cut at 64 bytes.
+      # The first read of each round is the identity check: the 25 registers 0-24, cut at 32 bytes.
       assert line =~
-               ~r/unit 1: 77 bytes skipped before the reply \(bad CRC.*\): 01 03 48( [0-9A-F]{2}){61} \(first 64 shown\)$/
+               ~r/unit 1: 55 bytes skipped before the reply \(bad CRC.*\): 01 03 32( [0-9A-F]{2}){29} \(first 32 shown\)$/
     end
 
     test "holds the cap: max_lines per window, then a count of what was suppressed" do

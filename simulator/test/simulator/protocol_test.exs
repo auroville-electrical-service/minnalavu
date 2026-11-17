@@ -45,6 +45,17 @@ defmodule Simulator.ProtocolTest do
                Protocol.respond(meters, faults, 1, <<3, 11_150::16, 1::16>>)
     end
 
+    test "a refused span gets its exception, and other reads from its address are answered",
+         %{meters: meters} do
+      faults = %Faults{refused_spans: %{{1, 11_149, 2} => 11}}
+
+      assert {:reply, <<0x83, 11>>} =
+               Protocol.respond(meters, faults, 1, <<3, 11_149::16, 2::16>>)
+
+      assert {:reply, <<3, 2, _::16>>} =
+               Protocol.respond(meters, faults, 1, <<3, 11_149::16, 1::16>>)
+    end
+
     test "no meter at a unit id stays silent", %{meters: meters} do
       assert :silent = Protocol.respond(meters, %Faults{}, 2, <<3, 11_149::16, 2::16>>)
     end

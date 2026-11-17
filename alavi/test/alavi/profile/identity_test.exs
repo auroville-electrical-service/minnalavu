@@ -184,6 +184,20 @@ defmodule Alavi.Profile.IdentityTest do
              ]
     end
 
+    test "a unit setting the meter may lack is a request of its own" do
+      identity =
+        identity!(%{
+          "serial" => at(@serial, 0, 4),
+          "product_code" => at(@product, 19, 6),
+          "energy_unit" => %{at(@unit, 35) | "absent_ok" => true}
+        })
+
+      assert Identity.requests(identity) == [
+               {:holding, 0, 25, [{:product_code, :holding, 19, 6}, {:serial, :holding, 0, 4}]},
+               {:holding, 35, 1, [{:energy_unit, :holding, 35, 1}]}
+             ]
+    end
+
     test "16 registers between reads part them; requests follow their first read" do
       identity =
         identity!(%{
