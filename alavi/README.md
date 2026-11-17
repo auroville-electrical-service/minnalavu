@@ -83,8 +83,15 @@ installed without these must be removed (`erlsrv remove alavi_alavi`) and
 installed again from step 3. A node that stops again within 10 seconds of
 being restarted, as one does with an invalid settings file, is left stopped
 rather than restarted in a loop: fix the cause (the log, or step 2) and start
-it again. To install a new release, `erlsrv remove alavi_alavi`, then the
-steps above from the new release root.
+it again.
+
+To upgrade to a new release, run `rel\windows\upgrade.ps1` from the clone
+(`powershell -ExecutionPolicy Bypass -File rel\windows\upgrade.ps1`; its
+`Get-Help -Full` has the arguments and the steps). It moves the old install
+aside, lays down the release with the steps above, carries the buffer, the
+log, `settings.json` (or one given) and the polling config over, copies the
+profiles, and starts and checks the service. Without `-Apply` it only checks
+and prints what it would do.
 
 ## Logs
 
