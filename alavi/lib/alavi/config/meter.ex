@@ -5,19 +5,21 @@ defmodule Alavi.Config.Meter do
 
   `serial` is the serial expected at this address, or nil when it is not known.
   Readings always carry the serial the meter reports; a different one is logged.
+  `interval_ms` and `retry_ms` are the meter's own, or else its endpoint's.
   """
 
   alias Alavi.Config.{Fields, Schema}
   alias Alavi.Profile
 
-  @enforce_keys [:unit_id, :serial, :profile, :interval_ms]
+  @enforce_keys [:unit_id, :serial, :profile, :interval_ms, :retry_ms]
   defstruct @enforce_keys
 
   @type t :: %__MODULE__{
           unit_id: 1..247,
           serial: String.t() | nil,
           profile: Profile.t(),
-          interval_ms: pos_integer()
+          interval_ms: pos_integer(),
+          retry_ms: pos_integer()
         }
 
   @path ["endpoints", "meters"]
@@ -27,23 +29,35 @@ defmodule Alavi.Config.Meter do
   @serial Schema.pattern(@path ++ ["serial"])
   @profile Schema.pattern(@path ++ ["profile"])
   @interval Schema.range(@path ++ ["interval_ms"])
+  @retry Schema.range(@path ++ ["retry_ms"])
 
   # contract: test/alavi/config_test.exs "parse/2"
   @doc false
-  @spec parse(term(), pos_integer(), %{String.t() => Profile.t()}) ::
-          {:ok, t()} | {:error, String.t()}
-  def parse(entry, endpoint_interval, profiles) when is_map(entry) do
+  @spec parse(
+          term(),
+          %{interval_ms: pos_integer(), retry_ms: pos_integer()},
+          %{String.t() => Profile.t()}
+        ) :: {:ok, t()} | {:error, String.t()}
+  def parse(entry, %{} = endpoint, profiles) when is_map(entry) do
     with :ok <- Fields.only(entry, @fields),
          {:ok, unit_id} <- Fields.integer(entry, "unit_id", @unit_id),
          {:ok, profile} <- profile(entry, profiles),
          {:ok, serial} <- serial(entry, profile),
-         {:ok, interval} <- interval(entry, endpoint_interval) do
+         {:ok, interval} <-
+           own(entry, "interval_ms", endpoint.interval_ms, &Fields.interval/3, @interval),
+         {:ok, retry} <- own(entry, "retry_ms", endpoint.retry_ms, &Fields.integer/3, @retry) do
       {:ok,
-       %__MODULE__{unit_id: unit_id, serial: serial, profile: profile, interval_ms: interval}}
+       %__MODULE__{
+         unit_id: unit_id,
+         serial: serial,
+         profile: profile,
+         interval_ms: interval,
+         retry_ms: retry
+       }}
     end
   end
 
-  def parse(_entry, _interval, _profiles), do: {:error, "meter entry is not an object"}
+  def parse(_entry, _endpoint, _profiles), do: {:error, "meter entry is not an object"}
 
   defp profile(entry, profiles) do
     with {:ok, name} <- Fields.matching(entry, "profile", @profile, "a profile name"),
@@ -84,8 +98,8 @@ defmodule Alavi.Config.Meter do
        "serial #{inspect(serial)} is longer than the #{chars} characters " <>
          "profile #{name}'s serial registers hold"}
 
-  defp interval(entry, _endpoint_interval) when is_map_key(entry, "interval_ms"),
-    do: Fields.integer(entry, "interval_ms", @interval)
+  defp own(entry, field, _endpoint, parse, range) when is_map_key(entry, field),
+    do: parse.(entry, field, range)
 
-  defp interval(_entry, endpoint_interval), do: {:ok, endpoint_interval}
+  defp own(_entry, _field, endpoint, _parse, _range), do: {:ok, endpoint}
 end

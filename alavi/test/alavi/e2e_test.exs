@@ -254,12 +254,12 @@ defmodule Alavi.EndToEndTest do
       endpoint_id => '#{id}_ep', valid_from => '2026-01-01Z', collector_id => '#{id}',
       host => '127.0.0.1', port => #{port}, framing => 'tcp', polled_by_other_system => false,
       timeout_ms => 100, max_timeouts => 3, retries => 2, busy_backoff_ms => 10,
-      reconnect_backoff_min_ms => 10, reconnect_backoff_max_ms => 40, interval_ms => 1500))
+      reconnect_backoff_min_ms => 10, reconnect_backoff_max_ms => 40, interval_ms => 1500, retry_ms => 60000))
     """)
 
     sql!("""
     SELECT to_json(admin.register_target(endpoint_id => '#{id}_ep', unit_id => 3,
-      valid_from => '2026-01-01Z', profile => 'elite_500', interval_ms => NULL))
+      valid_from => '2026-01-01Z', profile => 'elite_500', interval_ms => NULL, retry_ms => NULL))
     """)
 
     sql!("""
@@ -552,12 +552,12 @@ defmodule Alavi.EndToEndTest do
       endpoint_id => '#{id}_ep', valid_from => '2026-01-01Z', collector_id => '#{id}',
       host => '127.0.0.1', port => #{port}, framing => 'tcp', polled_by_other_system => false,
       timeout_ms => 100, max_timeouts => 3, retries => 2, busy_backoff_ms => 10,
-      reconnect_backoff_min_ms => 10, reconnect_backoff_max_ms => 40, interval_ms => 300))
+      reconnect_backoff_min_ms => 10, reconnect_backoff_max_ms => 40, interval_ms => 300, retry_ms => 60000))
     """)
 
     sql!("""
     SELECT to_json(admin.register_target(endpoint_id => '#{id}_ep', unit_id => 1,
-      valid_from => '2026-01-01Z', profile => 'elite_440', interval_ms => NULL))
+      valid_from => '2026-01-01Z', profile => 'elite_440', interval_ms => NULL, retry_ms => NULL))
     """)
 
     served = fn ->
@@ -595,7 +595,7 @@ defmodule Alavi.EndToEndTest do
 
     sql!("""
     SELECT to_json(admin.change_target(endpoint_id => '#{id}_ep', unit_id => 1,
-      valid_from => now(), profile => 'elite_440', interval_ms => 600))
+      valid_from => now(), profile => 'elite_440', interval_ms => 600, retry_ms => NULL))
     """)
 
     second = served.()
@@ -608,7 +608,7 @@ defmodule Alavi.EndToEndTest do
     # A profile this collector has not loaded: the whole config is refused.
     sql!("""
     SELECT to_json(admin.change_target(endpoint_id => '#{id}_ep', unit_id => 1,
-      valid_from => now(), profile => 'no_such_profile', interval_ms => 600))
+      valid_from => now(), profile => 'no_such_profile', interval_ms => 600, retry_ms => NULL))
     """)
 
     third = served.()
@@ -635,14 +635,14 @@ defmodule Alavi.EndToEndTest do
       endpoint_id => '#{id}_#{name}', valid_from => '2026-01-01Z', collector_id => '#{id}',
       host => '127.0.0.1', port => #{port}, framing => 'tcp', polled_by_other_system => false,
       timeout_ms => 100, max_timeouts => 3, retries => 2, busy_backoff_ms => 10,
-      reconnect_backoff_min_ms => 10, reconnect_backoff_max_ms => 40, interval_ms => 300))
+      reconnect_backoff_min_ms => 10, reconnect_backoff_max_ms => 40, interval_ms => 300, retry_ms => 60000))
     """)
   end
 
   defp register_target!(id, name, unit, profile, valid_from \\ "'2026-01-01Z'") do
     sql!("""
     SELECT to_json(admin.register_target(endpoint_id => '#{id}_#{name}', unit_id => #{unit},
-      valid_from => #{valid_from}, profile => '#{profile}', interval_ms => NULL))
+      valid_from => #{valid_from}, profile => '#{profile}', interval_ms => NULL, retry_ms => NULL))
     """)
   end
 

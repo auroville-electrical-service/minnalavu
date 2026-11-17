@@ -52,6 +52,7 @@ defmodule Alavi.Config.Endpoint do
   @backoff_min Schema.range(@path ++ ["reconnect_backoff_ms", "min"])
   @backoff_max Schema.range(@path ++ ["reconnect_backoff_ms", "max"])
   @interval Schema.range(@path ++ ["interval_ms"])
+  @retry Schema.range(@path ++ ["retry_ms"])
 
   # contract: test/alavi/config_test.exs "parse/2"
   @doc false
@@ -67,9 +68,15 @@ defmodule Alavi.Config.Endpoint do
          {:ok, retries} <- Fields.integer(entry, "retries", @retries),
          {:ok, busy} <- Fields.integer(entry, "busy_backoff_ms", @busy),
          {:ok, backoff} <- backoff(entry),
-         {:ok, interval} <- Fields.integer(entry, "interval_ms", @interval),
+         {:ok, interval} <- Fields.interval(entry, "interval_ms", @interval),
+         {:ok, retry} <- Fields.integer(entry, "retry_ms", @retry),
          {:ok, copy} <- Fields.boolean(entry, "copy"),
-         {:ok, meters} <- Fields.each(entry, "meters", &Meter.parse(&1, interval, profiles)),
+         {:ok, meters} <-
+           Fields.each(
+             entry,
+             "meters",
+             &Meter.parse(&1, %{interval_ms: interval, retry_ms: retry}, profiles)
+           ),
          :ok <- Fields.unique(meters, & &1.unit_id, "unit_id") do
       {:ok,
        %__MODULE__{

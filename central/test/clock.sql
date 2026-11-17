@@ -166,7 +166,7 @@ SELECT admin.register_endpoint(
   endpoint_id => id || '_ep', valid_from => now() - interval '2 days', collector_id => id,
   host => '10.0.0.1', port => 502, framing => 'tcp', polled_by_other_system => false,
   timeout_ms => 1000, max_timeouts => 3, retries => 2, busy_backoff_ms => 500,
-  reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000, interval_ms => 900000)
+  reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000, interval_ms => 900000, retry_ms => 1800000)
 FROM store.collectors WHERE id LIKE 'sqlc\_%' AND id <> 'sqlc_idle';
 
 -- sqlc_kiss's last answer 3 days ago, then RATE; sqlc_skewed's clock a week

@@ -25,7 +25,7 @@ LANGUAGE sql AS $$
     endpoint_id => id, valid_from => now() - interval '3 days', collector_id => 'sqlp_a',
     host => host, port => 502, framing => 'tcp', polled_by_other_system => other,
     timeout_ms => 1000, max_timeouts => 3, retries => 2, busy_backoff_ms => 500,
-    reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000, interval_ms => 900000)
+    reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000, interval_ms => 900000, retry_ms => 1800000)
 $$;
 
 -- n readings at host:502 by collector who, a minute apart, the last `ago`.
@@ -69,7 +69,7 @@ SELECT admin.change_endpoint(
   endpoint_id => 'sqlp_moved', valid_from => now() - interval '1 hour', collector_id => 'sqlp_a',
   host => '10.0.1.6', port => 502, framing => 'tcp', polled_by_other_system => false,
   timeout_ms => 1000, max_timeouts => 3, retries => 2, busy_backoff_ms => 500,
-  reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000, interval_ms => 900000, copy => false);
+  reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000, interval_ms => 900000, retry_ms => 1800000, copy => false);
 SELECT admin.retire_endpoint('sqlp_retired', now() - interval '1 hour');
 
 -- steady: 1 timeout in 100, and a day-old burst outside the lookback;

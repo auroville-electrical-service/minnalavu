@@ -31,7 +31,8 @@ BEGIN
     retries => (e ->> 'retries')::integer, busy_backoff_ms => (e ->> 'busy_backoff_ms')::integer,
     reconnect_backoff_min_ms => (e #>> '{reconnect_backoff_ms,min}')::integer,
     reconnect_backoff_max_ms => (e #>> '{reconnect_backoff_ms,max}')::integer,
-    interval_ms => (e ->> 'interval_ms')::integer, copy => (e ->> 'copy')::boolean);
+    interval_ms => (e ->> 'interval_ms')::integer, retry_ms => (e ->> 'retry_ms')::integer,
+    copy => (e ->> 'copy')::boolean);
   PERFORM admin.set_copy_window(
     collector_id => 'sqltest_cfg', valid_from => '2026-01-01Z',
     start_time => (config #>> '{copy_window,start}')::time,
@@ -39,7 +40,7 @@ BEGIN
   PERFORM admin.register_target(
     endpoint_id => 'sqltest_cfg_ep', unit_id => (m ->> 'unit_id')::integer,
     valid_from => '2026-01-01Z', profile => m ->> 'profile',
-    interval_ms => (m ->> 'interval_ms')::integer);
+    interval_ms => (m ->> 'interval_ms')::integer, retry_ms => (m ->> 'retry_ms')::integer);
   IF m ? 'serial' THEN
     PERFORM admin.register_meter(
       serial => m ->> 'serial', valid_from => '2026-01-01Z', endpoint_id => 'sqltest_cfg_ep',
@@ -82,9 +83,10 @@ FROM walk WHERE node ->> 'type' = 'integer';
 SELECT pg_temp.is(
   (SELECT string_agg(array_to_string(path, '.'), ' ' ORDER BY path) FROM bounded),
   'endpoints.0.busy_backoff_ms endpoints.0.interval_ms endpoints.0.max_timeouts '
-  || 'endpoints.0.meters.0.interval_ms endpoints.0.meters.0.unit_id endpoints.0.port '
+  || 'endpoints.0.meters.0.interval_ms endpoints.0.meters.0.retry_ms '
+  || 'endpoints.0.meters.0.unit_id endpoints.0.port '
   || 'endpoints.0.reconnect_backoff_ms.max endpoints.0.reconnect_backoff_ms.min '
-  || 'endpoints.0.retries endpoints.0.timeout_ms',
+  || 'endpoints.0.retries endpoints.0.retry_ms endpoints.0.timeout_ms',
   'the schema bounds the integers the registry stores, and only those');
 
 SELECT pg_temp.is(pg_temp.register(:'basic'), '00000', 'the registry holds the contract fixture');

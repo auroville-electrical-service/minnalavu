@@ -63,14 +63,14 @@ LANGUAGE sql AS $$
     endpoint_id => id, valid_from => now() - interval '2 days', collector_id => collector,
     host => host, port => 502, framing => 'tcp', polled_by_other_system => other,
     timeout_ms => 1000, max_timeouts => 3, retries => 2, busy_backoff_ms => 500,
-    reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000, interval_ms => 900000)
+    reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000, interval_ms => 900000, retry_ms => 1800000)
 $$;
 
 CREATE FUNCTION pg_temp.target(endpoint text, unit integer, ago interval, interval_ms integer)
 RETURNS bigint
 LANGUAGE sql AS $$
   SELECT admin.register_target(endpoint_id => endpoint, unit_id => unit, valid_from => now() - ago,
-    profile => 'elite_440', interval_ms => interval_ms)
+    profile => 'elite_440', interval_ms => interval_ms, retry_ms => NULL)
 $$;
 
 -- A meter at a target of its own, registered with it.
@@ -99,7 +99,7 @@ SELECT pg_temp.meter('SQLH-0005', 'sqlh_a_ep', 5, '10 minutes', NULL);  -- new, 
 SELECT pg_temp.meter('SQLH-0008', 'sqlh_a_ep', 8, '2 days', NULL);      -- back in service 30 min ago
 SELECT admin.retire_meter('SQLH-0008', now() - interval '1 day');
 SELECT admin.retire_target('sqlh_a_ep', 8, now() - interval '1 day');
-SELECT admin.change_target('sqlh_a_ep', 8, now() - interval '30 minutes', 'elite_440', NULL);
+SELECT admin.change_target('sqlh_a_ep', 8, now() - interval '30 minutes', 'elite_440', NULL, NULL);
 SELECT admin.change_meter('SQLH-0008', now() - interval '30 minutes', 'sqlh_a_ep', 8);
 SELECT pg_temp.meter('SQLH-0006', 'sqlh_a_other', 1, '2 days', NULL);   -- polled by the other system
 SELECT pg_temp.meter('SQLH-0007', 'sqlh_b_ep', 1, '2 days', NULL);      -- behind a silent collector
@@ -117,7 +117,7 @@ SELECT admin.change_endpoint(endpoint_id => 'sqlh_m_ep', valid_from => now() - i
   collector_id => 'sqlh_d', host => '10.0.0.3', port => 502, framing => 'tcp',
   polled_by_other_system => false, timeout_ms => 1000, max_timeouts => 3, retries => 2,
   busy_backoff_ms => 500, reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000,
-  interval_ms => 900000, copy => false);
+  interval_ms => 900000, retry_ms => 1800000, copy => false);
 SELECT pg_temp.target('sqlh_m_ep', u, '2 days', NULL) FROM unnest(ARRAY[1, 2]) u;
 SELECT admin.register_meter(serial => 'SQLT-0002', valid_from => now() - interval '2 days',
   endpoint_id => 'sqlh_m_ep', unit_id => 1);
@@ -505,14 +505,14 @@ LANGUAGE sql AS $$
     endpoint_id => id, valid_from => now() - ago, collector_id => collector, host => id,
     port => 502, framing => 'tcp', polled_by_other_system => other, timeout_ms => 1000,
     max_timeouts => 3, retries => 2, busy_backoff_ms => 500, reconnect_backoff_min_ms => 1000,
-    reconnect_backoff_max_ms => 60000, interval_ms => 900000, copy => copy)
+    reconnect_backoff_max_ms => 60000, interval_ms => 900000, retry_ms => 1800000, copy => copy)
 $$;
 
 -- A target of this profile, in service for ten days.
 CREATE FUNCTION pg_temp.copy_target(endpoint text, unit integer, profile text) RETURNS bigint
 LANGUAGE sql AS $$
   SELECT admin.register_target(endpoint_id => endpoint, unit_id => unit,
-    valid_from => now() - interval '10 days', profile => profile, interval_ms => NULL)
+    valid_from => now() - interval '10 days', profile => profile, interval_ms => NULL, retry_ms => NULL)
 $$;
 
 -- A meter-clock read `ago` at the endpoint's unit, through its collector's
@@ -555,7 +555,7 @@ SELECT admin.change_endpoint(endpoint_id => 'sqlc_late', valid_from => now() - i
   collector_id => 'sqlh_e', host => 'sqlc_late', port => 502, framing => 'tcp',
   polled_by_other_system => false, timeout_ms => 1000, max_timeouts => 3, retries => 2,
   busy_backoff_ms => 500, reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000,
-  interval_ms => 900000, copy => true);
+  interval_ms => 900000, retry_ms => 1800000, copy => true);
 SELECT pg_temp.copy_endpoint('sqlc_off', 'sqlh_e', '10 days', false, false);
 SELECT pg_temp.copy_endpoint('sqlc_other', 'sqlh_e', '10 days', true, true);
 SELECT pg_temp.copy_endpoint('sqlc_quiet', 'sqlh_f', '10 days', true, false);

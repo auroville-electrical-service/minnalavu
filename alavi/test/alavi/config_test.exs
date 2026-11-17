@@ -31,6 +31,15 @@ defmodule Alavi.ConfigTest do
       assert hd(tcp.meters).profile.name == "elite_440"
     end
 
+    test "a meter without a retry takes its endpoint's, and one with its own keeps it" do
+      json = put_in(valid(), ["endpoints", Access.at(0), "meters", Access.at(1), "retry_ms"], 7)
+
+      assert {:ok, %Config{endpoints: [%Endpoint{meters: [first, own]}, _]}} =
+               Config.parse(json, profiles())
+
+      assert {first.retry_ms, own.retry_ms} == {60_000, 7}
+    end
+
     test "parses the copy window into times of day, and each endpoint's copy" do
       json = valid() |> put_in(["endpoints", Access.at(1), "copy"], true)
       json = put_in(json, ["copy_window"], %{"start" => "23:30", "end" => "00:30"})
@@ -64,6 +73,15 @@ defmodule Alavi.ConfigTest do
        "copy_window: start and end are both 02:00"},
       {"an endpoint without copy", ["endpoints", 1, "copy"], :delete,
        "endpoints[1]: copy must be true or false"},
+      {"an endpoint interval that does not divide a day", ["endpoints", 0, "interval_ms"], 7,
+       "endpoints[0]: interval_ms 7 does not divide a day (86400000 ms)"},
+      {"a meter interval that does not divide a day",
+       ["endpoints", 0, "meters", 1, "interval_ms"], 420_000,
+       "meters[1]: interval_ms 420000 does not divide a day"},
+      {"an endpoint without retry_ms", ["endpoints", 1, "retry_ms"], :delete,
+       "endpoints[1]: retry_ms must be an integer in 1..86400000"},
+      {"meter retry 0", ["endpoints", 0, "meters", 0, "retry_ms"], 0,
+       "meters[0]: retry_ms must be an integer in 1.."},
       {"a string flag", ["endpoints", 0, "polled_by_other_system"], "no",
        "polled_by_other_system must be true or false"},
       {"backoff max below min", ["endpoints", 0, "reconnect_backoff_ms", "max"], 5,

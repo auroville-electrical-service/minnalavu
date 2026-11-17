@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://minnalavu.invalid/contract/config.v1.schema.json",
   "title": "Collector polling config, schema version 1",
-  "description": "What a collector polls and how: the collector's local file and the config the server serves are this one format. The collector takes its fields and limits from this file, and the registry's checks are tested against it. Rules a JSON Schema cannot state are the parser's (and the registry's, where it stores the value): an endpoint's host and port once per config, a unit_id once per endpoint, a serial once per config, reconnect_backoff_ms.max no less than its min, a profile among those the collector loaded that reads the serial and the product code, a serial no longer than its profile's serial registers hold, and a copy window whose start and end differ.",
+  "description": "What a collector polls and how: the collector's local file and the config the server serves are this one format. The collector takes its fields and limits from this file, and the registry's checks are tested against it. Rules a JSON Schema cannot state are the parser's (and the registry's, where it stores the value): an endpoint's host and port once per config, a unit_id once per endpoint, a serial once per config, reconnect_backoff_ms.max no less than its min, a profile among those the collector loaded that reads the serial and the product code, a serial no longer than its profile's serial registers hold, a copy window whose start and end differ, and an interval_ms, an endpoint's or a meter's, that divides a day (86400000) exactly.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "copy_window", "endpoints"],
@@ -41,6 +41,7 @@
         "busy_backoff_ms",
         "reconnect_backoff_ms",
         "interval_ms",
+        "retry_ms",
         "copy",
         "meters"
       ],
@@ -89,7 +90,11 @@
           }
         },
         "interval_ms": {
-          "description": "How often each meter is read, unless the meter gives its own.",
+          "description": "How often each meter is read, unless the meter gives its own: its rounds fall at multiples of it from midnight by the collector's local wall clock, so it divides a day.",
+          "$ref": "#/$defs/ms"
+        },
+        "retry_ms": {
+          "description": "After a round in which a meter gave no reading (no answer, not an exception reply), how long until it is read again, unless its next round comes first; and so on until it answers. A meter may give its own.",
           "$ref": "#/$defs/ms"
         },
         "copy": {
@@ -120,7 +125,11 @@
           "pattern": "^[a-z][a-z0-9_]{0,39}$"
         },
         "interval_ms": {
-          "description": "How often this meter is read; when absent, its endpoint's interval_ms.",
+          "description": "How often this meter is read, dividing a day as its endpoint's does; when absent, its endpoint's interval_ms.",
+          "$ref": "#/$defs/ms"
+        },
+        "retry_ms": {
+          "description": "How soon this meter is read again after a round that gave no reading; when absent, its endpoint's retry_ms.",
           "$ref": "#/$defs/ms"
         }
       }

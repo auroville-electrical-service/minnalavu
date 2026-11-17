@@ -26,6 +26,7 @@ defmodule Alavi.PollerCase do
       "busy_backoff_ms" => 10,
       "reconnect_backoff_ms" => %{"min" => 10, "max" => 40},
       "interval_ms" => 60_000,
+      "retry_ms" => 60_000,
       "copy" => false,
       "meters" => meters
     }

@@ -33,6 +33,11 @@
     { "name": "backoff max below min", "path": ["endpoints", 0, "reconnect_backoff_ms", "max"], "value": 999, "by": ["parser", "registry"] },
     { "name": "an unknown backoff field", "path": ["endpoints", 0, "reconnect_backoff_ms", "step"], "value": 2, "by": ["schema", "parser"] },
     { "name": "an endpoint interval of a day and a millisecond", "path": ["endpoints", 0, "interval_ms"], "value": 86400001, "by": ["schema", "parser", "registry"] },
+    { "name": "an endpoint interval that does not divide a day", "path": ["endpoints", 0, "interval_ms"], "value": 420000, "by": ["parser", "registry"] },
+    { "name": "an endpoint without retry_ms", "path": ["endpoints", 0, "retry_ms"], "delete": true, "by": ["schema", "parser"] },
+    { "name": "an endpoint retry of 0", "path": ["endpoints", 0, "retry_ms"], "value": 0, "by": ["schema", "parser", "registry"] },
+    { "name": "an endpoint retry of a day and a millisecond", "path": ["endpoints", 0, "retry_ms"], "value": 86400001, "by": ["schema", "parser", "registry"] },
+    { "name": "a retry as a string", "path": ["endpoints", 0, "retry_ms"], "value": "1800000", "by": ["schema", "parser"] },
     { "name": "no meters", "path": ["endpoints", 0, "meters"], "value": [], "by": ["schema", "parser"] },
     { "name": "a repeated endpoint", "path": ["endpoints", 1, "host"], "value": "192.0.2.10", "by": ["parser"] },
     { "name": "unit id 248", "path": ["endpoints", 0, "meters", 0, "unit_id"], "value": 248, "by": ["schema", "parser", "registry"] },
@@ -43,6 +48,8 @@
     { "name": "a profile name of 41 characters", "path": ["endpoints", 0, "meters", 0, "profile"], "value": "elite_440_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "by": ["schema", "parser", "registry"] },
     { "name": "a profile not loaded", "path": ["endpoints", 0, "meters", 0, "profile"], "value": "elite_999", "by": ["parser"] },
     { "name": "meter interval 0", "path": ["endpoints", 0, "meters", 0, "interval_ms"], "value": 0, "by": ["schema", "parser", "registry"] },
+    { "name": "a meter interval that does not divide a day", "path": ["endpoints", 0, "meters", 0, "interval_ms"], "value": 420000, "by": ["parser", "registry"] },
+    { "name": "meter retry 0", "path": ["endpoints", 0, "meters", 0, "retry_ms"], "value": 0, "by": ["schema", "parser", "registry"] },
     { "name": "an empty serial", "path": ["endpoints", 0, "meters", 0, "serial"], "value": "", "by": ["schema", "parser", "registry"] },
     { "name": "a serial with a trailing space", "path": ["endpoints", 0, "meters", 0, "serial"], "value": "EX-0001 ", "by": ["schema", "parser", "registry"] },
     { "name": "a serial with a leading space", "path": ["endpoints", 0, "meters", 0, "serial"], "value": " EX-0001", "by": ["schema", "parser", "registry"] },
@@ -108,6 +115,34 @@
       "changes": [
         { "path": ["copy_window", "start"], "value": "00:00" },
         { "path": ["copy_window", "end"], "value": "23:59" }
+      ],
+      "by": ["schema", "parser", "registry"]
+    },
+    {
+      "name": "an endpoint interval of a whole day",
+      "changes": [{ "path": ["endpoints", 0, "interval_ms"], "value": 86400000 }],
+      "by": ["schema", "parser", "registry"]
+    },
+    {
+      "name": "a meter interval of a millisecond, which divides a day",
+      "changes": [{ "path": ["endpoints", 0, "meters", 0, "interval_ms"], "value": 1 }],
+      "by": ["schema", "parser", "registry"]
+    },
+    {
+      "name": "a meter interval of 6 hours",
+      "changes": [{ "path": ["endpoints", 0, "meters", 0, "interval_ms"], "value": 21600000 }],
+      "by": ["schema", "parser", "registry"]
+    },
+    {
+      "name": "a meter retry of its own",
+      "changes": [{ "path": ["endpoints", 0, "meters", 0, "retry_ms"], "value": 60000 }],
+      "by": ["schema", "parser", "registry"]
+    },
+    {
+      "name": "a retry longer than the interval, and one that does not divide a day",
+      "changes": [
+        { "path": ["endpoints", 0, "interval_ms"], "value": 60000 },
+        { "path": ["endpoints", 0, "retry_ms"], "value": 4200007 }
       ],
       "by": ["schema", "parser", "registry"]
     },

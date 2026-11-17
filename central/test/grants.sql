@@ -237,8 +237,8 @@ FROM unnest(ARRAY[
   $q$SELECT store.batch_stored_entries('{}')$q$,
   $q$SELECT admin.create_collector('sqltest_intruder')$q$,
   $q$SELECT admin.retire_meter('SQLREG-0001', now())$q$,
-  $q$SELECT admin.register_target('e', 1, now(), 'elite_440', NULL)$q$,
-  $q$SELECT admin.change_target('e', 1, now(), 'elite_440', NULL)$q$,
+  $q$SELECT admin.register_target('e', 1, now(), 'elite_440', NULL, NULL)$q$,
+  $q$SELECT admin.change_target('e', 1, now(), 'elite_440', NULL, NULL)$q$,
   $q$SELECT admin.retire_target('e', 1, now())$q$,
   $q$INSERT INTO registry.target_versions (endpoint_id, unit_id, valid_from, in_service, profile) VALUES ('e', 1, now(), true, 'elite_440')$q$,
   $q$SELECT store.check_batch('{}')$q$,
@@ -408,7 +408,7 @@ FROM unnest(ARRAY[
   $q$SELECT registry.collector_config('sqltest_grants')$q$,
   $q$SELECT admin.set_health_thresholds('1 hour', 4, 0.8, '1 day', 0.05, '1 hour', '62 days', '14 days', '7 days', '30 days')$q$,
   $q$SELECT admin.retire_meter('SQLREG-0001', now())$q$,
-  $q$SELECT admin.register_target('e', 1, now(), 'elite_440', NULL)$q$,
+  $q$SELECT admin.register_target('e', 1, now(), 'elite_440', NULL, NULL)$q$,
   $q$SELECT admin.retire_target('e', 1, now())$q$,
   $q$INSERT INTO registry.health_thresholds (collector_silent_after, meter_silent_intervals, backlog_near_capacity, lookback, endpoint_error_rate, snapshot_missed_margin, history_behind_after, snapshot_behind_after_elite_500, load_survey_behind_after_elite_440, load_survey_behind_after_elite_500) VALUES ('1 hour', 4, 0.8, '1 day', 0.05, '1 hour', '62 days', '14 days', '7 days', '30 days')$q$,
   'SELECT * FROM store.profile_versions',
@@ -589,7 +589,7 @@ FROM unnest(ARRAY[
   $q$SELECT registry.collector_config('sqltest_grants')$q$,
   $q$SELECT admin.create_collector('sqltest_intruder')$q$,
   $q$SELECT admin.register_meter('S', now(), 'e', 1)$q$,
-  $q$SELECT admin.register_target('e', 1, now(), 'elite_440', NULL)$q$,
+  $q$SELECT admin.register_target('e', 1, now(), 'elite_440', NULL, NULL)$q$,
   'CREATE TABLE jobs.x (i int)',
   'CREATE TEMP TABLE x (i int)'
 ]) q;

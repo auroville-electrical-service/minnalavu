@@ -180,9 +180,11 @@ Collectors are `store.collectors`.
   id (a place to poll, whatever meter answers there, so a unit is polled
   before its serial is known), a meter by its serial (as readings carry it).
 - `registry.endpoint_versions`, `registry.target_versions` and
-  `registry.meter_versions` hold their state: a target's profile and interval
-  (NULL: its endpoint's), and the target a meter is placed at; each value
-  stored once.
+  `registry.meter_versions` hold their state: a target's profile, interval
+  and retry interval (NULL: its endpoint's), and the target a meter is placed
+  at; each value stored once. An interval, an endpoint's or a target's,
+  divides a day (86,400,000 ms), since rounds fall on slots from the
+  collector's local midnight; a retry interval need not.
   Each row is the whole state from `valid_from` until the next row's: a move,
   a new interval, a retirement or a swap adds a row. Nothing in `registry` is
   ever updated or deleted (triggers refuse it, even for the owner). A mistake
@@ -207,9 +209,11 @@ holds from, which may be in the past:
       collector_id => 'pilot_01', host => '10.0.0.21', port => 502, framing => 'tcp',
       polled_by_other_system => false, timeout_ms => 1000, max_timeouts => 3, retries => 2,
       busy_backoff_ms => 500, reconnect_backoff_min_ms => 1000,
-      reconnect_backoff_max_ms => 60000, interval_ms => 900000);   -- copies nothing
+      reconnect_backoff_max_ms => 60000, interval_ms => 900000,
+      retry_ms => 1800000);   -- copies nothing
     SELECT admin.register_target(endpoint_id => 'site_a_chain_1', unit_id => 1,
-      valid_from => '…', profile => 'elite_440', interval_ms => NULL);   -- NULL: the endpoint's
+      valid_from => '…', profile => 'elite_440', interval_ms => NULL,
+      retry_ms => NULL);   -- NULL: the endpoint's
     SELECT admin.register_meter(serial => '…', valid_from => '…', endpoint_id => 'site_a_chain_1',
       unit_id => 1);
 
@@ -218,7 +222,9 @@ holds from, which may be in the past:
   reprofile, retime, correct). An endpoint copies its meters' stored entries
   only when `copy => true`: `register_endpoint` takes it optionally, off when
   left out, and `change_endpoint` requires it, so a change cannot switch
-  copying off unseen.
+  copying off unseen. `retry_ms`, how soon a meter that gave no reading in a
+  round is read again, has no default in any of the four that set an
+  interval: register and change, endpoint and target.
 - `admin.set_copy_window(collector_id, valid_from, start_time, end_time)`:
   the window of the collector's local wall clock that copies run in, in
   whole minutes, from `valid_from`; an end before the start crosses

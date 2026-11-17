@@ -16,14 +16,14 @@ LANGUAGE sql AS $$
     endpoint_id => id, valid_from => valid_from, collector_id => collector, host => host,
     port => 502, framing => 'tcp', polled_by_other_system => false, timeout_ms => 1000,
     max_timeouts => 3, retries => 2, busy_backoff_ms => 500, reconnect_backoff_min_ms => 1000,
-    reconnect_backoff_max_ms => 60000, interval_ms => 900000)
+    reconnect_backoff_max_ms => 60000, interval_ms => 900000, retry_ms => 1800000)
 $$;
 
 -- A target from valid_from, polled as an elite_440 at its endpoint's interval.
 CREATE FUNCTION pg_temp.target(endpoint text, unit integer, valid_from timestamptz) RETURNS bigint
 LANGUAGE sql AS $$
   SELECT admin.register_target(endpoint_id => endpoint, unit_id => unit, valid_from => valid_from,
-    profile => 'elite_440', interval_ms => NULL)
+    profile => 'elite_440', interval_ms => NULL, retry_ms => NULL)
 $$;
 
 -- A meter's history, one period per line.
@@ -55,9 +55,9 @@ FROM (VALUES ('sqltest_ep_1', 1), ('sqltest_ep_1', 2), ('sqltest_ep_2', 5),
              ('sqltest_ep_2', 6)) v (e, u);
 
 SELECT admin.change_target(endpoint_id => 'sqltest_ep_1', unit_id => 1,
-  valid_from => '2026-02-01Z', profile => 'elite_440', interval_ms => 60000);
+  valid_from => '2026-02-01Z', profile => 'elite_440', interval_ms => 60000, retry_ms => NULL);
 SELECT admin.change_target(endpoint_id => 'sqltest_ep_1', unit_id => 1,
-  valid_from => '2026-01-15Z', profile => 'elite_440', interval_ms => 300000);
+  valid_from => '2026-01-15Z', profile => 'elite_440', interval_ms => 300000, retry_ms => NULL);
 
 SELECT pg_temp.is(pg_temp.target_history('sqltest_ep_1', 1),
   '[2026-01-01, 2026-01-15) in elite_440 endpoint' || E'\n'
@@ -109,7 +109,7 @@ SELECT admin.change_endpoint(
   endpoint_id => 'sqltest_ep_2', valid_from => '2026-05-01Z', collector_id => 'sqltest_reg_b',
   host => '10.1.0.5', port => 502, framing => 'rtu_over_tcp', polled_by_other_system => false,
   timeout_ms => 1000, max_timeouts => NULL, retries => 2, busy_backoff_ms => 500,
-  reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000, interval_ms => 900000, copy => false);
+  reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000, interval_ms => 900000, retry_ms => 1800000, copy => false);
 
 SELECT pg_temp.is(
   (SELECT string_agg(format('%s %s %s:%s %s', valid_from::date, collector_id, host, port, framing),
@@ -124,7 +124,7 @@ SELECT admin.change_endpoint(
   endpoint_id => 'sqltest_ep_copy', valid_from => '2026-03-01Z', collector_id => 'sqltest_reg_a',
   host => '10.0.0.29', port => 502, framing => 'tcp', polled_by_other_system => false,
   timeout_ms => 1000, max_timeouts => 3, retries => 2, busy_backoff_ms => 500,
-  reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000, interval_ms => 900000,
+  reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000, interval_ms => 900000, retry_ms => 1800000,
   copy => true);
 SELECT admin.retire_endpoint(endpoint_id => 'sqltest_ep_copy', valid_from => '2026-04-01Z');
 
@@ -143,7 +143,7 @@ SELECT pg_temp.is(pg_temp.sqlstate_as('postgres', $q$SELECT admin.change_endpoin
     host => '10.0.0.29', port => 502, framing => 'tcp', polled_by_other_system => false,
     timeout_ms => 1000, max_timeouts => 3, retries => 2, busy_backoff_ms => 500,
     reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000,
-    interval_ms => 900000)$q$),
+    interval_ms => 900000, retry_ms => 1800000)$q$),
   '42883',
   'a change that leaves copy out is refused, so it cannot switch copying off unseen');
 
@@ -152,7 +152,7 @@ SELECT pg_temp.is(pg_temp.sqlstate_as('postgres', $q$SELECT admin.change_endpoin
     host => '10.0.0.29', port => 502, framing => 'tcp', polled_by_other_system => false,
     timeout_ms => 1000, max_timeouts => 3, retries => 2, busy_backoff_ms => 500,
     reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000,
-    interval_ms => 900000, copy => NULL)$q$),
+    interval_ms => 900000, retry_ms => 1800000, copy => NULL)$q$),
   '23502',
   'a change with copy NULL is refused');
 
@@ -161,7 +161,7 @@ SELECT admin.register_meter(serial => 'SQLREG-0002', valid_from => '2026-01-01Z'
 SELECT admin.swap_meter(old_serial => 'SQLREG-0002', new_serial => 'SQLREG-0003',
   swapped_at => '2026-06-01Z');
 SELECT admin.change_target(endpoint_id => 'sqltest_ep_1', unit_id => 2,
-  valid_from => '2026-06-01Z', profile => 'elite_500', interval_ms => NULL);
+  valid_from => '2026-06-01Z', profile => 'elite_500', interval_ms => NULL, retry_ms => NULL);
 
 SELECT pg_temp.is(
   pg_temp.meter_history('SQLREG-0002') || E'\n' || pg_temp.meter_history('SQLREG-0003'),
@@ -231,16 +231,16 @@ FROM unnest(ARRAY[
   $q$SELECT admin.retire_target(endpoint_id => 'sqltest_ep_2', unit_id => 6,
        valid_from => '2026-12-01Z')$q$,
   $q$SELECT admin.change_target(endpoint_id => 'sqltest_ep_1', unit_id => 98,
-       valid_from => '2026-01-01Z', profile => 'elite_440', interval_ms => NULL)$q$
+       valid_from => '2026-01-01Z', profile => 'elite_440', interval_ms => NULL, retry_ms => NULL)$q$
 ]) q;
 
 SELECT pg_temp.is(pg_temp.sqlstate_as('postgres', q), '23514', 'out of range: ' || q)
 FROM unnest(ARRAY[
   $q$SELECT pg_temp.target('sqltest_ep_1', 248, '2026-01-01Z')$q$,
   $q$SELECT admin.register_target(endpoint_id => 'sqltest_ep_1', unit_id => 12,
-       valid_from => '2026-01-01Z', profile => 'elite_440', interval_ms => 0)$q$,
+       valid_from => '2026-01-01Z', profile => 'elite_440', interval_ms => 0, retry_ms => NULL)$q$,
   $q$SELECT admin.register_target(endpoint_id => 'sqltest_ep_1', unit_id => 12,
-       valid_from => '2026-01-01Z', profile => 'Elite_440', interval_ms => NULL)$q$,
+       valid_from => '2026-01-01Z', profile => 'Elite_440', interval_ms => NULL, retry_ms => NULL)$q$,
   $q$SELECT pg_temp.target('sqltest_ep_1', 12, 'infinity')$q$,
   $q$SELECT admin.register_meter(serial => 'SQLREG-0010', valid_from => 'infinity',
        endpoint_id => 'sqltest_ep_1', unit_id => 2)$q$,
@@ -249,8 +249,71 @@ FROM unnest(ARRAY[
        endpoint_id => 'sqltest_ep_2', valid_from => '2026-07-01Z', collector_id => 'sqltest_reg_b',
        host => '10.1.0.5', port => 502, framing => 'rtu_over_tcp', polled_by_other_system => false,
        timeout_ms => 1000, max_timeouts => 3, retries => 2, busy_backoff_ms => 500,
-       reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000, interval_ms => 900000, copy => false)$q$
+       reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000, interval_ms => 900000,
+       retry_ms => 1800000, copy => false)$q$,
+  -- an interval that does not divide a day has no slots from midnight
+  $q$SELECT admin.change_endpoint(
+       endpoint_id => 'sqltest_ep_2', valid_from => '2026-07-01Z', collector_id => 'sqltest_reg_b',
+       host => '10.1.0.5', port => 502, framing => 'rtu_over_tcp', polled_by_other_system => false,
+       timeout_ms => 1000, max_timeouts => NULL, retries => 2, busy_backoff_ms => 500,
+       reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000, interval_ms => 420000,
+       retry_ms => 1800000, copy => false)$q$,
+  $q$SELECT admin.change_target(endpoint_id => 'sqltest_ep_1', unit_id => 9,
+       valid_from => '2026-07-01Z', profile => 'elite_440', interval_ms => 7, retry_ms => NULL)$q$,
+  $q$SELECT admin.change_target(endpoint_id => 'sqltest_ep_1', unit_id => 9,
+       valid_from => '2026-07-01Z', profile => 'elite_440', interval_ms => NULL, retry_ms => 0)$q$
 ]) q;
+
+-- Retry intervals: stated by every change of an endpoint and of a target, a
+-- target's NULL for its endpoint's; a retired one keeps its own.
+SELECT admin.change_target(endpoint_id => 'sqltest_ep_2', unit_id => 5,
+  valid_from => '2026-02-01Z', profile => 'elite_440', interval_ms => NULL, retry_ms => 4200007);
+SELECT admin.retire_target(endpoint_id => 'sqltest_ep_2', unit_id => 5, valid_from => '2026-03-01Z');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s %s %s', valid_from::date,
+                            CASE WHEN in_service THEN 'in' ELSE 'retired' END,
+                            coalesce(retry_ms::text, 'endpoint')),
+                     ', ' ORDER BY valid_from)
+   FROM registry.target_history WHERE endpoint_id = 'sqltest_ep_2' AND unit_id = 5),
+  '2026-01-01 in endpoint, 2026-02-01 in 4200007, 2026-03-01 retired 4200007',
+  'a target''s retry interval is its endpoint''s until it has its own, which need not divide '
+  || 'a day; a retired target keeps it');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s %s', valid_from::date, retry_ms), ', ' ORDER BY valid_from)
+   FROM registry.endpoint_history WHERE endpoint_id = 'sqltest_ep_copy'),
+  '2026-01-01 1800000, 2026-03-01 1800000, 2026-04-01 1800000',
+  'an endpoint''s retry interval is in its history, and a retired one keeps it');
+
+SELECT pg_temp.is(pg_temp.sqlstate_as('postgres', q), '42883', 'retry_ms left out: ' || q)
+FROM unnest(ARRAY[
+  $q$SELECT admin.change_endpoint(
+       endpoint_id => 'sqltest_ep_copy', valid_from => '2026-05-01Z', collector_id => 'sqltest_reg_a',
+       host => '10.0.0.29', port => 502, framing => 'tcp', polled_by_other_system => false,
+       timeout_ms => 1000, max_timeouts => 3, retries => 2, busy_backoff_ms => 500,
+       reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000,
+       interval_ms => 900000, copy => false)$q$,
+  $q$SELECT admin.register_endpoint(
+       endpoint_id => 'sqltest_ep_noretry', valid_from => '2026-05-01Z', collector_id => 'sqltest_reg_a',
+       host => '10.0.0.30', port => 502, framing => 'tcp', polled_by_other_system => false,
+       timeout_ms => 1000, max_timeouts => 3, retries => 2, busy_backoff_ms => 500,
+       reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000,
+       interval_ms => 900000)$q$,
+  $q$SELECT admin.change_target(endpoint_id => 'sqltest_ep_1', unit_id => 9,
+       valid_from => '2026-07-01Z', profile => 'elite_440', interval_ms => NULL)$q$,
+  $q$SELECT admin.register_target(endpoint_id => 'sqltest_ep_1', unit_id => 13,
+       valid_from => '2026-07-01Z', profile => 'elite_440', interval_ms => NULL)$q$
+]) q;
+
+SELECT pg_temp.is(pg_temp.sqlstate_as('postgres', $q$SELECT admin.change_endpoint(
+    endpoint_id => 'sqltest_ep_copy', valid_from => '2026-05-01Z', collector_id => 'sqltest_reg_a',
+    host => '10.0.0.29', port => 502, framing => 'tcp', polled_by_other_system => false,
+    timeout_ms => 1000, max_timeouts => 3, retries => 2, busy_backoff_ms => 500,
+    reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000,
+    interval_ms => 900000, retry_ms => NULL, copy => false)$q$),
+  '23502',
+  'an endpoint''s change with retry_ms NULL is refused');
 
 -- A collector's copy window, by its local wall clock.
 SELECT admin.set_copy_window(collector_id => 'sqltest_reg_a', valid_from => '2026-01-01Z',

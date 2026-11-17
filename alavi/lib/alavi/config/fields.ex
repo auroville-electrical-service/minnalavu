@@ -39,6 +39,22 @@ defmodule Alavi.Config.Fields do
     end
   end
 
+  @day_ms 86_400_000
+
+  # contract: test/alavi/config_test.exs "parse/2"
+  # Rounds fall on slots at multiples of the interval from local midnight.
+  @spec interval(map(), String.t(), Range.t()) :: result(pos_integer())
+  def interval(map, field, range) do
+    with {:ok, ms} <- integer(map, field, range) do
+      if rem(@day_ms, ms) == 0,
+        do: {:ok, ms},
+        else:
+          {:error,
+           "#{field} #{ms} does not divide a day (#{@day_ms} ms), " <>
+             "and rounds fall on slots from local midnight"}
+    end
+  end
+
   @spec positive(map(), String.t()) :: result(pos_integer())
   def positive(map, field) do
     case Map.fetch(map, field) do

@@ -56,7 +56,8 @@ LANGUAGE sql AS $$
     retries => (e ->> 'retries')::integer, busy_backoff_ms => (e ->> 'busy_backoff_ms')::integer,
     reconnect_backoff_min_ms => (e #>> '{reconnect_backoff_ms,min}')::integer,
     reconnect_backoff_max_ms => (e #>> '{reconnect_backoff_ms,max}')::integer,
-    interval_ms => (e ->> 'interval_ms')::integer, copy => (e ->> 'copy')::boolean)
+    interval_ms => (e ->> 'interval_ms')::integer, retry_ms => (e ->> 'retry_ms')::integer,
+    copy => (e ->> 'copy')::boolean)
 $$;
 
 -- The config's copy window, two days ago, and another from tomorrow.
@@ -75,7 +76,8 @@ FROM jsonb_array_elements(:'basic'::jsonb -> 'endpoints') WITH ORDINALITY x(e, i
 
 SELECT admin.register_target(endpoint_id => 'sqltest_srv_' || i, unit_id => (m ->> 'unit_id')::integer,
   valid_from => now() - interval '2 days', profile => m ->> 'profile',
-  interval_ms => (m ->> 'interval_ms')::integer)
+  interval_ms => (m ->> 'interval_ms')::integer,
+  retry_ms => (m ->> 'retry_ms')::integer)
 FROM jsonb_array_elements(:'basic'::jsonb -> 'endpoints') WITH ORDINALITY x(e, i)
 CROSS JOIN jsonb_array_elements(e -> 'meters') m;
 
@@ -89,11 +91,11 @@ WHERE m ? 'serial';
 -- meter retired from a target that is still polled, an endpoint retired and
 -- one from tomorrow; and an endpoint of another collector.
 SELECT admin.register_target(endpoint_id => 'sqltest_srv_1', unit_id => 5,
-  valid_from => now() - interval '2 days', profile => 'elite_440', interval_ms => NULL);
+  valid_from => now() - interval '2 days', profile => 'elite_440', interval_ms => NULL, retry_ms => NULL);
 SELECT admin.retire_target(endpoint_id => 'sqltest_srv_1', unit_id => 5,
   valid_from => now() - interval '1 day');
 SELECT admin.register_target(endpoint_id => 'sqltest_srv_1', unit_id => 6,
-  valid_from => now() + interval '1 day', profile => 'elite_440', interval_ms => NULL);
+  valid_from => now() + interval '1 day', profile => 'elite_440', interval_ms => NULL, retry_ms => NULL);
 SELECT admin.register_meter(serial => 'SQLSRV-GONE', valid_from => now() - interval '2 days',
   endpoint_id => 'sqltest_srv_1', unit_id => 3);
 SELECT admin.retire_meter(serial => 'SQLSRV-GONE', valid_from => now() - interval '1 day');
@@ -102,7 +104,7 @@ SELECT pg_temp.endpoint('sqltest_srv_old', 'sqltest_srv_a',
   jsonb_set(:'basic'::jsonb #> '{endpoints,0}', '{host}', '"192.0.2.99"'),
   now() - interval '2 days');
 SELECT admin.register_target(endpoint_id => 'sqltest_srv_old', unit_id => 1,
-  valid_from => now() - interval '2 days', profile => 'elite_440', interval_ms => NULL);
+  valid_from => now() - interval '2 days', profile => 'elite_440', interval_ms => NULL, retry_ms => NULL);
 SELECT admin.retire_target(endpoint_id => 'sqltest_srv_old', unit_id => 1,
   valid_from => now() - interval '1 day');
 SELECT admin.retire_endpoint(endpoint_id => 'sqltest_srv_old', valid_from => now() - interval '1 day');
@@ -111,20 +113,20 @@ SELECT pg_temp.endpoint('sqltest_srv_new', 'sqltest_srv_a',
   jsonb_set(:'basic'::jsonb #> '{endpoints,0}', '{host}', '"192.0.2.98"'),
   now() + interval '1 day');
 SELECT admin.register_target(endpoint_id => 'sqltest_srv_new', unit_id => 1,
-  valid_from => now() + interval '1 day', profile => 'elite_440', interval_ms => NULL);
+  valid_from => now() + interval '1 day', profile => 'elite_440', interval_ms => NULL, retry_ms => NULL);
 
 SELECT pg_temp.endpoint('sqltest_srv_b1', 'sqltest_srv_b',
   jsonb_set(:'basic'::jsonb #> '{endpoints,0}', '{host}', '"192.0.2.77"'),
   now() - interval '2 days');
 SELECT admin.register_target(endpoint_id => 'sqltest_srv_b1', unit_id => 9,
-  valid_from => now() - interval '2 days', profile => 'elite_500', interval_ms => NULL);
+  valid_from => now() - interval '2 days', profile => 'elite_500', interval_ms => NULL, retry_ms => NULL);
 
 -- Serving
 
 SELECT pg_temp.is(pg_temp.config_as('collector_sqltest_srv_a'), :'basic'::jsonb,
   'a collector is served the config the registry holds for it now: its copy window in force, '
   || 'its endpoints and targets in service, whether each copies, the serial placed at each, '
-  || 'an interval only where a target has its own, and an endpoint another system polls as it is');
+  || 'an interval and a retry only where a target has its own, and an endpoint another system polls as it is');
 
 SELECT pg_temp.is(pg_temp.config_as('collector_sqltest_srv_b') -> 'copy_window',
   '{"start": "23:30", "end": "00:05"}'::jsonb,
@@ -189,7 +191,7 @@ SELECT pg_temp.is(
   'each collector''s answer carries the digest of its own config');
 
 SELECT admin.change_target(endpoint_id => 'sqltest_srv_1', unit_id => 1, valid_from => now(),
-  profile => 'elite_440', interval_ms => 120000);
+  profile => 'elite_440', interval_ms => 120000, retry_ms => NULL);
 
 SELECT pg_temp.ok(
   pg_temp.ingest_as('collector_sqltest_srv_a',
