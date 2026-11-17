@@ -287,6 +287,19 @@ defmodule Simulator.StoresTest do
       assert_raise ArgumentError, fn -> Simulator.Stores.change(stores, interval: 7) end
       assert_raise ArgumentError, fn -> Simulator.Stores.change(stores, parameters: [64]) end
     end
+
+    test "a 500's required registers read their profile values until changed; a 440 has none" do
+      meter = Meter.new(3, Profile.load!("elite_500"))
+      assert {:ok, [2]} = Meter.read(meter, :holding, 5001, 1, @now)
+      assert {:ok, [0]} = Meter.read(meter, :holding, 1844, 1, @now)
+
+      changed = Meter.stores(meter, settings: %{"logger_type" => 3})
+      assert {:ok, [3]} = Meter.read(changed, :holding, 5001, 1, @now)
+      assert {:ok, [0]} = Meter.read(changed, :holding, 1844, 1, @now)
+
+      assert_raise ArgumentError, fn -> Meter.stores(meter, settings: %{"other" => 1}) end
+      assert Meter.new(1, Profile.load!("elite_440")).stores.settings == %{}
+    end
   end
 
   defp held(:history, count), do: 0..count

@@ -25,6 +25,8 @@ defmodule Simulator.Stores do
     NaN (0xFFFFFFFF); the masks show the rest.
   - Every register of an entry a selector shows but the meter does not
     hold (past the counts) reads 0xFFFF.
+  - Each register the load survey `requires` reads its `settings` value,
+    the required one unless changed; the survey reads the same either way.
   """
 
   alias Simulator.{Encode, Profile}
@@ -34,6 +36,7 @@ defmodule Simulator.Stores do
     :snapshots,
     :days,
     :interval,
+    :settings,
     :unsupported,
     :parameters,
     :base,
@@ -42,14 +45,17 @@ defmodule Simulator.Stores do
   defstruct @enforce_keys
 
   @typedoc """
-  `interval` is the load survey's, in minutes; `parameters` the load-survey
-  parameter numbers the meter supports; `rates` in the quantity's unit per hour.
+  `interval` is the load survey's, in minutes; `settings` what each register
+  the profile's load survey `requires` reads, by key, the required value
+  unless changed; `parameters` the load-survey parameter numbers the meter
+  supports; `rates` in the quantity's unit per hour.
   """
   @type t :: %__MODULE__{
           histories: 0..0xFFFF,
           snapshots: 0..0xFFFF,
           days: 0..0xFFFF,
           interval: pos_integer(),
+          settings: %{String.t() => 0..0xFFFF},
           unsupported: MapSet.t(String.t()),
           parameters: MapSet.t(0..63),
           base: %{String.t() => Decimal.t()},
@@ -63,6 +69,7 @@ defmodule Simulator.Stores do
           | {:snapshots, 0..0xFFFF}
           | {:days, 0..0xFFFF}
           | {:interval, pos_integer()}
+          | {:settings, %{String.t() => 0..0xFFFF}}
           | {:unsupported, [String.t()]}
           | {:parameters, [0..63]}
           | {:base, %{String.t() => Decimal.t()}}
@@ -100,6 +107,7 @@ defmodule Simulator.Stores do
       snapshots: defaults.snapshots,
       days: 7,
       interval: defaults.interval,
+      settings: Map.new(stored.load_survey.requires, fn {key, r} -> {key, r.value} end),
       unsupported: unsupported(stored.history, defaults.mask),
       parameters: MapSet.new(defaults.parameters),
       base: keys |> Enum.with_index() |> Map.new(&base(&1, profile, values)),
@@ -136,6 +144,18 @@ defmodule Simulator.Stores do
   defp option({:interval, minutes}, stores)
        when is_integer(minutes) and minutes > 0 and rem(1440, minutes) == 0,
        do: %{stores | interval: minutes}
+
+  defp option({:settings, settings}, stores) do
+    if Enum.all?(settings, fn {key, value} ->
+         Map.has_key?(stores.settings, key) and value in 0..0xFFFF
+       end),
+       do: %{stores | settings: Map.merge(stores.settings, settings)},
+       else:
+         raise(
+           ArgumentError,
+           "not a required register's key, or out of range: #{inspect(settings)}"
+         )
+  end
 
   defp option({:unsupported, keys}, stores), do: %{stores | unsupported: MapSet.new(keys)}
   defp option({:parameters, numbers}, stores), do: %{stores | parameters: parameters(numbers)}
@@ -355,6 +375,7 @@ defmodule Simulator.Stores do
     values
     |> Map.merge(mask_bank(survey.mask, MapSet.to_list(stores.parameters)))
     |> Map.merge(%{survey.available => stores.days, survey.interval => stores.interval})
+    |> Map.merge(Map.new(survey.requires, fn {key, r} -> {r.address, stores.settings[key]} end))
   end
 
   defp series_bank(%{address: address, word_order: order}, values) do

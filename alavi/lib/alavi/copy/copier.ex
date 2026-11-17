@@ -173,7 +173,8 @@ defmodule Alavi.Copy.Copier do
   defp counts(meter, :load_survey, state, io) do
     survey = meter.profile.stored.load_survey
 
-    with {{:ok, [available]}, state} <-
+    with {:ok, state} <- required(meter.unit_id, survey.requires, state, io),
+         {{:ok, [available]}, state} <-
            io.read.(state, {meter.unit_id, :holding, survey.available, 1}),
          {{:ok, interval}, state} <-
            io.read.(state, {meter.unit_id, :holding, survey.interval, 1}),
@@ -211,6 +212,20 @@ defmodule Alavi.Copy.Copier do
       error ->
         error
     end
+  end
+
+  # Before anything of the survey is read: a register reading other than its
+  # profile requires means the selectors show some other survey, or one kept
+  # another way, so the store is not copied (read-only: never set back).
+  defp required(unit, requires, state, io) do
+    Enum.reduce_while(requires, {:ok, state}, fn %{key: key, address: address, value: want},
+                                                 {:ok, state} ->
+      case io.read.(state, {unit, :holding, address, 1}) do
+        {{:ok, [^want]}, state} -> {:cont, {:ok, state}}
+        {{:ok, [read]}, state} -> {:halt, {{:error, {:requires, key, read, want}}, state}}
+        error -> {:halt, error}
+      end
+    end)
   end
 
   defp session(run, visit, store, counts, state, io) do

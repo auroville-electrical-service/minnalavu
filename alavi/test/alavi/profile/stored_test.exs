@@ -38,6 +38,31 @@ defmodule Alavi.Profile.StoredTest do
                p500.stored.load_survey
 
       refute Enum.any?(p500.stored.load_survey.parameters, &(&1.number == 6))
+
+      assert p440.stored.load_survey.requires == []
+
+      assert [
+               %{key: "logger_type", address: 5001, value: 2},
+               %{key: "energy_storage_type", address: 1844, value: 0}
+             ] = p500.stored.load_survey.requires
+    end
+
+    test "a load-survey requirement is a cited u16 with a value, its key used once" do
+      path = ["stored", "load_survey", "requires", 0]
+
+      wide = change(json("elite_500"), path ++ ["type"], "u32")
+      assert {:error, message} = Profile.parse(wide)
+      assert message =~ ~s(type must be "u16")
+
+      large = change(json("elite_500"), path ++ ["value"], 0x10000)
+      assert {:error, message} = Profile.parse(large)
+      assert message =~ "value"
+
+      twice =
+        change(json("elite_500"), ["stored", "load_survey", "requires", 1, "key"], "logger_type")
+
+      assert {:error, message} = Profile.parse(twice)
+      assert message =~ "requires key"
     end
 
     test "a load-survey quantity is never cumulative, and no other store's is per interval" do

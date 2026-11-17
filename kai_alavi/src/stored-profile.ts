@@ -76,9 +76,21 @@ const block = <S extends "history" | "snapshot">(store: S) =>
       message: "only the load survey is per interval",
     });
 
+// A register that must read `value` for the survey the selectors show to be the one the section
+// describes: which logger they show, or whether energy is kept per interval.
+const requirement = z.strictObject({
+  key: z.string().min(1),
+  table: holding,
+  address,
+  type: z.literal("u16"),
+  value: z.int().min(0).max(0xffff),
+  ...cited,
+});
+
 const survey = z
   .strictObject({
     selectors: z.strictObject({ day: z.literal("load_survey_day"), parameter: z.literal("load_survey_parameter") }),
+    requires: z.array(requirement).min(1).optional(),
     available: count,
     interval: z.strictObject({ table: holding, address, type: z.literal("u16"), unit: z.literal("min"), ...cited }),
     stamp,
@@ -93,6 +105,7 @@ const survey = z
     }),
     parameters: z.array(parameter).min(1),
   })
+  .refine((s) => unique((s.requires ?? []).map((r) => r.key)), { message: "a requires key appears more than once" })
   .refine((s) => unique(s.parameters.map((p) => p.key)), { message: "a parameter key appears more than once" })
   .refine((s) => unique(s.parameters.map((p) => p.number)), { message: "a parameter number appears more than once" })
   .refine((s) => s.parameters.every((p) => p.kind !== "cumulative"), {
@@ -126,6 +139,7 @@ export const storedSources = (clock: Stamp | undefined, s: Stored | undefined): 
     : []),
   ...(s
     ? [
+        ...(s.load_survey.requires ?? []),
         s.load_survey.available,
         s.load_survey.interval,
         s.load_survey.stamp,

@@ -529,6 +529,26 @@
         "day": "load_survey_day",
         "parameter": "load_survey_parameter"
       },
+      "requires": [
+        {
+          "key": "logger_type",
+          "table": "holding",
+          "address": 5001,
+          "type": "u16",
+          "value": 2,
+          "source": "elite_500-a",
+          "verified_on_device": null
+        },
+        {
+          "key": "energy_storage_type",
+          "table": "holding",
+          "address": 1844,
+          "type": "u16",
+          "value": 0,
+          "source": "elite_500-a",
+          "verified_on_device": null
+        }
+      ],
       "available": {
         "table": "holding",
         "address": 4999,

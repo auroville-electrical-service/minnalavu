@@ -56,10 +56,17 @@ defmodule Alavi.Profile.Stored do
           kind: Register.kind(),
           source: Register.source()
         }
+  @typedoc """
+  A register that must read `value` for the survey the selectors show to be
+  the one this section describes: which logger they show, or whether energy
+  is kept per interval.
+  """
+  @type requirement :: %{key: String.t(), address: address(), value: 0..0xFFFF}
   @typedoc "`values` holds the day's f32 values, `per_request` intervals to a read."
   @type survey :: %{
           day: :load_survey_day,
           parameter: :load_survey_parameter,
+          requires: [requirement()],
           available: address(),
           interval: address(),
           stamp: stamp(),
@@ -141,10 +148,11 @@ defmodule Alavi.Profile.Stored do
   end
 
   defp survey(json) do
-    fields = ~w(selectors available interval stamp mask values parameters)
+    fields = ~w(selectors requires available interval stamp mask values parameters)
 
     with :ok <- Fields.only(json, fields),
          :ok <- selectors(json),
+         {:ok, requires} <- requires(json),
          {:ok, available} <- field(json, "available", &count/1),
          {:ok, interval} <- field(json, "interval", &interval/1),
          {:ok, stamp} <- field(json, "stamp", &stamp/1),
@@ -156,6 +164,7 @@ defmodule Alavi.Profile.Stored do
        %{
          day: :load_survey_day,
          parameter: :load_survey_parameter,
+         requires: Enum.map(requires, &Map.delete(&1, :source)),
          available: available.address,
          interval: interval.address,
          stamp: stamp,
@@ -163,10 +172,30 @@ defmodule Alavi.Profile.Stored do
          values: Map.delete(values, :source),
          parameters: parameters,
          sources:
-           [available.source, interval.source, stamp.source, mask.source, values.source] ++
+           Enum.map(requires, & &1.source) ++
+             [available.source, interval.source, stamp.source, mask.source, values.source] ++
              Enum.map(parameters, & &1.source)
        }}
     end
+  end
+
+  defp requires(json) do
+    if Map.has_key?(json, "requires") do
+      with {:ok, requires} <- Fields.each(json, "requires", &requirement/1),
+           :ok <- Fields.unique(requires, & &1.key, "requires key"),
+           do: {:ok, requires}
+    else
+      {:ok, []}
+    end
+  end
+
+  defp requirement(json) do
+    with :ok <- Fields.only(json, ~w(key table address type value) ++ @cited),
+         {:ok, key} <- Fields.string(json, "key"),
+         {:ok, address} <- holding(json, "u16"),
+         {:ok, value} <- Fields.integer(json, "value", 0..0xFFFF),
+         {:ok, source} <- cited(json),
+         do: {:ok, %{key: key, address: address, value: value, source: source}}
   end
 
   defp sources(mask, registers),

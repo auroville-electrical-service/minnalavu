@@ -352,6 +352,34 @@ defmodule Alavi.CopyTest do
       assert keys(stored(second, :load_survey)) == Enum.sort(@survey_445)
     end
 
+    for {key, read} <- [{"logger_type", 3}, {"energy_storage_type", 1}] do
+      test "an Elite 500 whose #{key} reads #{read}, not its profile's value, " <>
+             "has no load survey copied; its histories and snapshots are",
+           ctx do
+        {_agent, clock} = clock!()
+
+        meter =
+          3
+          |> Meter.new(Simulator.Profile.load!("elite_500"), %{
+            "active_energy_import" => Decimal.new("1234.5")
+          })
+          |> Meter.stores(days: 2, snapshots: 3, settings: %{unquote(key) => unquote(read)})
+
+        {_sim, endpoint} = start!(ctx, [meter], [meter(3, "elite_500")], clock)
+
+        {:done, events} = night!()
+        assert stored(events, :load_survey) == []
+        assert length(stamps(stored(events, :history))) == 6
+        assert length(stamps(stored(events, :snapshot))) == 3
+
+        assert_received {:"$gen_cast", {:copy, ^endpoint, {:error, 3, detail}}}
+        assert detail =~ "load_survey" and detail =~ unquote(key)
+        assert Store.owed(ctx.tmp_dir, endpoint) == :none
+        assert {:ok, progress} = copied(ctx, "SIM-3")
+        refute Map.has_key?(progress, :load_survey)
+      end
+    end
+
     test "a selector write the meter refuses skips that store, its session closed; the rest is copied",
          ctx do
       {_agent, clock} = clock!()

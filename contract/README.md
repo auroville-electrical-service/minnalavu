@@ -26,7 +26,12 @@ What the collector and the server share. Nothing else is shared between them.
   where there is a mask, and the load survey's `interval` (minutes), the
   `values` register its intervals are read from, `per_request` at a time,
   and its `parameters`, by the number the selector takes, which is also the
-  parameter's bit in the mask. Each stored quantity has a unit and a kind:
+  parameter's bit in the mask. The interval is read from each meter, since
+  it is set per meter. The load survey may also list what it `requires`:
+  u16 registers that must read a given `value`, or the survey is not
+  copied. The 500 requires its logger selector to show Logger-1 and its
+  load-survey energy to be kept per interval, not cumulative. These are
+  read, never written. Each stored quantity has a unit and a kind:
   history and snapshot energies are `cumulative`, load-survey energies
   `interval` (energy in that interval alone), and the store's catalog
   refuses a `cumulative` quantity in the load survey and an `interval` one

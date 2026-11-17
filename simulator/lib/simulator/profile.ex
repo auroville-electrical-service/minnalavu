@@ -69,7 +69,9 @@ defmodule Simulator.Profile do
           registers: [stored_register()]
         }
   @type kind :: :interval | :instantaneous | :demand
+  @typedoc "`requires` maps a key to its register and the value the profile requires there."
   @type survey :: %{
+          requires: %{String.t() => %{address: 0..0xFFFF, value: 0..0xFFFF}},
           available: 0..0xFFFF,
           interval: 0..0xFFFF,
           stamp: stamp(),
@@ -129,6 +131,10 @@ defmodule Simulator.Profile do
     %{"values" => %{"type" => "f32"} = values, "parameters" => parameters} = entry
 
     %{
+      requires:
+        entry
+        |> Map.get("requires", [])
+        |> Map.new(&{&1["key"], %{address: holding(&1), value: &1["value"]}}),
       available: holding(entry["available"]),
       interval: holding(entry["interval"]),
       stamp: stamp(entry["stamp"]),

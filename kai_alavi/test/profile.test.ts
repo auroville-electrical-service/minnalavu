@@ -190,4 +190,35 @@ describe("parseProfile stored sections", () => {
       parseProfile({ ...value, meter_clock: { ...value.meter_clock, epoch: "1988-02-30T00:00:00" } }).ok,
     ]).toEqual([false, false, false, false]);
   });
+
+  test("a 500's load survey requires its logger type and energy storage type; each is a cited u16", () => {
+    const p500 = parsed("elite_500");
+    if (!p500.ok || !p500.value.stored) throw new Error("elite_500 has no stored section");
+    const survey = p500.value.stored.load_survey;
+    const [logger, storage] = survey.requires ?? [];
+    if (!logger || !storage) throw new Error("elite_500's load survey requires nothing");
+    const withRequires = (requires: object[]) =>
+      parseProfile({
+        ...p500.value,
+        stored: { ...p500.value.stored, load_survey: { ...survey, requires } },
+      }).ok;
+    expect([
+      (survey.requires ?? []).map((r) => [r.key, r.address, r.value]),
+      stored.load_survey.requires,
+      withRequires([{ ...logger, type: "u32" }, storage]),
+      withRequires([{ ...logger, value: 0x10000 }, storage]),
+      withRequires([logger, { ...storage, key: logger.key }]),
+      withRequires([{ ...logger, source: "other" }, storage]),
+    ]).toEqual([
+      [
+        ["logger_type", 5001, 2],
+        ["energy_storage_type", 1844, 0],
+      ],
+      undefined,
+      false,
+      false,
+      false,
+      false,
+    ]);
+  });
 });
