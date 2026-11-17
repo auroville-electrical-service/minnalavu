@@ -237,6 +237,49 @@ SELECT pg_temp.is(
   'a target shows its profile, the meter placed there, its interval and its last reading and '
   || 'missed read');
 
+-- sqlh_m_ep unit 1 read, and missed, again at its new address: its last
+-- reading and missed read are the newest over every address.
+SAVEPOINT moved;
+INSERT INTO store.readings
+SELECT 'SQLT-0002', 'active_energy_import', now() - interval '5 minutes', 1.0, 'elite_440',
+       '10.0.0.3', 502, 1, 'sqlh_d', (SELECT batch FROM b WHERE collector = 'sqlh_d'),
+       'ELITE440-445', 2;
+INSERT INTO store.missed_reads
+SELECT NULL, 'active_energy_import', now() - interval '15 minutes', 'decode', NULL, NULL, 3, NULL,
+       'elite_440', '10.0.0.3', 502, 1, 'sqlh_d', (SELECT batch FROM b WHERE collector = 'sqlh_d'), 2;
+SELECT pg_temp.is(
+  (SELECT format('%s %s', last_reading_at = now() - interval '5 minutes',
+                 last_missed_read_at = now() - interval '15 minutes')
+   FROM health.targets WHERE endpoint_id = 'sqlh_m_ep' AND unit_id = 1),
+  't t',
+  'a target''s last reading and missed read are the newest at any address its endpoint had');
+ROLLBACK TO SAVEPOINT moved;
+
+-- sqlh_r_ep out of service from 1 day to 1 hour ago: what its address gave
+-- then is not its target's.
+SAVEPOINT retired;
+SELECT pg_temp.endpoint('sqlh_r_ep', 'sqlh_d', '10.0.0.4', false);
+SELECT pg_temp.target('sqlh_r_ep', 1, '2 days', NULL);
+SELECT admin.retire_target('sqlh_r_ep', 1, now() - interval '1 day');
+SELECT admin.retire_endpoint('sqlh_r_ep', now() - interval '1 day');
+SELECT admin.change_endpoint(endpoint_id => 'sqlh_r_ep', valid_from => now() - interval '1 hour',
+  collector_id => 'sqlh_d', host => '10.0.0.4', port => 502, framing => 'tcp',
+  polled_by_other_system => false, timeout_ms => 1000, max_timeouts => 3, retries => 2,
+  busy_backoff_ms => 500, reconnect_backoff_min_ms => 1000, reconnect_backoff_max_ms => 60000,
+  interval_ms => 900000, retry_ms => 1800000, copy => false);
+SELECT admin.change_target('sqlh_r_ep', 1, now() - interval '1 hour', 'elite_440', NULL, NULL);
+INSERT INTO store.readings
+SELECT 'SQLT-0003', 'active_energy_import', now() - ago, 1.0, 'elite_440',
+       '10.0.0.4', 502, 1, 'sqlh_d', (SELECT batch FROM b WHERE collector = 'sqlh_d'),
+       'ELITE440-445', 2
+FROM (VALUES ('30 hours'::interval), ('3 hours')) v (ago);
+SELECT pg_temp.is(
+  (SELECT (last_reading_at = now() - interval '30 hours')::text
+   FROM health.targets WHERE endpoint_id = 'sqlh_r_ep' AND unit_id = 1),
+  'true',
+  'a reading while a target''s endpoint was out of service is not its last reading');
+ROLLBACK TO SAVEPOINT retired;
+
 SELECT pg_temp.is(
   (SELECT detail FROM health.problems WHERE kind = 'target_silent'
    AND subject = 'sqlh_d_ep unit 15'),
