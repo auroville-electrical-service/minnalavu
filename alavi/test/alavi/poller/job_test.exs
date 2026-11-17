@@ -24,6 +24,18 @@ defmodule Alavi.Poller.JobTest do
     end
   end
 
+  describe "unreached/2" do
+    test "names each meter the round got no answer from, and none until told" do
+      [m1, m2] = meters()
+      job = Job.poll_round([m1, m2], 0)
+
+      assert job.unreached == []
+
+      assert job |> Job.unreached(2) |> Job.unreached(1) |> Map.fetch!(:unreached) |> Enum.sort() ==
+               [1, 2]
+    end
+  end
+
   describe "poll_round/2" do
     test "steps through each meter, then the names of each identified meter, in order" do
       [m1, m2] = meters()

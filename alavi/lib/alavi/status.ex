@@ -93,6 +93,16 @@ defmodule Alavi.Status do
     do: GenServer.cast(server, {:latency, endpoint, by_unit})
 
   # contract: test/alavi/status_test.exs "feeds"
+  @doc "When an endpoint's meters, by unit ID, are next due, at its poller's start and after each round."
+  @spec schedule(
+          GenServer.server(),
+          %{host: String.t(), port: :inet.port_number()},
+          %{(1..247) => Snapshot.schedule()}
+        ) :: :ok
+  def schedule(server, endpoint, by_unit),
+    do: GenServer.cast(server, {:schedule, endpoint, by_unit})
+
+  # contract: test/alavi/status_test.exs "feeds"
   @doc "An endpoint's selectors: a restore owed, restored, or a session refused."
   @spec selectors(
           GenServer.server(),
@@ -184,6 +194,9 @@ defmodule Alavi.Status do
 
   def handle_cast({:latency, endpoint, by_unit}, state),
     do: {:noreply, update(state, &Snapshot.latency(&1, endpoint, by_unit))}
+
+  def handle_cast({:schedule, endpoint, by_unit}, state),
+    do: {:noreply, update(state, &Snapshot.schedule(&1, endpoint, by_unit))}
 
   def handle_cast({:selectors, endpoint, event}, state),
     do: {:noreply, update(state, &Snapshot.selectors(&1, endpoint, event, state.clock.()))}

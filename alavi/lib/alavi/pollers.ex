@@ -4,6 +4,9 @@ defmodule Alavi.Pollers do
   until they stop; given `{:keeper, keeper}`, they start from the config the
   `Alavi.ConfigKeeper` applies now and follow each it applies after
   (`Alavi.Pollers.Applier`), whichever of them restarts.
+
+  Each poller rechecks the clock at least every `recheck_ms`, a minute
+  unless given (tests give less).
   """
 
   use Supervisor
@@ -11,6 +14,8 @@ defmodule Alavi.Pollers do
   alias Alavi.{Config, ConfigKeeper, Poller, Sink}
   alias Alavi.Poller.RawLog
   alias Alavi.Pollers.Applier
+
+  @recheck_ms 60_000
 
   @type option ::
           {:config, Config.t() | {:keeper, GenServer.server()}}
@@ -20,6 +25,7 @@ defmodule Alavi.Pollers do
           | {:status, GenServer.server()}
           | {:uplink, GenServer.server() | :none}
           | {:selectors_dir, Path.t()}
+          | {:recheck_ms, pos_integer()}
           | {:name, atom()}
 
   # contract: test/alavi/poller_test.exs "Pollers.start_link/1"
@@ -33,7 +39,10 @@ defmodule Alavi.Pollers do
           do: {key, Keyword.fetch!(opts, key)}
 
     # No uplink to nudge (tests that read the sink) unless one is named.
-    shared = [{:uplink, Keyword.get(opts, :uplink, :none)} | shared]
+    shared = [
+      {:uplink, Keyword.get(opts, :uplink, :none)},
+      {:recheck_ms, Keyword.get(opts, :recheck_ms, @recheck_ms)} | shared
+    ]
 
     {%Config{endpoints: endpoints, copy_window: window}, follow} =
       config(Keyword.fetch!(opts, :config), shared)

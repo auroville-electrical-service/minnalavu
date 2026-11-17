@@ -6,7 +6,8 @@ defmodule Alavi.Status.Snapshot do
   @moduledoc """
   What the collector is doing, as pure data: what the status page renders and
   `status.json` holds. Every leaf is JSON-ready (strings, integers, booleans,
-  nil; times as ISO 8601 UTC, register values as decimal strings), so nothing
+  nil; times as ISO 8601 UTC, but for a meter's next due time, ISO 8601 in
+  the collector's local time with its offset; register values as decimal strings), so nothing
   in it refers to what the poller or the buffer hold.
 
   History is bounded: per endpoint the last #{@rounds} rounds and
@@ -72,8 +73,17 @@ defmodule Alavi.Status.Snapshot do
         }
 
   @typedoc """
+  When a meter is next due, in the collector's local time with its offset
+  (`2026-11-17T06:00:00+05:30`), a time past while it is due, and whether
+  on a retry after a round that got no answer from it.
+  """
+  @type schedule :: %{next_due_at: String.t(), retrying: boolean()}
+
+  @typedoc """
   `serial_expected` is the polling config's; `serial` and `product_code` are
-  as last read with a reading. `missed_reads` counts since the collector started.
+  as last read with a reading. `missed_reads` counts since the collector
+  started. `next_due_at` and `retrying` are `schedule()`'s, nil and false
+  until its poller reports.
   """
   @type meter :: %{
           unit_id: 1..247,
@@ -85,7 +95,9 @@ defmodule Alavi.Status.Snapshot do
           registers: [register()],
           missed_reads: non_neg_integer(),
           firmware: firmware() | nil,
-          latency: latency() | nil
+          latency: latency() | nil,
+          next_due_at: String.t() | nil,
+          retrying: boolean()
         }
 
   @typedoc "`reason` and its `exception_code` and `detail` are as on the wire (batch.v1)."
@@ -295,6 +307,16 @@ defmodule Alavi.Status.Snapshot do
 
     %{snapshot | endpoints: endpoints}
   end
+
+  # contract: test/alavi/status_test.exs "Snapshot.schedule/3"
+  @doc "When an endpoint's meters, by unit ID, are next due; an endpoint or unit not in the config is ignored."
+  @spec schedule(
+          t(),
+          %{host: String.t(), port: :inet.port_number()},
+          %{(1..247) => schedule()}
+        ) :: t()
+  def schedule(%__MODULE__{} = snapshot, endpoint, by_unit),
+    do: on_meters(snapshot, endpoint, &Map.merge(&1, Map.get(by_unit, &1.unit_id, %{})))
 
   # contract: test/alavi/status_test.exs "Snapshot.selectors/4"
   @doc "An endpoint not in the config is ignored."
@@ -511,7 +533,9 @@ defmodule Alavi.Status.Snapshot do
       registers: Enum.map(m.profile.registers, &register/1),
       missed_reads: 0,
       firmware: nil,
-      latency: nil
+      latency: nil,
+      next_due_at: nil,
+      retrying: false
     }
   end
 

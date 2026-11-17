@@ -25,7 +25,7 @@ defmodule Alavi.ConfigTest do
       assert %Endpoint{framing: :rtu_over_tcp, max_timeouts: nil} = rtu
       assert tcp.reconnect_backoff_ms == %{min: 10, max: 40}
 
-      assert [%Meter{unit_id: 1, interval_ms: 60_000}, %Meter{unit_id: 3, interval_ms: 5}] =
+      assert [%Meter{unit_id: 1, interval_ms: 86_400_000}, %Meter{unit_id: 3, interval_ms: 5}] =
                tcp.meters
 
       assert hd(tcp.meters).profile.name == "elite_440"

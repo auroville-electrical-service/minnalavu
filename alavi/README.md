@@ -116,6 +116,15 @@ different one read is logged as a warning, and the readings still go under
 the serial read. A meter whose identity read fails, or whose serial is empty
 or not printable, gives missed reads for that round, with no serial if none
 was read.
+A meter's rounds fall on slots of the collector's local clock: multiples of
+its `interval_ms`, which divides a day, from local midnight (at 6 h, 00:00,
+06:00, 12:00, 18:00). It is read once at start, then at each slot; slots
+passed while the clock was set forward, or during a long round, come to one
+round, and after the clock is set back nothing is read until a later slot.
+A meter a round could not reach (no answer, link down, busy) is read again
+`retry_ms` after that round, or at its next slot if that comes first, until
+it answers; a meter that answers with exception replies is not.
+
 
 A meter's software and firmware names and Modbus protocol version (its
 profile's `firmware` section) are read after every meter's readings in the
@@ -153,8 +162,9 @@ check and the offset it implies, for display only.
 
 What the collector is doing is kept in memory and written, every few seconds
 when it has changed, to `status.json` in `log.dir`, beside the log: per
-endpoint its last rounds and failures, per meter the serial and product code
-read, its firmware names as last read and its register values as read, the
+endpoint its last rounds and failures, per meter when it is next due
+(`next_due_at`, local time with its offset) and whether on a retry
+(`retrying`), the serial and product code read, its firmware names as last read and its register values as read, the
 raw-bytes lines, the buffer's backlog, the uplink's last and next attempt, the
 clock, the release version and the settings (never the token). It is replaced whole (a temporary file renamed
 over it), and the recent history in it is lost on restart: the log and the

@@ -6,6 +6,13 @@ defmodule Alavi.Poller do
   `Alavi.Poller.Names` says they are due, unless the meter stopped answering
   during its register reads or the endpoint went down in the round.
 
+  Rounds fall on each meter's slots of the collector's local wall clock, the
+  first at once on start, with a retry after a round that got no answer
+  from a meter (`Alavi.Poller.Schedule`); no wait is longer than
+  `recheck_ms`, so a clock set while waiting is seen within it. Each
+  meter's next due time goes to the status at start and after each round
+  (`Alavi.Status.schedule/3`).
+
   A round is an `Alavi.Poller.Job`, run one step per `:step` message, so the
   mailbox is served between steps. Each meter's names are a step of their
   own: a names read is as many reads as a meter's registers, so no step is
@@ -63,16 +70,21 @@ defmodule Alavi.Poller do
 
   alias Alavi.Config.{CopyWindow, Endpoint, Meter}
   alias Alavi.Copy.{Copier, Run}
-  alias Alavi.{Decode, FirmwareRead, LatencyDay, MissedRead, Reading, Sink, Status, Uplink}
+  alias Alavi.{Decode, FirmwareRead, LatencyDay, LocalTime, MissedRead, Reading, Sink, Status}
   alias Alavi.Modbus.Client
   alias Alavi.Poller.{Job, Latency, Names, Policy, RawLog, Schedule}
   alias Alavi.Profile.{Firmware, Identity, Register}
   alias Alavi.Selectors.{Session, Store}
+  alias Alavi.Uplink
 
   @typedoc "Wall clock for reading timestamps, UTC."
   @type clock :: (-> DateTime.t())
 
-  @typedoc "`copy_window` is the config's, for its endpoint's `copy`."
+  @typedoc """
+  `copy_window` is the config's, for its endpoint's `copy`. `recheck_ms`
+  bounds each wait, so that a wall clock set while waiting moves the next
+  round to its slot within that time.
+  """
   @type option ::
           {:endpoint, Endpoint.t()}
           | {:copy_window, CopyWindow.t()}
@@ -82,8 +94,10 @@ defmodule Alavi.Poller do
           | {:status, GenServer.server()}
           | {:uplink, GenServer.server() | :none}
           | {:selectors_dir, Path.t()}
+          | {:recheck_ms, pos_integer()}
 
   # contract: test/alavi/poller_test.exs "start_link/1"
+  # contract: test/alavi/poller/slots_test.exs "start_link/1"
   # contract: test/alavi/restore_test.exs "start_link/1"
   @spec start_link([option()]) :: GenServer.on_start()
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
@@ -154,7 +168,7 @@ defmodule Alavi.Poller do
     raw_log = RawLog.new("#{endpoint.host}:#{endpoint.port}", Keyword.fetch!(opts, :raw_log))
     feeds = {sink, Keyword.fetch!(opts, :status), Keyword.fetch!(opts, :uplink)}
     local = {raw_log, Keyword.fetch!(opts, :selectors_dir), Keyword.fetch!(opts, :copy_window)}
-    start(endpoint, feeds, clock, local)
+    start(endpoint, feeds, {clock, Keyword.fetch!(opts, :recheck_ms)}, local)
   end
 
   @impl true
@@ -207,7 +221,8 @@ defmodule Alavi.Poller do
 
   defp start(%Endpoint{polled_by_other_system: true}, _feeds, _clock, _logs), do: :ignore
 
-  defp start(endpoint, {sink, status, uplink}, clock, {raw_log, selectors_dir, copy_window}) do
+  defp start(endpoint, {sink, status, uplink}, {clock, recheck_ms}, local) do
+    {raw_log, selectors_dir, copy_window} = local
     now = now()
 
     state = %{
@@ -217,6 +232,7 @@ defmodule Alavi.Poller do
       status: status,
       uplink: uplink,
       clock: clock,
+      recheck_ms: recheck_ms,
       raw_log: raw_log,
       client: nil,
       queue: [],
@@ -227,7 +243,7 @@ defmodule Alavi.Poller do
       connections: 0,
       restore: nil,
       timer: nil,
-      due: Map.new(endpoint.meters, &{&1.unit_id, now}),
+      due: %{},
       names: Map.new(endpoint.meters, &{&1.unit_id, Names.new()}),
       latency: Map.new(endpoint.meters, &{&1.unit_id, Latency.new()}),
       today: nil,
@@ -238,6 +254,8 @@ defmodule Alavi.Poller do
       retiring: nil
     }
 
+    state = %{state | due: Schedule.start(endpoint.meters, clocks(state))}
+    scheduled(state)
     {:ok, owed_at_start(state, now), {:continue, :poll}}
   end
 
@@ -309,7 +327,13 @@ defmodule Alavi.Poller do
     case decide(state) do
       {:wait, ms} ->
         timer = make_ref()
-        Process.send_after(self(), {:poll, timer}, min(ms, copy_wait(state)))
+
+        Process.send_after(
+          self(),
+          {:poll, timer},
+          Enum.min([ms, copy_wait(state), state.recheck_ms])
+        )
+
         %{state | timer: timer}
 
       _work ->
@@ -320,9 +344,9 @@ defmodule Alavi.Poller do
 
   # Retiring, no meter is due: no round starts, and the queue drains.
   defp decide(%{retiring: nil} = state),
-    do: Schedule.next(state.queue, now(), state.due, state.endpoint.meters)
+    do: Schedule.next(state.queue, clocks(state), state.due, state.endpoint.meters)
 
-  defp decide(state), do: Schedule.next(state.queue, now(), %{}, [])
+  defp decide(state), do: Schedule.next(state.queue, clocks(state), %{}, [])
 
   # A copy is queued once a night, when the window has opened since the last
   # one ended, unless one is queued, a restore is owed or the poller retiring.
@@ -351,19 +375,28 @@ defmodule Alavi.Poller do
 
   defp copy_wait(_state), do: :infinity
 
-  # The collector's local wall clock, which the copy window is set in.
-  defp local_now(state) do
-    state.clock.()
-    |> DateTime.to_naive()
-    |> NaiveDateTime.truncate(:second)
-    |> NaiveDateTime.to_erl()
-    |> :calendar.universal_time_to_local_time()
-    |> NaiveDateTime.from_erl!()
-  end
+  # The collector's local wall clock, which the copy window and the slots are set in.
+  defp local_now(state), do: LocalTime.of(state.clock.())
+
+  defp clocks(state), do: %{monotonic: now(), local: local_now(state)}
 
   defp begin_round(%Job{started: started} = round, state) do
     state = log_raw(state, &RawLog.flush(&1, started))
-    %{state | queue: state.queue ++ [round]}
+    due = Schedule.started(state.due, round, clocks(state))
+    %{state | queue: state.queue ++ [round], due: due}
+  end
+
+  defp scheduled(state) do
+    now = state.clock.()
+    clocks = %{monotonic: now(), local: LocalTime.of(now)}
+
+    by_unit =
+      Map.new(state.endpoint.meters, fn %Meter{unit_id: unit} = meter ->
+        %{at: at, retrying: retrying} = Schedule.due_at(state.due[unit], meter, clocks)
+        {unit, %{next_due_at: LocalTime.iso8601(at, now), retrying: retrying}}
+      end)
+
+    Status.schedule(state.status, endpoint_ref(state.endpoint), by_unit)
   end
 
   defp run(%Job{kind: :restore} = job, state) do
@@ -398,8 +431,9 @@ defmodule Alavi.Poller do
   end
 
   defp step({:meter, meter}, state) do
-    {events, identified, state} = poll_meter(meter, state)
-    %{state | job: Job.polled(state.job, events, identified)}
+    {events, identified, reached, state} = poll_meter(meter, state)
+    job = Job.polled(state.job, events, identified)
+    %{state | job: if(reached, do: job, else: Job.unreached(job, meter.unit_id))}
   end
 
   defp step({:names, identified}, state) do
@@ -442,7 +476,9 @@ defmodule Alavi.Poller do
   defp done(%{job: %Job{kind: :poll_round} = job} = state) do
     Status.round(state.status, Job.events(job))
     latency(state)
-    %{state | due: Schedule.after_round(state.due, job), job: nil}
+    state = %{state | due: Schedule.after_round(state.due, job, now()), job: nil}
+    scheduled(state)
+    state
   end
 
   defp done(%{job: %Job{kind: :copy, copy: run}} = state) do
@@ -501,20 +537,23 @@ defmodule Alavi.Poller do
   defp nudge(:none), do: :ok
   defp nudge(uplink), do: Uplink.nudge(uplink)
 
-  # The meter, with what it reported, when identified, for its names step.
+  # The meter, with what it reported, when identified, for its names step,
+  # and whether it answered: a reading, or a reply that a retry cannot change.
   defp poll_meter(meter, state) do
-    case identify(meter, state) do
+    case reach(meter, state) do
       {{:ok, seen}, state} ->
         state = serial_read(state, meter, seen.serial)
         {events, skip, state} = read_registers(meter, seen, state)
         recorded(events, state)
-        {events, {meter, seen, skip}, state}
 
-      {{:missed, reason, n, serial}, state} ->
+        {events, {meter, seen, skip}, skip == nil or Enum.any?(events, &match?(%Reading{}, &1)),
+         state}
+
+      {{tag, reason, n, serial}, state} ->
         state = serial_read(state, meter, serial)
         events = missed_all(state, meter, serial, reason, n)
         recorded(events, state)
-        {events, nil, state}
+        {events, nil, tag == :missed, state}
     end
   end
 
@@ -654,13 +693,23 @@ defmodule Alavi.Poller do
     ]
   end
 
-  # Read every round, so each reading carries what the meter reported in its own round.
-  defp identify(_meter, %{job: %Job{down: down}} = state) when down != nil,
-    do: {{:missed, {:unreachable, down}, 0, nil}, state}
-
+  # A copy's identity read: missed, whether answered or not.
   defp identify(meter, state) do
+    case reach(meter, state) do
+      {{:unreached, reason, n, serial}, state} -> {{:missed, reason, n, serial}, state}
+      identified -> identified
+    end
+  end
+
+  # Read every round, so each reading carries what the meter reported in its
+  # own round. `:unreached` when the meter did not answer, `:missed` when its
+  # answers did not identify it.
+  defp reach(_meter, %{job: %Job{down: down}} = state) when down != nil,
+    do: {{:unreached, {:unreachable, down}, 0, nil}, state}
+
+  defp reach(meter, state) do
     case read_identity(meter, state) do
-      {{:missed, _reason, _n, _serial} = missed, state} -> {missed, state}
+      {{:unreached, _reason, _n, _serial} = unreached, state} -> {unreached, state}
       {results, state} -> judged(Identity.verdict(meter.profile.identity, results), meter, state)
     end
   end
@@ -691,13 +740,13 @@ defmodule Alavi.Poller do
 
       {{:skip_meter, reason, n}, state} ->
         serial = Identity.observed(identity, results).serial
-        {:halt, {{:missed, reason, n, serial}, state}}
+        {:halt, {{:unreached, reason, n, serial}, state}}
     end
   end
 
   defp identity_reads(reads, acc, unit, identity) do
     case Enum.reduce_while(reads, acc, &identity_read(&1, &2, unit, identity)) do
-      {{:missed, _reason, _n, _serial}, _state} = missed -> {:halt, missed}
+      {{:unreached, _reason, _n, _serial}, _state} = unreached -> {:halt, unreached}
       acc -> {:cont, acc}
     end
   end
@@ -712,7 +761,7 @@ defmodule Alavi.Poller do
 
       {{:skip_meter, reason, n}, state} ->
         serial = Identity.observed(identity, results).serial
-        {:halt, {{:missed, reason, n, serial}, state}}
+        {:halt, {{:unreached, reason, n, serial}, state}}
     end
   end
 

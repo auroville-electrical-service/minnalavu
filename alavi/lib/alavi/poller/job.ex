@@ -39,7 +39,8 @@ defmodule Alavi.Poller.Job do
     :request_id,
     :not_before,
     :held,
-    :copy
+    :copy,
+    :unreached
   ]
   defstruct @enforce_keys
 
@@ -67,7 +68,8 @@ defmodule Alavi.Poller.Job do
           request_id: String.t() | nil,
           not_before: integer() | nil,
           held: held() | nil,
-          copy: Run.t() | nil
+          copy: Run.t() | nil,
+          unreached: [1..247]
         }
 
   @doc "A round over `meters`, started at `started` (monotonic milliseconds)."
@@ -85,7 +87,8 @@ defmodule Alavi.Poller.Job do
       request_id: nil,
       not_before: nil,
       held: nil,
-      copy: nil
+      copy: nil,
+      unreached: []
     }
   end
 
@@ -156,6 +159,16 @@ defmodule Alavi.Poller.Job do
 
   defp named(:poll_round, identified), do: List.wrap(identified)
   defp named(:read_on_demand, _identified), do: []
+
+  # contract: test/alavi/poller/job_test.exs "unreached/2"
+  @doc """
+  The meter at `unit` gave no reading in its step for want of an answer: a
+  timeout, a lost or refused connection, or a busy or gateway exception
+  that ended the meter's reads (`Alavi.Poller.Policy`), not exception
+  replies alone.
+  """
+  @spec unreached(t(), 1..247) :: t()
+  def unreached(%__MODULE__{} = job, unit), do: %{job | unreached: [unit | job.unreached]}
 
   @doc "The names step done."
   @spec named(t()) :: t()

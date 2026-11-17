@@ -94,28 +94,24 @@ defmodule Alavi.ReadOnDemandTest do
     test "leaves when each meter is next due as it was" do
       {_sim, port} = start_sim!(:tcp)
       interval = 2_000
-      started = System.monotonic_time(:millisecond)
 
       sup =
         start_pollers!([
           endpoint(port, "tcp", [meter(1, "elite_440")], %{"interval_ms" => interval})
         ])
 
-      recorded!()
-      Process.sleep(div(interval, 2))
-      asked = System.monotonic_time(:millisecond)
+      [%Reading{timestamp: first} | _] = recorded!()
       assert {:ok, ref} = Poller.read_now(poller!(sup), [1])
       answer!(ref)
       recorded!()
 
-      # The first round started after `started`, so the next is due no earlier
-      # than `started + interval`: a request that made the meter due at once
-      # breaks the first bound, one that pushed it to `asked + interval` the
-      # second. A round may start up to `asked - started` late and still pass.
-      recorded!(2 * interval)
-      next = System.monotonic_time(:millisecond)
-      assert next >= started + interval
-      assert next < asked + interval
+      # Slots of 2 s fall on the same instants in UTC as in any local zone. A
+      # request that made the meter due at once comes before the next slot,
+      # one that pushed it on comes a slot late.
+      [%Reading{timestamp: next} | _] = recorded!(2 * interval)
+      slot = &div(DateTime.to_unix(&1, :millisecond), interval)
+      assert slot.(next) == slot.(first) + 1
+      assert rem(DateTime.to_unix(next, :millisecond), interval) < div(interval, 2)
     end
 
     test "requests run one after another, in the order asked" do

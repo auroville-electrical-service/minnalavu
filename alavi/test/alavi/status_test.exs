@@ -246,6 +246,30 @@ defmodule Alavi.StatusTest do
     end
   end
 
+  describe "Snapshot.schedule/3" do
+    @due %{next_due_at: "2026-11-14T16:00:00+05:30", retrying: true}
+
+    test "sets each meter's next due time and whether on a retry, none until reported" do
+      assert %{next_due_at: nil, retrying: false} = meter_view(snapshot(), 1)
+
+      snapshot = Snapshot.schedule(snapshot(), @endpoint, %{1 => @due})
+
+      assert %{next_due_at: "2026-11-14T16:00:00+05:30", retrying: true} = meter_view(snapshot, 1)
+      assert %{next_due_at: nil, retrying: false} = meter_view(snapshot, 3)
+      json = snapshot |> Snapshot.to_json() |> JSON.decode!()
+
+      assert %{"next_due_at" => "2026-11-14T16:00:00+05:30", "retrying" => true} =
+               hd(hd(json["endpoints"])["meters"])
+    end
+
+    test "an endpoint or unit not in the config changes nothing" do
+      assert Snapshot.schedule(snapshot(), %{host: "10.9.9.9", port: 502}, %{1 => @due}) ==
+               snapshot()
+
+      assert Snapshot.schedule(snapshot(), @endpoint, %{7 => @due}) == snapshot()
+    end
+  end
+
   describe "Snapshot.selectors/4" do
     test "nil until reported, then the endpoint's last selector state, with why and when" do
       endpoint = %{host: "127.0.0.1", port: 5020}
@@ -612,6 +636,7 @@ defmodule Alavi.StatusTest do
       Status.config(status, %{digest: String.duplicate("a", 64), refused: nil})
       Status.clock_check(status, ClockCheckFixture.failed(:timeout))
       Status.latency(status, %{host: "127.0.0.1", port: 5020}, %{3 => @summary})
+      Status.schedule(status, %{host: "127.0.0.1", port: 5020}, %{1 => @due})
       Status.selectors(status, %{host: "127.0.0.1", port: 5020}, {:owed, "found at start", 0})
       Status.copy(status, %{host: "127.0.0.1", port: 5020}, {:error, 1, "refused"})
       snapshot = Status.read(status)
@@ -625,6 +650,7 @@ defmodule Alavi.StatusTest do
       assert snapshot.config["digest"] == String.duplicate("a", 64)
       assert snapshot.clock_check.outcome == "timeout"
       assert meter_view(snapshot, 3).latency.p99 == 80
+      assert meter_view(snapshot, 1).retrying
       assert hd(snapshot.endpoints).selectors.state == "owed"
       assert hd(snapshot.endpoints).copy.last_error.detail == "refused"
     end

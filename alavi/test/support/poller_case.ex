@@ -13,7 +13,11 @@ defmodule Alavi.PollerCase do
     profiles
   end
 
-  @doc "A config endpoint entry with tiny timings; `changes` replace or add fields."
+  @doc """
+  A config endpoint entry with tiny timings, polled at local midnight, so
+  that a test on the real clock sees no round but the first unless it sets
+  a shorter interval; `changes` replace or add fields.
+  """
   @spec endpoint(:inet.port_number(), String.t(), [map()], map()) :: map()
   def endpoint(port, framing, meters, changes \\ %{}) do
     base = %{
@@ -25,7 +29,7 @@ defmodule Alavi.PollerCase do
       "retries" => 2,
       "busy_backoff_ms" => 10,
       "reconnect_backoff_ms" => %{"min" => 10, "max" => 40},
-      "interval_ms" => 60_000,
+      "interval_ms" => 86_400_000,
       "retry_ms" => 60_000,
       "copy" => false,
       "meters" => meters

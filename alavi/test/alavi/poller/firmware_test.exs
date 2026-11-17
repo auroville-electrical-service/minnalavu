@@ -24,16 +24,18 @@ defmodule Alavi.Poller.FirmwareTest do
   # (`Status.firmware/2`) and each round's end (`Status.round/2`). Options:
   # `sink`, `faults` set before the first round, `clock`, which replaces
   # the agent's, and `endpoint`, fields merged into the endpoint's config.
+  # The agent's clock runs from `@start` at the monotonic clock's pace, so
+  # that rounds come on their slots, and `advance/2` moves it on.
   defp poll!(sim_meters, meters, opts \\ []) do
     {sim, port} = start_chain!(:tcp, sim_meters)
     :ok = Simulator.faults(sim, Keyword.get(opts, :faults, []))
-    {:ok, clock} = Agent.start_link(fn -> @start end)
+    {:ok, clock} = Agent.start_link(fn -> {@start, System.monotonic_time(:millisecond)} end)
     changes = Map.merge(%{"interval_ms" => 10}, Keyword.get(opts, :endpoint, %{}))
 
     opts = [
       config: config!([endpoint(port, "tcp", meters, changes)]),
       sink: {Keyword.get(opts, :sink, Alavi.TestSink), self()},
-      clock: Keyword.get(opts, :clock, fn -> Agent.get(clock, & &1) end),
+      clock: Keyword.get(opts, :clock, fn -> now(clock) end),
       raw_log: raw_log(),
       status: self(),
       selectors_dir: selectors_dir!()
@@ -59,7 +61,15 @@ defmodule Alavi.Poller.FirmwareTest do
   defp names_read?(round), do: Enum.any?(round, &match?({:names_read, _}, &1))
   defp sent(round), do: for({:sent, read} <- round, do: read)
 
-  defp advance(clock, seconds), do: Agent.update(clock, &DateTime.add(&1, seconds))
+  defp now(clock) do
+    {at, since} = Agent.get(clock, & &1)
+    DateTime.add(at, System.monotonic_time(:millisecond) - since, :millisecond)
+  end
+
+  defp advance(clock, seconds),
+    do: Agent.update(clock, fn {at, since} -> {DateTime.add(at, seconds), since} end)
+
+  defp near_start?(at), do: DateTime.diff(at, @start, :millisecond) in 0..1_000
 
   defp until!(check, tries \\ 20) do
     round = round!()
@@ -82,12 +92,13 @@ defmodule Alavi.Poller.FirmwareTest do
                unit_id: 1,
                meter_serial: "SIM-1",
                product_code: "ELITE440-445",
-               timestamp: @start,
                software: "SIM-SW",
                firmware_1: "SIM-F1",
                firmware_2: "SIM-F2",
                modbus_version: "0100"
              } = read
+
+      assert near_start?(read.timestamp)
     end
 
     test "the names are not read again within a day, then read, and sent only if changed" do
@@ -121,7 +132,7 @@ defmodule Alavi.Poller.FirmwareTest do
                          profile_version: 2
                        } = read}
 
-      assert read.collector_at == @start
+      assert near_start?(read.collector_at)
       assert abs(NaiveDateTime.diff(read.meter_time, NaiveDateTime.utc_now())) < 5
 
       for _ <- 1..3, do: refute(names_read?(round!()))

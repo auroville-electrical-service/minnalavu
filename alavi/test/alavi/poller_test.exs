@@ -159,7 +159,7 @@ defmodule Alavi.PollerTest do
         endpoint(
           port,
           "tcp",
-          [meter(1, "elite_440"), meter(2, "elite_440", %{"interval_ms" => 60_000})],
+          [meter(1, "elite_440"), meter(2, "elite_440", %{"interval_ms" => 86_400_000})],
           %{
             "interval_ms" => 20
           }
@@ -323,6 +323,7 @@ defmodule Alavi.PollerTest do
           assert [%Reading{timestamp: ~U[2026-11-13 23:59:59Z]} | _] = recorded!()
           Agent.update(agent, fn _ -> ~U[2026-11-14 00:00:01Z] end)
           await_unit!(1, &match?([%Reading{timestamp: ~U[2026-11-14 00:00:01Z]} | _], &1))
+          Agent.update(agent, fn _ -> ~U[2026-11-14 00:00:02Z] end)
           recorded!()
         end)
 
@@ -449,7 +450,7 @@ defmodule Alavi.PollerTest do
 
       sup =
         start_pollers!([
-          endpoint(port, "tcp", meters, %{"interval_ms" => 60_000, "timeout_ms" => 1_000})
+          endpoint(port, "tcp", meters, %{"interval_ms" => 86_400_000, "timeout_ms" => 1_000})
         ])
 
       assert [%Reading{unit_id: 1} | _] = recorded!()

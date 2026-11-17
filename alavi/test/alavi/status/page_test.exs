@@ -243,6 +243,26 @@ defmodule Alavi.Status.PageTest do
       assert meters =~ ~s|<th>Last round</th><td><span class="bad">missed</span>|
     end
 
+    test "shows each meter's next due time, and a retry after a miss" do
+      endpoint = %{host: StatusFixture.host(1), port: 502}
+
+      by_unit = %{
+        1 => %{next_due_at: "2026-11-14T16:00:00+05:30", retrying: false},
+        2 => %{next_due_at: "2026-11-14T15:59:30+05:30", retrying: true}
+      }
+
+      snapshot = 10 |> StatusFixture.snapshot(5) |> Snapshot.schedule(endpoint, by_unit)
+      {:ok, html} = Page.endpoint(snapshot, 1, 5)
+      meters = section(html, "Meters")
+
+      assert meters =~ "<th>Next due</th><td>2026-11-14T16:00:00+05:30</td>"
+
+      assert meters =~
+               ~s|<th>Next due</th><td>2026-11-14T15:59:30+05:30 <span class="warn">retry after a miss</span></td>|
+
+      assert meters =~ ~s|<th>Next due</th><td><span class="note">not known yet</span></td>|
+    end
+
     test "shows each meter's request latency, a meter not asked yet left out" do
       summary = %{since: ~D[2026-11-08], answered: 1_440, retries: 2, timeouts: 3}
       endpoint = %{host: StatusFixture.host(1), port: 502}

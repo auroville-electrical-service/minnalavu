@@ -428,6 +428,7 @@ defmodule Alavi.Status.Page do
       pairs([
         {"Last round", meter_state(state)},
         {"Last read", or_none(m.last_read_at, "never")},
+        {"Next due", next_due(m)},
         {"Serial expected", or_none(m.serial_expected, "not configured")},
         {"Serial read", serial(m.serial_expected, m.serial)},
         {"Product code read", or_none(m.product_code, "not read yet")},
@@ -442,6 +443,12 @@ defmodule Alavi.Status.Page do
     do: text(Keyword.fetch!(@meter_states, state))
 
   defp meter_state(state), do: bad(Keyword.fetch!(@meter_states, state))
+
+  defp next_due(%{next_due_at: nil}), do: none_text("not known yet")
+  defp next_due(%{next_due_at: at, retrying: false}), do: text(at)
+
+  defp next_due(%{next_due_at: at, retrying: true}),
+    do: [text(at), " ", warn("retry after a miss")]
 
   defp serial(_expected, nil), do: none_text("not read yet")
   defp serial(expected, expected), do: ok(expected)

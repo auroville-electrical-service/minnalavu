@@ -175,6 +175,39 @@ defmodule Alavi.Pollers.ApplierTest do
       from!(other)
     end
 
+    test "a change to an endpoint's retry interval, or a meter's interval or retry, restarts that poller alone",
+         %{tmp_dir: dir} do
+      [{_, changed}, {_, other}] = for _ <- 1..2, do: start_sim!(:tcp)
+
+      endpoints = fn retry, own ->
+        [
+          at(changed, [Map.merge(unit(1, "elite_440"), own)], %{"retry_ms" => retry}),
+          at(other, [unit(1, "elite_440")])
+        ]
+      end
+
+      keeper = keeper!(dir, document(endpoints.(60_000, %{})))
+      sup = pollers!(keeper)
+      for port <- [changed, other], do: from!(port)
+
+      changes = [
+        {120_000, %{}, &match?(%{retry_ms: 120_000}, &1)},
+        {120_000, %{"interval_ms" => 100}, &match?(%{interval_ms: 100}, &1)},
+        {120_000, %{"interval_ms" => 100, "retry_ms" => 5_000}, &match?(%{retry_ms: 5_000}, &1)}
+      ]
+
+      Enum.reduce(changes, running(sup), fn {retry, own, meter?}, before ->
+        apply!(keeper, document(endpoints.(retry, own)))
+        :ok = eventually!(fn -> restarted?(sup, changed, before) end)
+        now = running(sup)
+
+        assert now[other] == before[other]
+        assert {%{meters: [meter]}, _window} = started(sup, changed)
+        assert meter?.(meter)
+        now
+      end)
+    end
+
     test "a poller removed mid-round finishes the round, then stops", %{tmp_dir: dir} do
       {slow, port} = start_sim!(:tcp)
       {_sim, other} = start_sim!(:tcp)
@@ -184,7 +217,7 @@ defmodule Alavi.Pollers.ApplierTest do
       keeper =
         keeper!(
           dir,
-          document([at(port, meters, %{"interval_ms" => 60_000, "timeout_ms" => 1_000})])
+          document([at(port, meters, %{"interval_ms" => 86_400_000, "timeout_ms" => 1_000})])
         )
 
       sup = pollers!(keeper)
@@ -203,7 +236,7 @@ defmodule Alavi.Pollers.ApplierTest do
       {_sim, other} = start_sim!(:tcp)
 
       keeper =
-        keeper!(dir, document([at(port, [unit(1, "elite_440")], %{"interval_ms" => 60_000})]))
+        keeper!(dir, document([at(port, [unit(1, "elite_440")], %{"interval_ms" => 86_400_000})]))
 
       sup = pollers!(keeper)
       from!(port)
