@@ -284,9 +284,9 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
 - `health.unregistered_serial_places`: the same serials, one row per place
   (collector, host, port, unit) each was read at within the lookback.
 - `health.place_serials`: places (collector, host, port, unit) whose readings
-  within the lookback carry more than one serial, registered or not; one row
-  per place and serial, with its readings and when the first and last were
-  taken.
+  and missed reads within the lookback carry more than one serial, registered
+  or not; one row per place and serial, with its readings, its missed reads
+  and when it was first and last seen there.
 - `health.misplaced_serials`: registered serials read within the lookback at
   a place (collector, host, port, unit) other than where the registry put them
   when each reading was taken; one row per serial and place.

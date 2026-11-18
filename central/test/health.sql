@@ -187,6 +187,7 @@ SELECT pg_temp.is(
   || 'backlog_refused sqlh_d; collector_silent sqlh_b; endpoint_errors sqlh_a_ep; '
   || 'misplaced_serial SQLH-0003; misplaced_serial SQLH-0007; '
   || 'serial_at_several_places SQLH-TWIN; several_serials_at_place 10.0.0.1:502 unit 12 via sqlh_a; '
+  || 'several_serials_at_place 10.0.0.1:502 unit 2 via sqlh_a; '
   || 'several_serials_at_place 10.0.0.1:502 unit 9 via sqlh_a; '
   || 'target_silent sqlh_a_ep unit 2; target_silent sqlh_d_ep unit 13; '
   || 'target_silent sqlh_d_ep unit 14; target_silent sqlh_d_ep unit 15; '
@@ -434,22 +435,35 @@ SELECT pg_temp.is(
   'an unregistered serial read at several places says each place and when it was read there');
 
 SELECT pg_temp.is(
-  (SELECT string_agg(format('%s %s:%s %s %s %s', collector_id, endpoint_host, endpoint_port,
-                            unit_id, serial, readings),
+  (SELECT string_agg(format('%s %s:%s %s %s %s %s', collector_id, endpoint_host, endpoint_port,
+                            unit_id, serial, readings, missed_reads),
                      '; ' ORDER BY unit_id, serial)
    FROM health.place_serials),
-  'sqlh_a 10.0.0.1:502 9 SQLH-0005 1; sqlh_a 10.0.0.1:502 9 SQLH-STRAY 1; '
-  || 'sqlh_a 10.0.0.1:502 12 SQLS-A 3; sqlh_a 10.0.0.1:502 12 SQLS-B 2',
-  'a place whose readings within the lookback carry several serials lists each, registered '
-  || 'or not, and a place with one serial, or one more outside the lookback, is not listed');
+  'sqlh_a 10.0.0.1:502 2 SQLH-0001 0 1; sqlh_a 10.0.0.1:502 2 SQLH-0002 1 2; '
+  || 'sqlh_a 10.0.0.1:502 9 SQLH-0005 1 0; sqlh_a 10.0.0.1:502 9 SQLH-STRAY 1 0; '
+  || 'sqlh_a 10.0.0.1:502 12 SQLS-A 3 0; sqlh_a 10.0.0.1:502 12 SQLS-B 2 0',
+  'a place whose readings and missed reads within the lookback carry several serials lists '
+  || 'each, registered or not, and a place with one serial, or one more outside the lookback, '
+  || 'or a missed read with none, is not listed');
 
 SELECT pg_temp.is(
   (SELECT detail FROM health.problems
    WHERE kind = 'several_serials_at_place' AND subject = '10.0.0.1:502 unit 12 via sqlh_a'),
-  format('SQLS-A: 3 readings, from %s to %s; SQLS-B: 2 readings, from %s to %s',
+  format('SQLS-A: 3 readings, 0 missed reads, from %s to %s; '
+         || 'SQLS-B: 2 readings, 0 missed reads, from %s to %s',
          now() - interval '50 minutes', now() - interval '10 minutes',
          now() - interval '40 minutes', now() - interval '20 minutes'),
   'several serials at a place say each serial''s readings and when, so interleaving shows');
+
+SELECT pg_temp.is(
+  (SELECT detail FROM health.problems
+   WHERE kind = 'several_serials_at_place' AND subject = '10.0.0.1:502 unit 2 via sqlh_a'),
+  format('SQLH-0002: 1 readings, 2 missed reads, from %s to %s; '
+         || 'SQLH-0001: 0 readings, 1 missed reads, from %s to %s',
+         now() - interval '2 hours', now() - interval '10 minutes',
+         now() - interval '40 minutes', now() - interval '40 minutes'),
+  'a serial a place gave only in missed reads, its register reads all failing, is one of its '
+  || 'serials');
 
 -- Firmware reads at 10.0.0.1:502, from the batch's collector, with the
 -- software and module 1 names given (module 2 and the version fixed).
