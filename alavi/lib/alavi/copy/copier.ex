@@ -25,7 +25,7 @@ defmodule Alavi.Copy.Copier do
   alias Alavi.Copy.{Progress, Run, Stores}
   alias Alavi.Decode.Stored, as: Decode
   alias Alavi.{MeterClockRead, Sink, Status, StoredEntry}
-  alias Alavi.Modbus.Client
+  alias Alavi.Modbus.{Client, Selector}
   alias Alavi.Profile.{Identity, Stored}
   alias Alavi.Selectors.Session
 
@@ -188,7 +188,7 @@ defmodule Alavi.Copy.Copier do
       case Decode.interval(interval) do
         {:ok, _minutes} ->
           counts = %{
-            available: available,
+            available: Selector.reachable(meter.profile.name, :load_survey_day, available),
             mask: mask,
             interval: interval,
             parameters: Stores.parameters(survey, mask)

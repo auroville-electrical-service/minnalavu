@@ -14,6 +14,9 @@ defmodule Alavi.Modbus.Selector do
   - `:below_available`: 0 to that count less one (0 is today);
   - `:supported_bit`: a parameter number whose bit is set in the meter's
     supported-parameter mask.
+
+  Each entry also has a `max`, the largest value its register holds, whatever
+  the meter counts; `reachable/3` says how many entries that leaves.
   """
 
   import Bitwise
@@ -40,13 +43,16 @@ defmodule Alavi.Modbus.Selector do
           address: 0..0xFFFF,
           function_code: function_code(),
           range: range(),
+          max: 0..0xFFFF,
           settle_ms: non_neg_integer(),
           source: String.t()
         }
   @type reply_error :: {:exception, 1..255} | :echo_mismatch
 
   # PDU address = register number − 40001. `settle_ms`: the 500 needs 100 ms
-  # after a load-survey selector write before the entry is read.
+  # after a load-survey selector write before the entry is read. `max`: the
+  # 500's day register keeps only its low byte and selects by it, so 256 shows
+  # day 0 (measured on a 500, 2026-11-18), though `DLSuppDays` reads 335-735.
   @allowlist [
     %{
       model: "elite_440",
@@ -54,6 +60,7 @@ defmodule Alavi.Modbus.Selector do
       address: 520,
       function_code: 6,
       range: :through_available,
+      max: 0xFFFF,
       settle_ms: 0,
       source: "elite_440-a"
     },
@@ -63,6 +70,7 @@ defmodule Alavi.Modbus.Selector do
       address: 700,
       function_code: 6,
       range: :below_available,
+      max: 0xFFFF,
       settle_ms: 0,
       source: "elite_440-a"
     },
@@ -72,6 +80,7 @@ defmodule Alavi.Modbus.Selector do
       address: 800,
       function_code: 6,
       range: :supported_bit,
+      max: 0xFFFF,
       settle_ms: 0,
       source: "elite_440-a"
     },
@@ -81,6 +90,7 @@ defmodule Alavi.Modbus.Selector do
       address: 801,
       function_code: 6,
       range: :below_available,
+      max: 0xFFFF,
       settle_ms: 0,
       source: "elite_440-a"
     },
@@ -90,6 +100,7 @@ defmodule Alavi.Modbus.Selector do
       address: 900,
       function_code: 16,
       range: :through_available,
+      max: 0xFFFF,
       settle_ms: 0,
       source: "elite_500-a"
     },
@@ -99,6 +110,7 @@ defmodule Alavi.Modbus.Selector do
       address: 1500,
       function_code: 16,
       range: :below_available,
+      max: 0xFFFF,
       settle_ms: 0,
       source: "elite_500-a"
     },
@@ -108,6 +120,7 @@ defmodule Alavi.Modbus.Selector do
       address: 5002,
       function_code: 16,
       range: :below_available,
+      max: 0xFF,
       settle_ms: 100,
       source: "elite_500-a"
     },
@@ -117,6 +130,7 @@ defmodule Alavi.Modbus.Selector do
       address: 5003,
       function_code: 16,
       range: :supported_bit,
+      max: 0xFFFF,
       settle_ms: 100,
       source: "elite_500-a"
     }
@@ -130,14 +144,29 @@ defmodule Alavi.Modbus.Selector do
   @spec request(model(), name(), integer(), integer()) ::
           {:ok, t()} | {:error, :not_allowed | :out_of_range}
   def request(model, name, value, bound) do
-    case Enum.find(@allowlist, &(&1.model == model and &1.name == name)) do
+    case entry(model, name) do
       nil -> {:error, :not_allowed}
       entry -> build(entry, value, bound)
     end
   end
 
+  # contract: test/alavi/modbus/selector_test.exs "reachable/3"
+  @doc """
+  How many of the `count` entries a meter reports `name` can select: all of
+  them, unless the register's `max` stops short.
+  """
+  @spec reachable(model(), name(), non_neg_integer()) :: non_neg_integer()
+  def reachable(model, name, count) do
+    case entry(model, name) do
+      %{range: :below_available, max: max} -> min(count, max + 1)
+      %{range: :through_available, max: max} -> min(count, max)
+    end
+  end
+
+  defp entry(model, name), do: Enum.find(@allowlist, &(&1.model == model and &1.name == name))
+
   defp build(entry, value, bound) when is_integer(value) and is_integer(bound) do
-    if value in 0..0xFFFF and in_range?(entry.range, value, bound) do
+    if value in 0..entry.max and in_range?(entry.range, value, bound) do
       {:ok,
        %__MODULE__{
          function_code: entry.function_code,

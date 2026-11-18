@@ -153,6 +153,22 @@ defmodule Simulator.MeterTest do
       assert {:ok, ^today} = Meter.read(again, :holding, stamp, 2, @at + 149)
     end
 
+    test "a 500's day register keeps the low byte of what is written, and shows that day" do
+      meter =
+        Meter.new(3, Profile.load!("elite_500")) |> Meter.stores(days: 300) |> Meter.anchor(@at)
+
+      %{stamp: %{address: stamp}} = meter.profile.stored.load_survey
+
+      for {written, kept} <- [{256, 0}, {257, 1}, {300, 44}] do
+        {:ok, direct} = Meter.write(meter, 16, 5002, kept, @at)
+        {:ok, wrapped} = Meter.write(meter, 16, 5002, written, @at)
+        assert {:ok, [^kept]} = Meter.read(wrapped, :holding, 5002, 1, @at + 100)
+
+        assert Meter.read(wrapped, :holding, stamp, 2, @at + 100) ==
+                 Meter.read(direct, :holding, stamp, 2, @at + 100)
+      end
+    end
+
     test "a 440's load survey and a 500's histories show the new entry at once" do
       meter_440 = Meter.new(1, Profile.load!("elite_440")) |> Meter.anchor(@at)
       meter_500 = Meter.new(3, Profile.load!("elite_500")) |> Meter.anchor(@at)

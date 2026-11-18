@@ -92,7 +92,8 @@ defmodule Alavi.Modbus.ReadOnlyTest do
 
     # The copy is the collector's only unattended writer: its writes are
     # Session.set/5 alone, each inside a session it opened, and every other
-    # request it makes is a read through the poller's client.
+    # request it makes is a read through the poller's client. From Selector it
+    # asks only how many entries a register reaches.
     test "the copy writes only through the selector session, and builds no request of its own" do
       copier = Path.join(@lib, "alavi/copy/copier.ex")
       assert copier in lib_files()
@@ -101,7 +102,8 @@ defmodule Alavi.Modbus.ReadOnlyTest do
       assert Enum.sort(Enum.uniq(session_calls)) == [:close, :open, :set]
       # `Client.t()` in its types is no call.
       assert Enum.reject(remote_calls(copier, :Client), &(&1 == :t)) == []
-      assert remote_calls(copier, :Selector) == []
+      # `reachable/3` counts the entries a register can select; it builds nothing.
+      assert remote_calls(copier, :Selector) == [:reachable]
       assert remote_calls(copier, :PDU) == []
     end
 

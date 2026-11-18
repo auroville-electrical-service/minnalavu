@@ -5,16 +5,16 @@ defmodule Alavi.Modbus.SelectorTest do
   alias Alavi.Modbus.Selector
 
   # The whole allowlist, written out: a change to any address, function code,
-  # range or settle time must change this table too.
+  # range, max or settle time must change this table too.
   @allowlist [
-    {"elite_440", :history, 520, 6, :through_available, 0, "elite_440-a"},
-    {"elite_440", :snapshot, 700, 6, :below_available, 0, "elite_440-a"},
-    {"elite_440", :load_survey_parameter, 800, 6, :supported_bit, 0, "elite_440-a"},
-    {"elite_440", :load_survey_day, 801, 6, :below_available, 0, "elite_440-a"},
-    {"elite_500", :history, 900, 16, :through_available, 0, "elite_500-a"},
-    {"elite_500", :snapshot, 1500, 16, :below_available, 0, "elite_500-a"},
-    {"elite_500", :load_survey_day, 5002, 16, :below_available, 100, "elite_500-a"},
-    {"elite_500", :load_survey_parameter, 5003, 16, :supported_bit, 100, "elite_500-a"}
+    {"elite_440", :history, 520, 6, :through_available, 0xFFFF, 0, "elite_440-a"},
+    {"elite_440", :snapshot, 700, 6, :below_available, 0xFFFF, 0, "elite_440-a"},
+    {"elite_440", :load_survey_parameter, 800, 6, :supported_bit, 0xFFFF, 0, "elite_440-a"},
+    {"elite_440", :load_survey_day, 801, 6, :below_available, 0xFFFF, 0, "elite_440-a"},
+    {"elite_500", :history, 900, 16, :through_available, 0xFFFF, 0, "elite_500-a"},
+    {"elite_500", :snapshot, 1500, 16, :below_available, 0xFFFF, 0, "elite_500-a"},
+    {"elite_500", :load_survey_day, 5002, 16, :below_available, 0xFF, 100, "elite_500-a"},
+    {"elite_500", :load_survey_parameter, 5003, 16, :supported_bit, 0xFFFF, 100, "elite_500-a"}
   ]
 
   @names [:history, :snapshot, :load_survey_day, :load_survey_parameter]
@@ -23,7 +23,8 @@ defmodule Alavi.Modbus.SelectorTest do
     test "is exactly the pinned table" do
       entries =
         for e <- Selector.allowlist(),
-            do: {e.model, e.name, e.address, e.function_code, e.range, e.settle_ms, e.source}
+            do:
+              {e.model, e.name, e.address, e.function_code, e.range, e.max, e.settle_ms, e.source}
 
       assert entries == @allowlist
     end
@@ -54,6 +55,12 @@ defmodule Alavi.Modbus.SelectorTest do
       assert {:ok, _} = Selector.request("elite_500", :snapshot, 51, 52)
       assert {:error, :out_of_range} = Selector.request("elite_500", :snapshot, 52, 52)
       assert {:error, :out_of_range} = Selector.request("elite_440", :load_survey_day, 0, 0)
+    end
+
+    test "a 500's load-survey day stops at 255, whatever the meter counts" do
+      assert {:ok, _} = Selector.request("elite_500", :load_survey_day, 255, 735)
+      assert {:error, :out_of_range} = Selector.request("elite_500", :load_survey_day, 256, 735)
+      assert {:ok, _} = Selector.request("elite_440", :load_survey_day, 256, 735)
     end
 
     test "a load-survey parameter must be supported by the meter's mask" do
@@ -88,6 +95,20 @@ defmodule Alavi.Modbus.SelectorTest do
     end
   end
 
+  describe "reachable/3" do
+    test "a 500 reaches 256 load-survey days of any count above that, and all of fewer" do
+      assert Selector.reachable("elite_500", :load_survey_day, 735) == 256
+      assert Selector.reachable("elite_500", :load_survey_day, 256) == 256
+      assert Selector.reachable("elite_500", :load_survey_day, 30) == 30
+    end
+
+    test "a register that holds a word reaches every entry counted" do
+      assert Selector.reachable("elite_440", :load_survey_day, 735) == 735
+      assert Selector.reachable("elite_500", :snapshot, 52) == 52
+      assert Selector.reachable("elite_500", :history, 6) == 6
+    end
+  end
+
   describe "parse_reply/2" do
     test "an exact echo is :ok" do
       {:ok, w440} = Selector.request("elite_440", :snapshot, 0, 1)
@@ -114,11 +135,11 @@ defmodule Alavi.Modbus.SelectorTest do
   end
 
   defp assert_allowed(model, name, value, bound, request) do
-    assert [{^model, ^name, address, fc, range, settle_ms, _source}] =
-             Enum.filter(@allowlist, &match?({^model, ^name, _, _, _, _, _}, &1))
+    assert [{^model, ^name, address, fc, range, max, settle_ms, _source}] =
+             Enum.filter(@allowlist, &match?({^model, ^name, _, _, _, _, _, _}, &1))
 
     assert Selector.settle_ms(request) == settle_ms
-    assert value in 0..0xFFFF
+    assert value in 0..max
     assert in_range?(range, value, bound)
 
     case fc do

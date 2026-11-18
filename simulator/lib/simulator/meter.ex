@@ -34,6 +34,8 @@ defmodule Simulator.Meter do
   time the meter was anchored at, which `Simulator` does when it starts.
   """
 
+  import Bitwise, only: [&&&: 2]
+
   alias Simulator.{Encode, Profile, Stores}
 
   @enforce_keys [:unit_id, :profile, :values, :stores]
@@ -80,7 +82,8 @@ defmodule Simulator.Meter do
       function_code: 6,
       other: {16, 2},
       addresses: %{history: 520, snapshot: 700, load_survey_parameter: 800, load_survey_day: 801},
-      settle_ms: %{}
+      settle_ms: %{},
+      widths: %{}
     },
     "elite_500" => %{
       function_code: 16,
@@ -91,7 +94,9 @@ defmodule Simulator.Meter do
         load_survey_day: 5002,
         load_survey_parameter: 5003
       },
-      settle_ms: %{load_survey_day: 100, load_survey_parameter: 100}
+      settle_ms: %{load_survey_day: 100, load_survey_parameter: 100},
+      # The day register keeps its low byte and selects by it (seen 2026-11-18).
+      widths: %{load_survey_day: 0xFF}
     }
   }
 
@@ -196,8 +201,10 @@ defmodule Simulator.Meter do
         {:exception, 2}
 
       {name, _} ->
-        if Stores.allows?(meter.stores, name, value),
-          do: {:ok, settle(meter, address, value, host_ms, Map.get(model.settle_ms, name, 0))},
+        kept = value &&& Map.get(model.widths, name, 0xFFFF)
+
+        if Stores.allows?(meter.stores, name, kept),
+          do: {:ok, settle(meter, address, kept, host_ms, Map.get(model.settle_ms, name, 0))},
           else: {:exception, 3}
     end
   end

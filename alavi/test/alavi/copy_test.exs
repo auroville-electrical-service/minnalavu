@@ -87,20 +87,23 @@ defmodule Alavi.CopyTest do
 
   # What was copied until a copy ends, in order: `{:stored, entries}`,
   # `{:clock, read}` and, with `rounds`, `:round` for each meter a round read.
-  defp night!(opts \\ []),
-    do: collect([], Keyword.get(opts, :rounds, false), Keyword.get(opts, :stop_after))
+  # `wait_ms`: the longest silence between two events, as long as a scan takes.
+  defp night!(opts \\ []) do
+    opts = Keyword.validate!(opts, rounds: false, stop_after: nil, wait_ms: 30_000)
+    collect([], Map.new(opts))
+  end
 
-  defp collect(acc, rounds, stop_after) do
+  defp collect(acc, %{stop_after: stop_after} = opts) do
     if stop_after && Enum.count(acc, &match?({:stored, _}, &1)) >= stop_after do
       {:partial, Enum.reverse(acc)}
     else
       receive do
-        {:stored, entries} -> collect([{:stored, entries} | acc], rounds, stop_after)
-        {:meter_clock, read} -> collect([{:clock, read} | acc], rounds, stop_after)
-        {:recorded, _events} when rounds -> collect([:round | acc], rounds, stop_after)
+        {:stored, entries} -> collect([{:stored, entries} | acc], opts)
+        {:meter_clock, read} -> collect([{:clock, read} | acc], opts)
+        {:recorded, _events} when opts.rounds -> collect([:round | acc], opts)
         {:"$gen_cast", {:copy, _endpoint, {:finished, outcome}}} -> {outcome, Enum.reverse(acc)}
       after
-        30_000 -> flunk("no copy finished")
+        opts.wait_ms -> flunk("no copy finished")
       end
     end
   end
@@ -243,6 +246,23 @@ defmodule Alavi.CopyTest do
 
       assert Store.owed(ctx.tmp_dir, endpoint) == :none
       assert {:ok, %{load_survey: _, history: _, snapshot: _}} = copied(ctx, "SIM-3")
+    end
+
+    test "an Elite 500 counting more load-survey days than its day register reaches copies " <>
+           "from the oldest it reaches, day 255",
+         ctx do
+      {_agent, clock} = clock!()
+
+      meter =
+        3
+        |> Meter.new(Simulator.Profile.load!("elite_500"), %{})
+        |> Meter.stores(days: 300, snapshots: 1)
+
+      start!(ctx, [meter], [meter(3, "elite_500")], clock)
+
+      assert {:partial, events} = night!(stop_after: 8, wait_ms: 60_000)
+      assert [first | _] = stored(events, :load_survey)
+      assert NaiveDateTime.to_date(first.meter_time) == Date.add(today(), -255)
     end
 
     test "a window that closes mid-copy stops it at an entry boundary, session closed, " <>
