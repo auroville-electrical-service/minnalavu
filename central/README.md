@@ -257,6 +257,12 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
   service and no other system polls the endpoint. A missed read counts for
   the meter whose serial it carries or, with none, for the meter registered at
   its address now.
+- `health.meter_rounds`: per meter expected to be read, the rounds due since
+  the lookback or its coming into service (whole intervals, at its interval
+  now) and the rounds it was read in since then, wherever it was read. A
+  round is its readings run together: one more than half an interval after
+  the last starts the next. Rounds not uploaded yet count as not read. No
+  problem kind is raised on it.
 - `health.targets`: per registered target, as registered now: its profile,
   the meter placed there now (if any), its expected interval, the last
   reading and the last missed read at its unit whatever serial they carry, at

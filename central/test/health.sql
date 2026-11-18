@@ -465,6 +465,25 @@ SELECT pg_temp.is(
   'a serial a place gave only in missed reads, its register reads all failing, is one of its '
   || 'serials');
 
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s %s %s', serial, rounds_due, rounds_read), ', ' ORDER BY serial)
+   FROM health.meter_rounds),
+  'SQLH-0001 96 1, SQLH-0002 96 1, SQLH-0003 1 1, SQLH-0005 0 0, SQLH-0007 96 1, SQLH-0008 2 0, '
+  || 'SQLT-0001 96 0, SQLT-0002 96 1',
+  'each meter expected to be read gives the whole intervals since the lookback or its coming '
+  || 'into service, and its rounds read since then, wherever it was read');
+
+SAVEPOINT rounds;
+-- SQLH-0001 also read 35 minutes ago and 4 minutes after, and twice a second
+-- apart 20 minutes ago: rounds at 35, 20 and 5 minutes ago.
+SELECT pg_temp.reading('SQLH-0001', (SELECT batch FROM b WHERE collector = 'sqlh_a'), i, 1)
+FROM unnest(ARRAY['35 minutes', '31 minutes', '20 minutes 1 second', '20 minutes']::interval[]) i;
+SELECT pg_temp.is(
+  (SELECT rounds_read FROM health.meter_rounds WHERE serial = 'SQLH-0001'),
+  3::bigint,
+  'readings within half an interval of the one before are one round, and past it the next');
+ROLLBACK TO SAVEPOINT rounds;
+
 -- Firmware reads at 10.0.0.1:502, from the batch's collector, with the
 -- software and module 1 names given (module 2 and the version fixed).
 CREATE FUNCTION pg_temp.firmware(serial text, batch uuid, ago interval, software text,
