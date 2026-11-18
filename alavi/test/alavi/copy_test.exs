@@ -372,6 +372,37 @@ defmodule Alavi.CopyTest do
       assert keys(stored(second, :load_survey)) == Enum.sort(@survey_445)
     end
 
+    test "a connection dropped mid-copy cuts that meter's visit only: the restore is done, " <>
+           "and the next meter is copied the same night",
+         ctx do
+      {_agent, clock} = clock!()
+
+      meters = [
+        meter_440(),
+        2 |> Meter.new(Simulator.Profile.load!("elite_440")) |> Meter.stores([])
+      ]
+
+      {sim, endpoint} =
+        start!(ctx, meters, [meter(1, "elite_440"), meter(2, "elite_440")], clock,
+          endpoint: %{"interval_ms" => 200}
+        )
+
+      Simulator.faults(sim, dropped_requests: [{1, 807}])
+
+      capture_log(fn ->
+        {:fault, events} = night!()
+        survey = stored(events, :load_survey)
+        assert Enum.all?(survey, &(&1.unit_id == 2))
+        assert keys(survey) == Enum.sort(@survey_445)
+        assert_received {:"$gen_cast", {:selectors, ^endpoint, :restored}}
+      end)
+
+      assert Store.owed(ctx.tmp_dir, endpoint) == :none
+      assert {:ok, %{load_survey: _}} = copied(ctx, "SIM-2")
+      assert {:ok, progress} = copied(ctx, "SIM-1")
+      refute Map.has_key?(progress, :load_survey)
+    end
+
     for {key, read} <- [{"logger_type", 3}, {"energy_storage_type", 1}] do
       test "an Elite 500 whose #{key} reads #{read}, not its profile's value, " <>
              "has no load survey copied; its histories and snapshots are",

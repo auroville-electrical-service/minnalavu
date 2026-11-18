@@ -264,6 +264,10 @@ defmodule Alavi.Copy.Copier do
 
         {%{run | phase: {:scan, visit, scope}}, at(state, visit, scope)}
 
+      # The restore a cut visit left is still to do: no session opens tonight.
+      {:error, :restore_owed} ->
+        {Run.faulted(run), failed(state, meter, {store, {:session, :restore_owed}})}
+
       {:error, reason} ->
         {%{run | phase: {:open, visit}}, failed(state, meter, {store, {:session, reason}})}
     end
@@ -288,7 +292,7 @@ defmodule Alavi.Copy.Copier do
 
   defp lost(run, visit, state, io, why) do
     state = failed(state, visit.meter, {visit_store(run), why})
-    {Run.faulted(run), io.owe_restore.(state)}
+    {Run.cut(run), io.owe_restore.(state)}
   end
 
   defp visit_store(%Run{phase: {_phase, _visit, scope}}), do: scope.store

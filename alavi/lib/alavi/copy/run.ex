@@ -64,7 +64,7 @@ defmodule Alavi.Copy.Run do
           | {:end_visit, visit()}
           | :done
 
-  @typedoc "`fault`: the run ended with a restore owed."
+  @typedoc "`fault`: a visit was cut short, or the run ended with a restore owed."
   @type t :: %__MODULE__{
           meters: [Meter.t()],
           phase: phase(),
@@ -91,14 +91,22 @@ defmodule Alavi.Copy.Run do
 
   def next_meter(%__MODULE__{} = run), do: %{run | meters: [], phase: :done}
 
-  @doc "Ended by a lost connection or a failed close: a restore is owed."
+  @doc "Ended with a restore owed, from a failed close or a session that cannot open until it is done."
   @spec faulted(t()) :: t()
   def faulted(%__MODULE__{} = run), do: %{run | meters: [], phase: :done, fault: true}
+
+  # contract: test/alavi/copy_test.exs "copy"
+  @doc """
+  A visit cut short by a lost connection: on to the next meter. The poller
+  does the restore owed first, so the next session opens on a clean meter.
+  """
+  @spec cut(t()) :: t()
+  def cut(%__MODULE__{} = run), do: %{next_meter(run) | fault: true}
 
   @spec done?(t()) :: boolean()
   def done?(%__MODULE__{phase: phase}), do: phase == :done
 
-  @doc "How the run ended: done, stopped, or faulted."
+  @doc "How the run ended: done, stopped, or faulted (a visit cut short on the way)."
   @spec outcome(t()) :: :done | stop() | :fault
   def outcome(%__MODULE__{fault: true}), do: :fault
   def outcome(%__MODULE__{stop: nil}), do: :done
