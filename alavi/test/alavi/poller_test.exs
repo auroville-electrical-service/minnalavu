@@ -86,16 +86,15 @@ defmodule Alavi.PollerTest do
       assert [%Reading{unit_id: 1} | _] = recorded!()
     end
 
-    test "a gateway's two-byte reply is rejected as unexpected and logged, on a fresh connection each retry, and the rest of the chain is read" do
+    test "a gateway's two-byte reply under a byte of its own is rejected as unexpected and logged, " <>
+           "retried on the same connection, and the rest of the chain is read" do
       {sim, port} = start_sim!(:tcp)
       Simulator.faults(sim, two_byte_replies: [{2, 7}])
       meters = [meter(1, "elite_440"), meter(2, "elite_440"), meter(3, "elite_500")]
-      # Long enough that the endpoint has let go of the closed connection.
-      backoff = %{"reconnect_backoff_ms" => %{"min" => 50, "max" => 100}}
 
       {rounds, log} =
         with_log(fn ->
-          start_pollers!([endpoint(port, "tcp", meters, backoff)])
+          start_pollers!([endpoint(port, "tcp", meters)])
           for _ <- 1..3, do: recorded!()
         end)
 
@@ -107,13 +106,20 @@ defmodule Alavi.PollerTest do
       prefix = "unit 2: reply rejected (:unexpected_response), 8 bytes:"
       assert [_, _, _] = lines
 
-      assert Enum.all?(
-               lines,
-               &(&1 =~ ~r/#{Regex.escape(prefix)} 00 [0-9A-F]{2} 00 00 00 02 07 0B$/)
-             )
+      tids =
+        for line <- lines do
+          assert [_, tid] =
+                   Regex.run(
+                     ~r/#{Regex.escape(prefix)} ([0-9A-F]{2} [0-9A-F]{2}) 00 00 00 02 07 0B$/,
+                     line
+                   )
 
-      # The client closes on the rejection, so each retry starts a new connection at transaction 0.
-      assert Enum.all?(tl(lines), &String.ends_with?(&1, ": 00 00 00 00 00 02 07 0B"))
+          tid
+        end
+
+      # One connection throughout: each retry carries the next transaction id, not 0 again.
+      assert tids == Enum.uniq(tids)
+      refute "00 00" in tl(tids)
     end
 
     test "exception 06 backs off before each retry, then the meter is missed until it clears" do

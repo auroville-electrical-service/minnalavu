@@ -39,6 +39,7 @@ defmodule Alavi.Modbus.ReadResponsesTest do
       {:skip, why, rest} -> step(framing, rest, expected, skipped ++ [Atom.to_string(why)])
       {:ok, pdu, rest} -> {skipped, {:pdu, pdu}, rest}
       :incomplete -> {skipped, :incomplete, buffer}
+      {:rejected, reason, rest} -> {skipped, {:error, reason}, rest}
       {:error, reason} -> {skipped, {:error, reason}, buffer}
     end
   end

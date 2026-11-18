@@ -20,11 +20,12 @@ export interface Expected {
 export type Skipped = "stale" | "noise" | "bad_crc";
 export type FrameError = "malformed_frame" | "unexpected_response";
 
+/** `error` with `rest`: the frame was not the reply but was taken whole, so the connection is still in step. */
 export type Step =
   | { readonly kind: "reply"; readonly pdu: Uint8Array; readonly rest: Uint8Array }
   | { readonly kind: "skip"; readonly why: Skipped; readonly rest: Uint8Array }
   | { readonly kind: "incomplete" }
-  | { readonly kind: "error"; readonly error: FrameError };
+  | { readonly kind: "error"; readonly error: FrameError; readonly rest?: Uint8Array };
 
 const incomplete: Step = { kind: "incomplete" };
 const view = (b: Uint8Array): DataView => new DataView(b.buffer, b.byteOffset, b.byteLength);
@@ -55,7 +56,14 @@ const tcpReply = (buffer: Uint8Array, expected: Expected): Step => {
   if (buffer.length < end) return incomplete;
   const rest = buffer.subarray(end);
   if (header.getUint16(0) !== expected.transactionId) return { kind: "skip", why: "stale", rest };
-  if (header.getUint8(6) !== expected.unitId) return { kind: "error", error: "unexpected_response" };
+  if (header.getUint8(6) !== expected.unitId) {
+    // A gateway's lone 0B under a byte of its own, not the unit asked: taken whole, so the
+    // connection stays in step and `rest` is what follows it.
+    const gatewayFault = length === 2 && header.getUint8(mbap) === 0x0b;
+    return gatewayFault
+      ? { kind: "error", error: "unexpected_response", rest }
+      : { kind: "error", error: "unexpected_response" };
+  }
   return { kind: "reply", pdu: buffer.subarray(mbap, end), rest };
 };
 

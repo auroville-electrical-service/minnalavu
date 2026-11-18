@@ -1,6 +1,6 @@
 {
   "format": "modbus-read-responses/1",
-  "description": "What a collector makes of the bytes it receives after sending a read. Frames are built independently of either collector (CRC-16/MODBUS, check value 0x4B37); each outcome follows the documented rules. expected: the request the reply must answer (transaction_id is 0 and unused for rtu_over_tcp). skipped: every step that drops bytes ahead of the reply, in order: stale (TCP: a whole frame with another transaction id), noise (RTU: a byte that cannot start the reply), bad_crc (RTU: one byte of what began like the reply but failed its CRC). result: the registers read, a Modbus exception code, incomplete (more bytes needed), or an error: malformed_frame, unexpected_response (TCP: the right transaction from another unit), or malformed_response (a frame that is not the reply to this read). rest: the bytes after the reply, or, for incomplete, malformed_frame or unexpected_response, what the buffer still holds when stepping stops. Every implementation that reads meters must give every outcome.",
+  "description": "What a collector makes of the bytes it receives after sending a read. Frames are built independently of either collector (CRC-16/MODBUS, check value 0x4B37); each outcome follows the documented rules. expected: the request the reply must answer (transaction_id is 0 and unused for rtu_over_tcp). skipped: every step that drops bytes ahead of the reply, in order: stale (TCP: a whole frame with another transaction id), noise (RTU: a byte that cannot start the reply), bad_crc (RTU: one byte of what began like the reply but failed its CRC). result: the registers read, a Modbus exception code, incomplete (more bytes needed), or an error: malformed_frame, unexpected_response (TCP: the right transaction from another unit; when its PDU is the lone byte 0B, a gateway's fault under a byte of its own, the frame is taken whole and rest is what follows it), or malformed_response (a frame that is not the reply to this read). rest: the bytes after the reply, or, for incomplete, malformed_frame or unexpected_response, what the buffer still holds when stepping stops. Every implementation that reads meters must give every outcome.",
   "cases": [
     {
       "why": "a whole reply",
@@ -267,7 +267,7 @@
       "rest": ""
     },
     {
-      "why": "a gateway's two-byte reply, the code 0B with no function code, under another unit, is unexpected",
+      "why": "a gateway's two-byte reply, the code 0B with no function code, under a byte of its own rather than the unit, is unexpected but taken whole",
       "framing": "tcp",
       "expected": {
         "transaction_id": 7,
@@ -275,12 +275,12 @@
         "table": "holding",
         "count": 2
       },
-      "buffer": "000700000002020b",
+      "buffer": "000700000002030b0008",
       "skipped": [],
       "result": {
         "error": "unexpected_response"
       },
-      "rest": "000700000002020b"
+      "rest": "0008"
     },
     {
       "why": "a gateway's two-byte reply under the unit asked for is malformed",
@@ -297,6 +297,22 @@
         "error": "malformed_response"
       },
       "rest": ""
+    },
+    {
+      "why": "a two-byte reply under another unit with any code but 0B is unexpected",
+      "framing": "tcp",
+      "expected": {
+        "transaction_id": 7,
+        "unit_id": 1,
+        "table": "holding",
+        "count": 2
+      },
+      "buffer": "000700000002030a",
+      "skipped": [],
+      "result": {
+        "error": "unexpected_response"
+      },
+      "rest": "000700000002030a"
     },
     {
       "why": "a whole reply",

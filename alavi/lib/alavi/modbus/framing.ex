@@ -82,11 +82,13 @@ defmodule Alavi.Modbus.Framing do
   `{:skip, why, rest}` drops what is in front of the reply; call again on `rest`.
   A TCP frame with the right transaction id but another unit is
   `:unexpected_response`; a stale one (`:stale`) is skipped, so a device that echoes
-  the wrong id times out rather than failing as unexpected.
+  the wrong id times out rather than failing as unexpected. `{:rejected, why, rest}`:
+  the frame was not the reply, but was taken whole and leaves the stream in step.
   """
   @spec take_reply(t(), binary(), expected()) ::
           {:ok, binary(), binary()}
           | {:skip, skipped(), binary()}
+          | {:rejected, :unexpected_response, binary()}
           | :incomplete
           | {:error, decode_error() | :unexpected_response}
   def take_reply(:tcp, buffer, expected) do
@@ -117,6 +119,11 @@ defmodule Alavi.Modbus.Framing do
          unit_id: unit
        }),
        do: {:ok, pdu, rest}
+
+  # A gateway's lone 0B under a byte of its own (one fixed byte per gateway on
+  # site), not the unit asked: taken whole, so the connection stays in step.
+  defp tcp_reply(%{transaction_id: tid, pdu: <<0x0B>>}, rest, %{transaction_id: tid}),
+    do: {:rejected, :unexpected_response, rest}
 
   defp tcp_reply(%{transaction_id: tid}, _rest, %{transaction_id: tid}),
     do: {:error, :unexpected_response}

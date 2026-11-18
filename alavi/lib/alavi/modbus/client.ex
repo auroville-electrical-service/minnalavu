@@ -173,6 +173,10 @@ defmodule Alavi.Modbus.Client do
     end
   end
 
+  # A read refused in step keeps the connection: a retry may be answered on it.
+  defp parse({:error, {:in_step, reason}, client}, _unit_id, _table, _count),
+    do: {:error, reason, client}
+
   defp parse({:error, reason, client}, _unit_id, _table, _count), do: fail(client, reason)
 
   defp echoed({:ok, pdu, client}, unit_id, request) do
@@ -189,6 +193,9 @@ defmodule Alavi.Modbus.Client do
     end
   end
 
+  defp echoed({:error, {:in_step, reason}, client}, _unit_id, _request),
+    do: {:error, reason, close(client)}
+
   defp echoed({:error, reason, client}, _unit_id, _request), do: {:error, reason, close(client)}
 
   # A deadline reached after a bad CRC reports the corruption, not a plain timeout.
@@ -203,6 +210,16 @@ defmodule Alavi.Modbus.Client do
 
       :incomplete ->
         receive_more(client, expected, deadline, skipped)
+
+      {:rejected, reason, rest} ->
+        frame = binary_part(client.buffer, 0, byte_size(client.buffer) - byte_size(rest))
+
+        client =
+          %{client | buffer: rest}
+          |> noted(expected, skipped)
+          |> rejected(expected.unit_id, reason, frame)
+
+        {:error, {:in_step, reason}, client}
 
       {:error, reason} ->
         client =

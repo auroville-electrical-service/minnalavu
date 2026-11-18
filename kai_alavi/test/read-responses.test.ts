@@ -22,7 +22,7 @@ const run = (
     case "incomplete":
       return { skipped, result: "incomplete", rest: hex(buffer) };
     case "error":
-      return { skipped, result: { error: step.error }, rest: hex(buffer) };
+      return { skipped, result: { error: step.error }, rest: hex(step.rest ?? buffer) };
     case "reply": {
       const parsed = parseResponse(expected.table, count, step.pdu);
       const result = parsed.ok
