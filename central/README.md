@@ -321,6 +321,23 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
   than its `*_behind_after` before the meter's clock at the collector's last
   upload, and copied and seen since before then. `behind` is one lookup by
   serial, store and stamp range; `newest_entry` one per register key.
+- `health.meter_clock_offsets`: per meter-clock read, its collector's
+  answered clock check nearest it within 48 hours, and the meter's offset
+  from UTC that check gives (its zone and error together); no check within
+  the bound, no offset.
+- `health.meter_clock_steps`: per grounded meter-clock read whose batch
+  arrived within the lookback, its step from the same serial's previous
+  grounded read, when that passes `meter_clock_step_after`: the clock was
+  set or stopped between the two.
+- `health.meter_clocks`: per target in service, the last grounded
+  meter-clock read at its address, its offset, and its distance from the
+  median offset of its collector's meters (a collector's meters share a
+  zone, so the zone cancels). Far past `meter_clock_far_after`, judged only
+  where the collector has at least three such meters.
+- `health.copy_meters`: per copied meter, the stores behind in
+  `health.copy_stores`, the days missed in `health.missed_snapshots`, and its
+  polling interval; polled slowly when its copies fail and it is polled less
+  often than `copy_failing_interval`.
 - `health.problems`: one row per problem, `(kind, subject)` naming it and
   `detail` describing it now. Kinds: `collector_silent` (no upload for
   `collector_silent_after`), `clock_unchecked` (unchecked in
@@ -359,7 +376,12 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
   `copy_behind` (a store behind in `health.copy_stores`, subject
   `<serial> <store>`; its newest entry copied and the threshold in its
   detail). Both are measured at the collector's last upload, so a collector
-  gone quiet shows as `collector_silent`, not as copies missed.
+  gone quiet shows as `collector_silent`, not as copies missed. Then
+  `meter_clock_step` (a serial in `health.meter_clock_steps`; each step, the
+  reads either side and the address in its detail), `meter_clock_far` (far in
+  `health.meter_clocks`; its offset, its distance from the median and of how
+  many meters) and `copy_failing_polled_slowly` (polled slowly in
+  `health.copy_meters`; what fails, its interval and the threshold).
 - `health.stored_entries`, `health.stored_entry_conflicts`,
   `health.meter_clock_reads` and `health.meter_clock_read_conflicts`: every
   row of their `store` tables, the first and third with `received_at`, when
@@ -373,7 +395,9 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
         meter_silent_intervals => 4, backlog_near_capacity => 0.8, lookback => '1 day',
         endpoint_error_rate => 0.05, snapshot_missed_margin => '1 hour',
         history_behind_after => '62 days', snapshot_behind_after_elite_500 => '14 days',
-        load_survey_behind_after_elite_440 => '7 days', load_survey_behind_after_elite_500 => '30 days');
+        load_survey_behind_after_elite_440 => '7 days', load_survey_behind_after_elite_500 => '30 days',
+        meter_clock_step_after => '5 minutes', meter_clock_far_after => '15 minutes',
+        copy_failing_interval => '30 minutes');
 
   `endpoint_error_rate`'s first value, 0.05, is a guess until the pilot's
   figures say what a healthy chain misses.
@@ -383,7 +407,9 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
   `load_survey_behind_after_elite_500` (30 days), until the pilot's copies show
   what its meters keep: each sits below what the pilot's meters of that model
   held (a 440 34 days of load survey, a 500 52 snapshots and 332 days; six
-  histories each).
+  histories each). And of `meter_clock_step_after` (5 minutes, far above
+  a meter's drift between reads), `meter_clock_far_after` (15 minutes) and
+  `copy_failing_interval` (30 minutes, the 440's load-survey interval).
 
 The role `monitor` may select from these views and nothing else: no raw
 table, no registry table, nothing in `api` or `admin`, no function, no writes

@@ -16,7 +16,9 @@ SELECT admin.set_health_thresholds(collector_silent_after => '1 hour',
   meter_silent_intervals => 4, backlog_near_capacity => 0.8, lookback => '1 day',
   endpoint_error_rate => 0.05, snapshot_missed_margin => '1 hour',
   history_behind_after => '62 days', snapshot_behind_after_elite_500 => '14 days',
-  load_survey_behind_after_elite_440 => '7 days', load_survey_behind_after_elite_500 => '30 days');
+  load_survey_behind_after_elite_440 => '7 days', load_survey_behind_after_elite_500 => '30 days',
+  meter_clock_step_after => '5 minutes', meter_clock_far_after => '15 minutes',
+  copy_failing_interval => '30 minutes');
 
 SELECT admin.create_collector(c)
 FROM unnest(ARRAY['sqltest_srv_a', 'sqltest_srv_b', 'sqltest_srv_c']) c;

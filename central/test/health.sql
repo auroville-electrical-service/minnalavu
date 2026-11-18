@@ -11,7 +11,9 @@ SELECT admin.set_health_thresholds(collector_silent_after => '1 hour',
   meter_silent_intervals => 4, backlog_near_capacity => 0.8, lookback => '1 day',
   endpoint_error_rate => 0.05, snapshot_missed_margin => '1 hour',
   history_behind_after => '62 days', snapshot_behind_after_elite_500 => '14 days',
-  load_survey_behind_after_elite_440 => '7 days', load_survey_behind_after_elite_500 => '30 days');
+  load_survey_behind_after_elite_440 => '7 days', load_survey_behind_after_elite_500 => '30 days',
+  meter_clock_step_after => '5 minutes', meter_clock_far_after => '15 minutes',
+  copy_failing_interval => '30 minutes');
 
 SELECT admin.create_collector(c) FROM unnest(ARRAY['sqlh_a', 'sqlh_b', 'sqlh_c', 'sqlh_d']) c;
 
@@ -728,11 +730,141 @@ SELECT pg_temp.is(pg_temp.unkeyed_scans('SELECT * FROM health.missed_snapshots')
 SELECT pg_temp.is(pg_temp.unkeyed_scans('SELECT * FROM health.copy_stores'), NULL,
   'health.copy_stores finds clock reads, uploads and entries by index');
 
+-- Copied meters' polling: sqlc_on unit 7 (a 500, two stores behind) and unit
+-- 3 (nothing failing) are moved to 6-hour polling; the rest poll every 15
+-- minutes.
+SAVEPOINT polling;
+SELECT admin.change_target(endpoint_id => 'sqlc_on', unit_id => u, valid_from => now() - interval '1 minute',
+  profile => p, interval_ms => 21600000, retry_ms => NULL)
+FROM (VALUES (7, 'elite_500'), (3, 'elite_440')) v (u, p);
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s %s %s %s %s %s', serial, expected_interval,
+                            coalesce(array_to_string(behind_stores, '/'), '-'),
+                            missed_snapshot_days, failing, polled_slowly),
+                     ', ' ORDER BY serial)
+   FROM health.copy_meters),
+  'SQLC-0001 00:15:00 - 1 t f, SQLC-0002 00:15:00 load_survey 0 t f, '
+  || 'SQLC-0003 06:00:00 - 0 f f, SQLC-0004 00:15:00 - 1 t f, SQLC-0005 00:15:00 - 0 f f, '
+  || 'SQLC-0201 00:15:00 - 0 f f, SQLC-0401 00:15:00 - 0 f f, '
+  || 'SQLC-5001 06:00:00 history/load_survey 0 t t',
+  'a copied meter fails when a store is behind or a snapshot day missed, and is polled slowly '
+  || 'when it fails and is polled less often than copy_failing_interval');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s: %s', subject, detail), '; ' ORDER BY subject) FROM health.problems
+   WHERE kind = 'copy_failing_polled_slowly'),
+  'SQLC-5001: copies failing (behind: history, load_survey) while polled every 06:00:00, less '
+  || 'often than 00:30:00; at sqlc_on:502 unit 7 via sqlh_e, profile elite_500',
+  'a meter polled slowly while its copies fail is a problem, saying what fails and how often it '
+  || 'is polled');
+ROLLBACK TO SAVEPOINT polling;
+
+SELECT pg_temp.is(pg_temp.unkeyed_scans('SELECT * FROM health.copy_meters'), NULL,
+  'health.copy_meters finds clock reads, uploads and entries by index');
+
+-- Meter clocks, on collector sqlh_g, whose clock is 20 s slow by answered
+-- checks 9 days, 26 hours and 1 hour ago. Its meters keep IST: unit 1 on time
+-- (reads 25 and 2 hours ago), unit 2 a minute fast 2 hours ago, an hour fast
+-- 5 days ago (which no check grounds) and an hour slow 9 days ago, unit 3 44
+-- hours slow, unit 4 17 hours slow 25 hours ago and on time 2 hours ago. sqlh_h has three meters on
+-- time and one 44 hours slow, read once, and no check.
+SAVEPOINT clocks;
+SELECT admin.create_collector(c) FROM unnest(ARRAY['sqlh_g', 'sqlh_h']) c;
+INSERT INTO b VALUES ('sqlh_g', pg_temp.upload('sqlh_g', '5 minutes', 0, 0, 0, 0)),
+                     ('sqlh_h', pg_temp.upload('sqlh_h', '5 minutes', 0, 0, 0, 0));
+INSERT INTO store.clock_checks
+  (collector_id, t1, t4, trigger, server, outcome, t2_unix, t3_unix, address, stratum, leap,
+   reference_id, batch_id)
+SELECT 'sqlh_g', now() - ago, now() - ago + interval '0.02 seconds', 'daily', 'pool.ntp.org',
+       'answered', extract(epoch FROM now() - ago) + 20.01, extract(epoch FROM now() - ago) + 20.01,
+       '192.0.2.123', 2, 0, 3221226115, (SELECT batch FROM b WHERE collector = 'sqlh_g')
+FROM unnest(ARRAY['9 days'::interval, '26 hours', '1 hour']) ago;
+SELECT pg_temp.copy_endpoint(e, c, '10 days', false, false)
+FROM (VALUES ('sqlk_g', 'sqlh_g'), ('sqlk_h', 'sqlh_h')) v (e, c);
+SELECT pg_temp.copy_target(e, u, 'elite_440')
+FROM unnest(ARRAY['sqlk_g', 'sqlk_h']) e CROSS JOIN generate_series(1, 4) u;
+SELECT pg_temp.clock(e, u, format('SQLK-%s-%s', right(e, 1), u), 'elite_440', a,
+                     (now() AT TIME ZONE 'Asia/Kolkata') + d)
+FROM (VALUES ('sqlk_g', 1, '25 hours'::interval, '0'::interval), ('sqlk_g', 1, '2 hours', '0'),
+             ('sqlk_g', 2, '9 days', '-1 hour'), ('sqlk_g', 2, '5 days', '1 hour'),
+             ('sqlk_g', 2, '2 hours', '1 minute'),
+             ('sqlk_g', 3, '2 hours', '-44 hours'),
+             ('sqlk_g', 4, '25 hours', '-17 hours'), ('sqlk_g', 4, '2 hours', '0'),
+             ('sqlk_h', 1, '2 hours', '0'), ('sqlk_h', 2, '2 hours', '0'),
+             ('sqlk_h', 3, '2 hours', '0'), ('sqlk_h', 4, '2 hours', '-44 hours'))
+       v (e, u, a, d);
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s %s %s', serial, check_at = now() - interval '1 hour',
+                            coalesce((meter_offset - interval '5:30' + interval '20 seconds')::text,
+                                     '-')),
+                     ', ' ORDER BY serial, collector_at)
+   FROM health.meter_clock_offsets WHERE collector_id = 'sqlh_g' AND collector_at > now() - interval '3 hours'),
+  'SQLK-g-1 t 00:00:00, SQLK-g-2 t 00:01:00, SQLK-g-3 t -1 days -20:00:00, SQLK-g-4 t 00:00:00',
+  'a meter-clock read''s offset from UTC is grounded by its collector''s nearest answered check');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s %s %s', serial, coalesce(check_at::text, '-'),
+                            coalesce(meter_offset::text, '-')), ', ' ORDER BY serial, collector_at)
+   FROM health.meter_clock_offsets
+   WHERE (collector_id = 'sqlh_g' AND collector_at < now() - interval '3 days'
+          AND collector_at > now() - interval '6 days')
+      OR (collector_id = 'sqlh_h' AND serial = 'SQLK-h-1')),
+  'SQLK-g-2 - -, SQLK-h-1 - -',
+  'a read with no answered check within 48 hours has no offset');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s %s %s %s', serial, step, previous_read_at = now() - interval '25 hours',
+                            read_at = now() - interval '2 hours'), ', ' ORDER BY serial)
+   FROM health.meter_clock_steps),
+  'SQLK-g-2 01:01:00 f t, SQLK-g-4 17:00:00 t t',
+  'a step is an offset moving more than meter_clock_step_after between two grounded reads of '
+  || 'a serial, past any ungrounded read between them; drift is not');
+
+SELECT pg_temp.is(
+  (SELECT detail FROM health.problems WHERE kind = 'meter_clock_step' AND subject = 'SQLK-g-4'),
+  format('clock moved 17:00:00 between %s and %s (-11:30:20 to 05:29:40 from UTC), at sqlk_g:502 '
+         || 'unit 4 via sqlh_g', now() - interval '25 hours', now() - interval '2 hours'),
+  'a clock step''s problem says how far it moved, between which reads, and where');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s %s %s %s', serial, collector_meters, from_median = interval '-44 hours',
+                            far), ', ' ORDER BY serial)
+   FROM health.meter_clocks WHERE collector_id IN ('sqlh_g', 'sqlh_h')),
+  'SQLK-g-1 4 f f, SQLK-g-2 4 f f, SQLK-g-3 4 t t, SQLK-g-4 4 f f',
+  'a meter''s clock is far when its last grounded offset is past meter_clock_far_after from its '
+  || 'collector''s median; a collector with no check grounds none');
+
+SELECT pg_temp.is(
+  (SELECT detail FROM health.problems WHERE kind = 'meter_clock_far'),
+  format('clock -1 days -14:30:20 from UTC at %s, -1 days -20:00:00 from the median of the 4 '
+         || 'meters on sqlh_g; at sqlk_g:502 unit 3', now() - interval '2 hours'),
+  'a far clock''s problem says its offset, how far from the median, of how many meters, and where');
+
+SAVEPOINT two_meters;
+SELECT admin.retire_target(endpoint_id => 'sqlk_g', unit_id => u, valid_from => now() - interval '1 minute')
+FROM generate_series(1, 2) u;
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s %s %s', serial, collector_meters, far), ', ' ORDER BY serial)
+   FROM health.meter_clocks WHERE collector_id = 'sqlh_g'),
+  'SQLK-g-3 2 f, SQLK-g-4 2 f',
+  'a collector with fewer than three grounded meters judges no clock far');
+ROLLBACK TO SAVEPOINT two_meters;
+
+SELECT pg_temp.is(pg_temp.unkeyed_scans('SELECT * FROM health.meter_clock_steps'), NULL,
+  'health.meter_clock_steps finds meter-clock reads by batch and serial');
+SELECT pg_temp.is(pg_temp.unkeyed_scans('SELECT * FROM health.meter_clocks'), NULL,
+  'health.meter_clocks finds meter-clock reads by address');
+ROLLBACK TO SAVEPOINT clocks;
+
 SELECT admin.set_health_thresholds(collector_silent_after => '1 hour',
   meter_silent_intervals => 4, backlog_near_capacity => 0.8, lookback => '4 days',
   endpoint_error_rate => 0.05, snapshot_missed_margin => '2 hours',
   history_behind_after => '120 days', snapshot_behind_after_elite_500 => '14 days',
-  load_survey_behind_after_elite_440 => '7 days', load_survey_behind_after_elite_500 => '50 days');
+  load_survey_behind_after_elite_440 => '7 days', load_survey_behind_after_elite_500 => '50 days',
+  meter_clock_step_after => '5 minutes', meter_clock_far_after => '15 minutes',
+  copy_failing_interval => '30 minutes');
 SELECT pg_temp.is(
   (SELECT string_agg(format('%s %s', serial, meter_day), ', ' ORDER BY serial, meter_day)
    FROM health.missed_snapshots WHERE serial IN ('SQLC-0001', 'SQLC-0004')),
@@ -750,7 +882,9 @@ SELECT admin.set_health_thresholds(collector_silent_after => '3 hours',
   meter_silent_intervals => 10, backlog_near_capacity => 0.9, lookback => '4 days',
   endpoint_error_rate => 0.2, snapshot_missed_margin => '1 hour',
   history_behind_after => '62 days', snapshot_behind_after_elite_500 => '14 days',
-  load_survey_behind_after_elite_440 => '7 days', load_survey_behind_after_elite_500 => '30 days');
+  load_survey_behind_after_elite_440 => '7 days', load_survey_behind_after_elite_500 => '30 days',
+  meter_clock_step_after => '5 minutes', meter_clock_far_after => '15 minutes',
+  copy_failing_interval => '30 minutes');
 
 SELECT pg_temp.is(
   (SELECT string_agg(format('%s %s', kind, subject), '; ' ORDER BY kind, subject)
