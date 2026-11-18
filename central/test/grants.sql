@@ -259,12 +259,14 @@ FROM unnest(ARRAY[
   $q$DELETE FROM store.readings$q$
 ]) q;
 
--- The role monitor, and any login that is a member of it (the operator's, the
--- alert job's): it may read the health views, and nothing else.
+-- The role monitor, and a login that holds it alone: it may read the health
+-- views, and nothing else. Real logins (the operator's, the alert job's) are
+-- checked below to add nothing to the roles they hold.
+CREATE ROLE sqltest_monitor_login IN ROLE monitor;
+
 CREATE TEMP VIEW monitor_roles AS
   SELECT 'monitor'::name AS role
-  UNION SELECT m.member::regrole::name FROM pg_auth_members m
-        WHERE m.roleid = (SELECT oid FROM pg_roles WHERE rolname = 'monitor');
+  UNION SELECT 'sqltest_monitor_login';
 
 SELECT pg_temp.is(
   (SELECT string_agg(c.relname::text, ', ' ORDER BY c.relname)
@@ -350,7 +352,7 @@ SELECT pg_temp.is(
      AND (r.rolsuper OR r.rolcreaterole OR r.rolcreatedb OR r.rolbypassrls OR r.rolreplication
           OR (r.rolname = 'monitor' AND r.rolcanlogin))),
   NULL,
-  'monitor cannot log in, and neither it nor its members hold a special attribute');
+  'monitor cannot log in and holds no special attribute');
 
 SELECT pg_temp.is(pg_temp.sqlstate_as('monitor', q), '00000', 'monitor may: ' || q)
 FROM unnest(ARRAY[
@@ -426,26 +428,24 @@ FROM unnest(ARRAY[
   'CREATE TEMP TABLE x (i int)'
 ]) q;
 
--- The role minkanakku_staff, and any login that is a member of it: it may
--- call jobs.request_job and read jobs.request_status, and nothing else. No
--- other role (the portal's, whatever it is named) may call jobs.request_job.
+-- The role minkanakku_staff, and a login that holds it alone: it may call
+-- jobs.request_job and read jobs.request_status, and nothing else. No other
+-- role (the portal's, whatever it is named) may call jobs.request_job.
 CREATE ROLE sqltest_staff_login IN ROLE minkanakku_staff;
 CREATE ROLE sqltest_portal;
 
 CREATE TEMP VIEW staff_roles AS
-  SELECT r.rolname AS role FROM pg_roles r
-  WHERE pg_has_role(r.oid, 'minkanakku_staff', 'USAGE') AND NOT r.rolsuper;
-
-SELECT pg_temp.ok(
-  (SELECT 'sqltest_staff_login' IN (SELECT role FROM staff_roles)),
-  'a login that is a member of minkanakku_staff is among the roles checked');
+  SELECT 'minkanakku_staff'::name AS role
+  UNION SELECT 'sqltest_staff_login';
 
 SELECT pg_temp.is(
   (SELECT string_agg(r.rolname, ', ' ORDER BY r.rolname)
    FROM pg_roles r
    WHERE NOT r.rolsuper
      AND has_function_privilege(r.oid, 'jobs.request_job(text, text, text[], text)', 'EXECUTE')),
-  (SELECT string_agg(role, ', ' ORDER BY role) FROM staff_roles),
+  (SELECT string_agg(r.rolname, ', ' ORDER BY r.rolname)
+   FROM pg_roles r
+   WHERE NOT r.rolsuper AND pg_has_role(r.oid, 'minkanakku_staff', 'USAGE')),
   'no role but minkanakku_staff and its members may call jobs.request_job');
 
 SELECT pg_temp.is(
@@ -517,7 +517,7 @@ SELECT pg_temp.is(
      AND (r.rolsuper OR r.rolcreaterole OR r.rolcreatedb OR r.rolbypassrls OR r.rolreplication
           OR (r.rolname = 'minkanakku_staff' AND r.rolcanlogin))),
   NULL,
-  'minkanakku_staff cannot log in, and neither it nor its members hold a special attribute');
+  'minkanakku_staff cannot log in and holds no special attribute');
 
 SELECT pg_temp.is(
   (SELECT string_agg(format('%s may execute %s', r.role, f.oid::regprocedure), '; ')
@@ -599,6 +599,90 @@ FROM unnest(ARRAY[
   $q$SELECT admin.register_target('e', 1, now(), 'elite_440', NULL, NULL)$q$,
   'CREATE TABLE jobs.x (i int)',
   'CREATE TEMP TABLE x (i int)'
+]) q;
+
+-- Every login under monitor or minkanakku_staff, however indirectly. Roles
+-- belong to the cluster, so the real ones (the box's) are here too. A login
+-- may hold both roles, so its reach is theirs together; what each role grants
+-- is checked above. Here each login is checked to add nothing to them: no
+-- other role, no right granted to it by name, nothing it owns, no special
+-- attribute.
+CREATE ROLE sqltest_both_login IN ROLE monitor, minkanakku_staff;
+
+CREATE TEMP VIEW member_logins AS
+  WITH RECURSIVE m(oid) AS (
+    SELECT member FROM pg_auth_members
+    WHERE roleid IN (SELECT oid FROM pg_roles WHERE rolname IN ('monitor', 'minkanakku_staff'))
+    UNION SELECT a.member FROM pg_auth_members a JOIN m ON a.roleid = m.oid)
+  SELECT r.oid, r.rolname AS role FROM m JOIN pg_roles r USING (oid);
+
+SELECT pg_temp.is(
+  (SELECT string_agg(role, ', ' ORDER BY role) FROM member_logins
+   WHERE role LIKE 'sqltest\_%'),
+  'sqltest_both_login, sqltest_monitor_login, sqltest_staff_login',
+  'the logins checked include one holding each role alone and one holding both');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s in %s', l.role, a.roleid::regrole), '; ')
+   FROM pg_auth_members a JOIN member_logins l ON l.oid = a.member
+   WHERE a.roleid NOT IN ('monitor'::regrole, 'minkanakku_staff'::regrole)),
+  NULL,
+  'a login under monitor or minkanakku_staff holds no other role');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(r.rolname, '; ')
+   FROM pg_roles r JOIN member_logins l USING (oid)
+   WHERE r.rolsuper OR r.rolcreaterole OR r.rolcreatedb OR r.rolbypassrls OR r.rolreplication),
+  NULL,
+  'no login under monitor or minkanakku_staff holds a special attribute');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s has %s on %s', l.role, g.privilege_type, g.what), '; '
+                     ORDER BY l.role, g.what, g.privilege_type)
+   FROM member_logins l
+   JOIN (SELECT (aclexplode(c.relacl)).*, c.oid::regclass::text AS what FROM pg_class c
+         UNION ALL
+         SELECT (aclexplode(a.attacl)).*, format('%s.%s', a.attrelid::regclass, a.attname)
+         FROM pg_attribute a WHERE a.attacl IS NOT NULL
+         UNION ALL
+         SELECT (aclexplode(n.nspacl)).*, 'schema ' || n.nspname FROM pg_namespace n
+         UNION ALL
+         SELECT (aclexplode(f.proacl)).*, f.oid::regprocedure::text FROM pg_proc f
+         UNION ALL
+         SELECT (aclexplode(d.datacl)).*, 'database ' || d.datname FROM pg_database d) g
+     ON g.grantee = l.oid),
+  NULL,
+  'no right is granted by name to a login under monitor or minkanakku_staff');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s owns %s', l.role, o.what), '; ' ORDER BY l.role, o.what)
+   FROM member_logins l
+   JOIN (SELECT relowner AS owner, oid::regclass::text AS what FROM pg_class
+         UNION ALL SELECT nspowner, 'schema ' || nspname FROM pg_namespace
+         UNION ALL SELECT proowner, oid::regprocedure::text FROM pg_proc
+         UNION ALL SELECT datdba, 'database ' || datname FROM pg_database) o
+     ON o.owner = l.oid),
+  NULL,
+  'no login under monitor or minkanakku_staff owns anything');
+
+-- A login holding both roles reaches what each grants, and nothing more.
+SELECT pg_temp.is(pg_temp.sqlstate_as('sqltest_both_login', q), '00000',
+                  'a login holding both may: ' || q)
+FROM unnest(ARRAY['SELECT * FROM health.problems', 'SELECT * FROM jobs.request_status']) q;
+
+SELECT pg_temp.is(pg_temp.sqlstate_as('sqltest_both_login', q), '22023',
+                  'a login holding both may call: ' || q)
+FROM unnest(ARRAY[
+  $q$SELECT jobs.request_job('sqltest_none', 'read_on_demand', ARRAY['S'], 'staff:1')$q$
+]) q;
+
+SELECT pg_temp.is(pg_temp.sqlstate_as('sqltest_both_login', q), '42501',
+                  'a login holding both is refused: ' || q)
+FROM unnest(ARRAY[
+  'SELECT * FROM store.readings',
+  'SELECT * FROM registry.meter_history',
+  'SELECT * FROM jobs.requests',
+  $q$SELECT api.ingest('{}')$q$
 ]) q;
 
 ROLLBACK;

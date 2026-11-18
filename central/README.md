@@ -482,7 +482,9 @@ will wake it sooner), runs it, and tags what it reads with the request's id.
 
 The role `minkanakku_staff` may call one function and read one view, and
 nothing else (`test/grants.sql`); no other role may call the function. It
-cannot log in; a login is a member of it, as for `monitor`.
+cannot log in; a login is a member of it, as for `monitor`. One login may
+hold both roles, and so reach what each grants; it may hold no other role,
+own nothing, and be granted nothing by name.
 
 `minkanakku`'s read-only role, not built yet, will read `stored_entries`,
 `stored_entry_conflicts`, `meter_clock_reads` and `meter_clock_read_conflicts`
