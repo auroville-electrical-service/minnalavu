@@ -174,6 +174,21 @@ describe("decodeDay", () => {
     expect(decodeDay(p.stored.load_survey, read)).toEqual({ ok: false, error: c.error });
   });
 
+  test("the current day read whole, past the meter's clock, is refused", () => {
+    const c = fixture.load_survey.find((x) => x.clock_words);
+    if (!c?.clock_words) throw new Error("the fixture has no current-day case");
+    const p = profileAt(c);
+    const [minutes] = c.interval_words;
+    if (minutes === undefined) throw new Error("the case has no interval");
+    const read = {
+      stamp: c.stamp_words,
+      interval: c.interval_words,
+      values: Array.from({ length: 2 * (1440 / minutes) }, () => 0),
+      clock: { stamp: p.meter_clock, words: c.clock_words },
+    };
+    expect(decodeDay(p.stored.load_survey, read)).toEqual({ ok: false, error: "wrong_word_count" });
+  });
+
   test("a day whose values do not fill its intervals is refused", () => {
     const [c] = fixture.load_survey;
     if (!c) throw new Error("the fixture has no load-survey case");

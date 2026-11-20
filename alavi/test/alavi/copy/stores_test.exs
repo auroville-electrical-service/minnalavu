@@ -81,10 +81,12 @@ defmodule Alavi.Copy.StoresTest do
                [{901, 2}, {911, 4}, {927, 16}, {945, 12}]
     end
 
-    test "a day's values in reads of per_request intervals", ctx do
-      assert Stores.value_runs(ctx.p440.stored.load_survey, 30) == [{807, 96}]
-      assert Stores.value_runs(ctx.p440.stored.load_survey, 15) == [{807, 96}, {903, 96}]
-      assert Stores.value_runs(ctx.p500.stored.load_survey, 15) == [{5022, 120}, {5142, 72}]
+    test "a day's first intervals in reads of per_request intervals; none, no read", ctx do
+      assert Stores.value_runs(ctx.p440.stored.load_survey, 48) == [{807, 96}]
+      assert Stores.value_runs(ctx.p440.stored.load_survey, 96) == [{807, 96}, {903, 96}]
+      assert Stores.value_runs(ctx.p500.stored.load_survey, 96) == [{5022, 120}, {5142, 72}]
+      assert Stores.value_runs(ctx.p500.stored.load_survey, 20) == [{5022, 40}]
+      assert Stores.value_runs(ctx.p500.stored.load_survey, 0) == []
     end
   end
 end

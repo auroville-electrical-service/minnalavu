@@ -28,7 +28,7 @@ defmodule Alavi.Decode.Stored do
 
   @typedoc """
   One load-survey parameter of one day: each interval ended by the meter's
-  clock, by its start; `not_ended` counts the rest.
+  clock, by its start; `not_ended` counts the rest, which are not read.
   """
   @type day :: %{
           meter_time: NaiveDateTime.t(),
@@ -92,11 +92,24 @@ defmodule Alavi.Decode.Stored do
 
   def values(_survey, _words), do: {:error, :wrong_word_count}
 
+  @doc """
+  How many of a day's `minutes` intervals from `at` have ended by the meter's
+  `clock`, which are the ones to read: every one for a day past (`clock`
+  nil). An Elite 500 refuses a read past the interval in progress.
+  """
+  @spec ended(NaiveDateTime.t(), pos_integer(), NaiveDateTime.t() | nil) :: non_neg_integer()
+  def ended(_at, minutes, nil), do: div(@day_minutes, minutes)
+
+  def ended(at, minutes, clock) do
+    whole = clock |> NaiveDateTime.diff(at) |> max(0) |> div(minutes * 60)
+    min(whole, div(@day_minutes, minutes))
+  end
+
   # contract: test/alavi/decode/stored_test.exs "stored-decode.v1.json"
   @doc """
   One parameter's day. `clock` is the meter clock's words, read on the day
-  being copied, or nil for a day past: an interval is an entry only once its
-  end is no later than the clock. `values` holds every interval of the day.
+  being copied, or nil for a day past. `values` holds the intervals `ended/3`
+  counts, each an entry; the day's others are `not_ended`.
   """
   @spec day(Stored.survey(), %{
           stamp: words(),
@@ -107,41 +120,32 @@ defmodule Alavi.Decode.Stored do
   def day(survey, %{stamp: stamp_words, interval: interval_words} = read) do
     with {:ok, at} <- stamp(survey.stamp, stamp_words),
          {:ok, minutes} <- interval(interval_words),
+         {:ok, clock} <- clock(read.clock),
          {:ok, values} <- values(survey, read.values),
-         :ok <- whole_day(values, minutes),
-         {:ok, clock} <- clock(read.clock) do
-      {:ok, intervals(at, minutes * 60, values, clock)}
+         :ok <- count(values, ended(at, minutes, clock)) do
+      {:ok, intervals(at, minutes * 60, values, div(@day_minutes, minutes))}
     end
   end
-
-  defp whole_day(values, minutes),
-    do:
-      if(length(values) == div(@day_minutes, minutes), do: :ok, else: {:error, :wrong_word_count})
 
   defp clock(nil), do: {:ok, nil}
   defp clock({stamp, words}), do: stamp(stamp, words)
 
-  defp intervals(at, step, values, clock) do
+  defp count(values, n), do: if(length(values) == n, do: :ok, else: {:error, :wrong_word_count})
+
+  defp intervals(at, step, values, of) do
     timed =
       values
       |> Enum.with_index()
       |> Enum.map(fn {v, i} -> {NaiveDateTime.add(at, i * step), v} end)
 
-    {ended, rest} = Enum.split_while(timed, fn {start, _v} -> ended?(start, step, clock) end)
-
     %{
       meter_time: at,
       interval_s: step,
-      entries: for({start, %Decimal{} = v} <- ended, do: {start, v}),
-      not_finite: for({start, :not_finite} <- ended, do: start),
-      not_ended: length(rest)
+      entries: for({start, %Decimal{} = v} <- timed, do: {start, v}),
+      not_finite: for({start, :not_finite} <- timed, do: start),
+      not_ended: of - length(values)
     }
   end
-
-  defp ended?(_start, _step, nil), do: true
-
-  defp ended?(start, step, clock),
-    do: NaiveDateTime.compare(NaiveDateTime.add(start, step), clock) != :gt
 
   defp block_mask(nil, nil), do: {:ok, nil}
   defp block_mask(%{} = mask, words) when is_list(words), do: mask(mask, words)

@@ -20,6 +20,9 @@ defmodule Simulator.Stores do
   - Snapshot `n` (0 to `snapshots` − 1) and load-survey day `n` (0 to
     `days` − 1) are stamped midnight, `n` days before today.
   - A load-survey interval that has not ended by the meter's clock reads 0.
+    A 500 holds none past the interval in progress: a read past it is
+    unmapped (exception 02), as an Elite 500 answered on 2026-11-20. A 440
+    reads 0 there.
     A parameter's average (voltage, current, frequency) is a constant.
   - A quantity in `unsupported`, or a parameter not in `parameters`, reads
     NaN (0xFFFFFFFF); the masks show the rest.
@@ -39,6 +42,7 @@ defmodule Simulator.Stores do
     :settings,
     :unsupported,
     :parameters,
+    :unended,
     :base,
     :rates
   ]
@@ -48,7 +52,8 @@ defmodule Simulator.Stores do
   `interval` is the load survey's, in minutes; `settings` what each register
   the profile's load survey `requires` reads, by key, the required value
   unless changed; `parameters` the load-survey parameter numbers the meter
-  supports; `rates` in the quantity's unit per hour.
+  supports; `unended` whether intervals past the one in progress read 0 or
+  are unmapped; `rates` in the quantity's unit per hour.
   """
   @type t :: %__MODULE__{
           histories: 0..0xFFFF,
@@ -58,6 +63,7 @@ defmodule Simulator.Stores do
           settings: %{String.t() => 0..0xFFFF},
           unsupported: MapSet.t(String.t()),
           parameters: MapSet.t(0..63),
+          unended: :zero | :unmapped,
           base: %{String.t() => Decimal.t()},
           rates: %{String.t() => Decimal.t()}
         }
@@ -87,9 +93,16 @@ defmodule Simulator.Stores do
       snapshots: 1,
       interval: 30,
       mask: 0x03F3,
-      parameters: [0, 1, 8, 9, 19, 23, 27]
+      parameters: [0, 1, 8, 9, 19, 23, 27],
+      unended: :zero
     },
-    "elite_500" => %{snapshots: 52, interval: 15, mask: nil, parameters: Enum.to_list(0..16)}
+    "elite_500" => %{
+      snapshots: 52,
+      interval: 15,
+      mask: nil,
+      parameters: Enum.to_list(0..16),
+      unended: :unmapped
+    }
   }
 
   @averages %{"V" => "240", "A" => "5", "Hz" => "50"}
@@ -110,6 +123,7 @@ defmodule Simulator.Stores do
       settings: Map.new(stored.load_survey.requires, fn {key, r} -> {key, r.value} end),
       unsupported: unsupported(stored.history, defaults.mask),
       parameters: MapSet.new(defaults.parameters),
+      unended: defaults.unended,
       base: keys |> Enum.with_index() |> Map.new(&base(&1, profile, values)),
       rates: keys |> Enum.with_index(1) |> Map.new(fn {k, i} -> {k, Decimal.div(i, 4)} end)
     }
@@ -362,8 +376,11 @@ defmodule Simulator.Stores do
              now,
              anchor
            ) do
-        {:ok, %{stamp: at, values: values}} ->
-          Map.merge(stamp_bank(survey.stamp, at), series_bank(survey.values, values))
+        {:ok, %{stamp: at, interval: minutes, values: values}} ->
+          Map.merge(
+            stamp_bank(survey.stamp, at),
+            series_bank(survey.values, held(stores, values, NaiveDateTime.diff(now, at), minutes))
+          )
 
         :none ->
           Map.merge(
@@ -377,6 +394,11 @@ defmodule Simulator.Stores do
     |> Map.merge(%{survey.available => stores.days, survey.interval => stores.interval})
     |> Map.merge(Map.new(survey.requires, fn {key, r} -> {r.address, stores.settings[key]} end))
   end
+
+  defp held(%__MODULE__{unended: :zero}, values, _elapsed_s, _minutes), do: values
+
+  defp held(%__MODULE__{unended: :unmapped}, values, elapsed_s, minutes),
+    do: Enum.take(values, max(0, div(elapsed_s + minutes * 60 - 1, minutes * 60)))
 
   defp series_bank(%{address: address, word_order: order}, values) do
     values

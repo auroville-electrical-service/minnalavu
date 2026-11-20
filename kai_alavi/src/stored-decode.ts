@@ -24,7 +24,7 @@ export interface SurveyDay {
   readonly intervalS: number;
   readonly entries: readonly { readonly meterTime: string; readonly value: string }[];
   readonly notFinite: readonly string[];
-  /** The intervals the meter's clock had not ended: none for a day past. */
+  /** The intervals the meter's clock had not ended, not read: none for a day past. */
   readonly notEnded: number;
 }
 
@@ -112,11 +112,23 @@ export const decodeInterval = (words: readonly number[]): Result<number, StoredE
   return dayMinutes % minutes === 0 ? ok(minutes) : err("interval_not_dividing_a_day");
 };
 
+/**
+ * How many of a day's `minutes` intervals from `day` have ended by the meter's `clock`, which are
+ * the ones to read: every one for a day past (`clock` null). An Elite 500 refuses a read past the
+ * interval in progress.
+ */
+export const endedIntervals = (day: string, minutes: number, clock: string | null): number => {
+  const whole = dayMinutes / minutes;
+  if (clock === null) return whole;
+  const elapsed = Math.max(0, epochMs(clock) - epochMs(day));
+  return Math.min(whole, Math.floor(elapsed / (minutes * 60_000)));
+};
+
 // contract: test/stored-decode.test.ts "decodeDay"
 /**
- * One parameter's day. `values` holds every interval of the day, two words each. `clock` is the
- * meter clock's words, read on the day being copied, or null for a day past: an interval is an
- * entry only once its end is no later than the clock.
+ * One parameter's day. `clock` is the meter clock's words, read on the day being copied, or null
+ * for a day past. `values` holds the intervals `endedIntervals` counts, two words each, each an
+ * entry; the day's others are `notEnded`.
  */
 export const decodeDay = (
   survey: Pick<Survey, "stamp" | "values">,
@@ -131,10 +143,11 @@ export const decodeDay = (
   if (!at.ok) return at;
   const minutes = decodeInterval(read.interval);
   if (!minutes.ok) return minutes;
-  if (read.values.length !== 2 * (dayMinutes / minutes.value)) return err("wrong_word_count");
   const clock = read.clock === null ? ok(null) : decodeStamp(read.clock.stamp, read.clock.words);
   if (!clock.ok) return clock;
-  return ok(intervals(at.value, minutes.value * 60, survey.values.word_order, read.values, clock.value));
+  const ended = endedIntervals(at.value, minutes.value, clock.value);
+  if (read.values.length !== 2 * ended) return err("wrong_word_count");
+  return ok(intervals(at.value, minutes.value * 60, survey.values.word_order, read.values, dayMinutes / minutes.value));
 };
 
 const intervals = (
@@ -142,19 +155,18 @@ const intervals = (
   step: number,
   order: "high_first" | "low_first",
   words: readonly number[],
-  clock: string | null,
+  of: number,
 ): SurveyDay => {
   const start = epochMs(day);
   const timed = Array.from({ length: words.length / 2 }, (_, i) => ({
     startMs: start + i * step * 1000,
     value: f32(order, words.slice(2 * i, 2 * i + 2)),
   }));
-  const ended = timed.filter((t) => clock === null || t.startMs + step * 1000 <= epochMs(clock));
   return {
     meterTime: day,
     intervalS: step,
-    entries: ended.flatMap((t) => (t.value.ok ? [{ meterTime: localTime(t.startMs), value: t.value.value }] : [])),
-    notFinite: ended.flatMap((t) => (t.value.ok ? [] : [localTime(t.startMs)])),
-    notEnded: timed.length - ended.length,
+    entries: timed.flatMap((t) => (t.value.ok ? [{ meterTime: localTime(t.startMs), value: t.value.value }] : [])),
+    notFinite: timed.flatMap((t) => (t.value.ok ? [] : [localTime(t.startMs)])),
+    notEnded: of - timed.length,
   };
 };

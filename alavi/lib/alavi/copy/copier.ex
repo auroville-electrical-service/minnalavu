@@ -360,11 +360,12 @@ defmodule Alavi.Copy.Copier do
          {:ok, state} <-
            set(state, io, scope, :load_survey_parameter, parameter.number, scope.mask),
          {:ok, stamp_words, state} <- read(state, io, {unit, :holding, survey.stamp.address, 2}),
-         {:ok, values, state} <- read_runs(state, io, unit, Stores.value_runs(survey, minutes)),
+         {:ok, ended, state} <- decoded(ended(survey, stamp_words, minutes, visit), state),
+         {:ok, values, state} <- read_runs(state, io, unit, Stores.value_runs(survey, ended)),
          read = %{
            stamp: stamp_words,
            interval: scope.interval,
-           values: values_of(values, survey, minutes),
+           values: values_of(values, survey, ended),
            clock: {visit.meter.profile.meter_clock, visit.clock}
          },
          {:ok, day, state} <- decoded(Decode.day(survey, read), state),
@@ -394,8 +395,14 @@ defmodule Alavi.Copy.Copier do
     end
   end
 
-  defp values_of(by_address, %{values: %{address: address}}, minutes),
-    do: Stores.words(by_address, address, 2 * div(1440, minutes))
+  defp ended(survey, stamp_words, minutes, visit) do
+    with {:ok, at} <- Decode.stamp(survey.stamp, stamp_words),
+         {:ok, clock} <- Decode.stamp(visit.meter.profile.meter_clock, visit.clock),
+         do: {:ok, Decode.ended(at, minutes, clock)}
+  end
+
+  defp values_of(by_address, %{values: %{address: address}}, ended),
+    do: Stores.words(by_address, address, 2 * ended)
 
   defp select_day(state, _io, %{day: slot} = scope, slot), do: {:ok, state, scope}
 

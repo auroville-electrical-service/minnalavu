@@ -241,6 +241,13 @@ defmodule Alavi.CopyTest do
 
       assert length(Enum.uniq(per_key)) == length(@survey_500)
 
+      # Today: only the intervals the meter's clock had ended, as a 500 refuses
+      # a read past the interval in progress.
+      ended = div(NaiveDateTime.utc_now().hour * 60 + NaiveDateTime.utc_now().minute, 15)
+
+      for key <- @survey_500,
+          do: assert(length(Map.get(by_day, {today(), key}, [])) in (ended - 1)..ended)
+
       assert [_daily, _start, _end] =
                for({:clock, %MeterClockRead{unit_id: 3}} <- events, do: :read)
 

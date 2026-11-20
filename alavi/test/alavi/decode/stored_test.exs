@@ -92,6 +92,21 @@ defmodule Alavi.Decode.StoredTest do
       end
     end
 
+    test "the current day read whole, past the meter's clock, is refused", ctx do
+      c = Enum.find(ctx.fixture["load_survey"], & &1["clock_words"])
+      profile = profile(ctx, c)
+      whole = List.duplicate(0, 2 * div(1440, hd(c["interval_words"])))
+
+      read = %{
+        stamp: c["stamp_words"],
+        interval: c["interval_words"],
+        values: whole,
+        clock: {profile.meter_clock, c["clock_words"]}
+      }
+
+      assert Decode.day(profile.stored.load_survey, read) == {:error, :wrong_word_count}
+    end
+
     test "every no_value case is refused with the fixture's error", ctx do
       for c <- ctx.fixture["no_value"] do
         profile = profile(ctx, c)

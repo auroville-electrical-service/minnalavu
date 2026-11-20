@@ -80,6 +80,7 @@ export {
   decodeInterval,
   decodeMask,
   decodeStamp,
+  endedIntervals,
   type StoredError,
   type SurveyDay,
   supportedParameters,

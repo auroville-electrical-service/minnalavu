@@ -228,16 +228,19 @@ defmodule Simulator.StoresTest do
       assert f32(shown, values.address, :low_first) == :not_finite
     end
 
-    test "the interval register and the values follow the meter's interval" do
-      meter = meter("elite_500") |> Meter.stores(interval: 30, days: 3)
+    test "the interval register and a day past's values follow the meter's interval" do
+      meter =
+        meter("elite_500") |> Meter.stores(interval: 30, days: 3) |> select(:load_survey_day, 1)
 
       %{available: available, interval: interval, values: values} =
         meter.profile.stored.load_survey
 
-      assert words(meter, available, 1) == [3]
-      assert words(meter, interval, 1) == [30]
-      assert {:ok, _} = Meter.read(meter, :holding, values.address, 96, @now)
-      assert :unmapped = Meter.read(meter, :holding, values.address, 97, @now)
+      # After the 500's settle, when it shows day 1.
+      at = @now + 200
+      assert words(meter, available, 1, at) == [3]
+      assert words(meter, interval, 1, at) == [30]
+      assert {:ok, _} = Meter.read(meter, :holding, values.address, 96, at)
+      assert :unmapped = Meter.read(meter, :holding, values.address, 97, at)
     end
   end
 
@@ -267,6 +270,22 @@ defmodule Simulator.StoresTest do
         meter = name |> meter() |> Meter.stores(opts)
         %{address: address, type: type} = meter.profile.stored[store].mask
         assert words(meter, address, %{u16: 1, u32: 2, u64: 4}[type]) == raw, case_["why"]
+      end
+    end
+
+    test "a 500 holds today's values to the interval in progress and no further; a 440 reads past it" do
+      at = @start + 3 * @hour + 7 * 60_000
+
+      for {name, past_held?} <- [{"elite_500", false}, {"elite_440", true}] do
+        meter = meter(name)
+        survey = meter.profile.stored.load_survey
+        clock = stamp(meter.profile.meter_clock, meter, at)
+        [minutes] = words(meter, survey.interval, 1, at)
+        held = div(clock.hour * 60 + clock.minute, minutes) + 1
+
+        assert {:ok, _} = Meter.read(meter, :holding, survey.values.address, 2 * held, at), name
+        past = Meter.read(meter, :holding, survey.values.address, 2 * held + 2, at)
+        assert match?({:ok, _}, past) == past_held?, name
       end
     end
 

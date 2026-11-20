@@ -120,11 +120,9 @@ defmodule Alavi.Copy.Stores do
   def mask_words(:u64), do: 4
 
   # contract: test/alavi/copy/stores_test.exs "runs/1"
-  @doc "The reads of a load-survey day of `minutes` intervals: `per_request` intervals each."
-  @spec value_runs(Stored.survey(), pos_integer()) :: [run()]
-  def value_runs(%{values: %{address: address, per_request: per}}, minutes) do
-    intervals = div(1440, minutes)
-
+  @doc "The reads of a load-survey day's first `intervals` intervals: `per_request` intervals each."
+  @spec value_runs(Stored.survey(), non_neg_integer()) :: [run()]
+  def value_runs(%{values: %{address: address, per_request: per}}, intervals) do
     for first <- 0..(intervals - 1)//per,
         do: {address + 2 * first, 2 * min(per, intervals - first)}
   end
@@ -139,7 +137,7 @@ defmodule Alavi.Copy.Stores do
   end
 
   @doc "`count` words from `address`, out of `at/1`'s map."
-  @spec words(%{(0..0xFFFF) => 0..0xFFFF}, 0..0xFFFF, pos_integer()) :: [0..0xFFFF]
+  @spec words(%{(0..0xFFFF) => 0..0xFFFF}, 0..0xFFFF, non_neg_integer()) :: [0..0xFFFF]
   def words(by_address, address, count),
-    do: for(a <- address..(address + count - 1), do: Map.fetch!(by_address, a))
+    do: for(a <- address..(address + count - 1)//1, do: Map.fetch!(by_address, a))
 end

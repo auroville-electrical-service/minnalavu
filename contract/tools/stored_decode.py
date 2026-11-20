@@ -49,7 +49,7 @@ DESCRIPTION_SENTENCES = (
     "A mask is an unsigned integer in its word order; bit n set means the entry with mask_bit n (history, snapshot) or parameter number n (load survey) is supported. named lists the set bits the profile names, unnamed the set bits it does not, which are never read.",
     "blocks: a history or snapshot entry as read after its selector write: the stamp, the mask where the profile has one, and each register's words. Each register whose mask bit is clear is unsupported, whatever its words; each other register decodes to an entry, or is not_finite when its words are a NaN or an infinity, which is no value.",
     "load_survey: one parameter of one day, as read after both selector writes: the day's stamp, the interval in minutes and the day's values, two words each, from the first interval of the day. Interval i starts at the day's stamp plus i intervals, and that start is its meter_time.",
-    "Where the meter's clock is given (the current day), an interval is an entry only when it has ended by that clock (its end no later than the clock); the rest are counted in not_ended, whatever their words.",
+    "Where the meter's clock is given (the current day), an interval has ended when its end is no later than that clock, and values holds the ended intervals only, as many as whole intervals fit between the day's stamp and the clock (none before the stamp, the whole day at most): an Elite 500 refuses a read past the interval in progress with exception 02. Every ended interval is an entry; the day's other intervals, not read, are counted in not_ended. Any other number of values is wrong_word_count.",
     "Values are decimal strings as in register-decode.v1.json, and their unit and kind are the profile entry's.",
     "no_value: words that must give no value at all, with the error.",
     "Every implementation that copies stored entries must give every result and refuse every no_value. Changing an expected value changes what may be billed.",
@@ -650,7 +650,7 @@ SURVEY_CASES = [
         60,
         T("2026-11-14T05:47:10"),
         hourly(5, lambda i: 0.25 * i),
-        "the current day: by the meter's clock five intervals have ended; the rest read 0 and are not entries",
+        "the current day: by the meter's clock five intervals have ended, and only they are read",
     ),
     SurveyCase(
         "elite_440",
@@ -678,6 +678,15 @@ SURVEY_CASES = [
         T("2026-11-14T00:31:00"),
         hourly(2, lambda i: 12.5 + i),
         "the current day at 15 minutes: two intervals have ended",
+    ),
+    SurveyCase(
+        "elite_500",
+        4,
+        T("2026-11-20T00:00:00"),
+        30,
+        T("2026-11-20T00:29:59"),
+        {},
+        "the current day before its first interval ends: nothing read, nothing an entry",
     ),
 ]
 
@@ -785,12 +794,12 @@ def survey_case(profiles: dict[str, Profile], c: SurveyCase) -> dict[str, Json]:
     assert 1440 % c.minutes == 0
     step = timedelta(minutes=c.minutes)
     n = 1440 // c.minutes
-    raw = [w for i in range(n) for w in f32_words(c.values.get(i, 0.0))]
     ended = (
         n
         if c.clock is None
         else sum(1 for i in range(n) if c.day + (i + 1) * step <= c.clock)
     )
+    raw = [w for i in range(ended) for w in f32_words(c.values.get(i, 0.0))]
     decoded = [
         (iso(c.day + i * step), value(raw[2 * i : 2 * i + 2], s.values_order))
         for i in range(ended)
