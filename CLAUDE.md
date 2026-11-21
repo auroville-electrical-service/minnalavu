@@ -28,6 +28,7 @@ Sibling Mix projects (poncho, no umbrella), the central store, and the shared co
   batches, to the same contract fixtures as `alavi`.
 - `contract/`: batch schema, meter register profiles, shared fixtures.
 - `simulator/`: Modbus endpoint simulator with faults; a test dependency of `alavi`.
+- `skills/`: operator procedures for sessions.
 
 ## Commands
 

@@ -532,7 +532,8 @@ entry of the serial (or `since`, if later) and its newest that holds no entry,
 with `gone` (a fill result showed the meter no longer held it) and
 `pending_request` (a fill offered now that will copy it). A store with no
 entry of the serial has no holes: `health.problems` shows it as
-`copy_behind`. Judging which holes to fill is the operator's.
+`copy_behind`. Judging which holes to fill is the operator's, and a session
+does it with the `copy-holes` skill (`skills/copy-holes/`).
 
     SELECT admin.request_fill(collector_id => 'pilot_01', meters => ARRAY['…'],
       stores => ARRAY['load_survey', 'history'], from_time => '2026-10-01',
