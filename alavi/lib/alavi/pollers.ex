@@ -72,25 +72,25 @@ defmodule Alavi.Pollers do
         do: {id, child}
       )
 
-  # contract: test/alavi/poller_test.exs "Pollers.log_latency/2"
+  # contract: test/alavi/poller_test.exs "Pollers.record_latency/2"
   @doc """
-  `Alavi.Poller.log_latency/2` on every poller, together; one that does not
+  `Alavi.Poller.record_latency/2` on every poller, together; one that does not
   answer within `timeout` ms, or is not running, is passed over.
   """
-  @spec log_latency(Supervisor.supervisor(), timeout()) :: :ok
-  def log_latency(pollers, timeout) do
+  @spec record_latency(Supervisor.supervisor(), timeout()) :: :ok
+  def record_latency(pollers, timeout) do
     pids = for {_id, pid} <- pollers(pollers), is_pid(pid), do: pid
 
     pids
-    |> Task.async_stream(&logged(&1, timeout),
+    |> Task.async_stream(&recorded(&1, timeout),
       timeout: :infinity,
       max_concurrency: max(length(pids), 1)
     )
     |> Stream.run()
   end
 
-  defp logged(pid, timeout) do
-    Poller.log_latency(pid, timeout)
+  defp recorded(pid, timeout) do
+    Poller.record_latency(pid, timeout)
   catch
     :exit, _reason -> :ok
   end

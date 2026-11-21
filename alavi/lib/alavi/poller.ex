@@ -56,14 +56,14 @@ defmodule Alavi.Poller do
   and closes its session first. Retired `:removed`, it first puts back any owed
   selectors, retrying as before however long that takes; retired
   `:replaced`, it leaves them owed on disk, for the poller that replaces it
-  finds them at start. Its latency so far is logged and recorded as when
-  the collector stops.
+  finds them at start. Its latency so far is recorded as when the collector
+  stops.
 
   Each request's round trip, from send to reply, not the connect, counts in
   its meter's `Alavi.Poller.Latency`: shown on the status page after each
   job (`Alavi.Status.latency/3`); and when a UTC day ends, and on
-  `log_latency/2`, logged a line per meter and recorded to the sink as an
-  `Alavi.LatencyDay` per meter, under the time the poller started.
+  `record_latency/2`, recorded to the sink as an `Alavi.LatencyDay` per
+  meter, under the time the poller started.
   """
 
   use GenServer
@@ -139,14 +139,14 @@ defmodule Alavi.Poller do
   @spec serials(GenServer.server()) :: %{(1..247) => String.t()}
   def serials(server), do: GenServer.call(server, :serials, :infinity)
 
-  # contract: test/alavi/poller_test.exs "Pollers.log_latency/2"
+  # contract: test/alavi/poller_test.exs "Pollers.record_latency/2"
   @doc """
-  Log each meter's latency for the day so far and record it to the sink, as
-  when a day ends: for a collector about to stop, whose latency is otherwise
-  lost. The reply waits for the step under way.
+  Record each meter's latency for the day so far to the sink, as when a day
+  ends: for a collector about to stop, whose latency is otherwise lost. The
+  reply waits for the step under way.
   """
-  @spec log_latency(GenServer.server(), timeout()) :: :ok
-  def log_latency(server, timeout), do: GenServer.call(server, :log_latency, timeout)
+  @spec record_latency(GenServer.server(), timeout()) :: :ok
+  def record_latency(server, timeout), do: GenServer.call(server, :record_latency, timeout)
 
   # contract: test/alavi/poller_test.exs "retire/2"
   # contract: test/alavi/restore_test.exs "retire/2"
@@ -213,8 +213,7 @@ defmodule Alavi.Poller do
 
   def handle_call(:serials, _from, state), do: {:reply, state.serials, state}
 
-  def handle_call(:log_latency, _from, state),
-    do: {:reply, log_days(state, "before stopping"), state}
+  def handle_call(:record_latency, _from, state), do: {:reply, record_days(state), state}
 
   @impl true
   def handle_cast({:retire, why}, state) do
@@ -320,7 +319,7 @@ defmodule Alavi.Poller do
     do: Enum.all?(queue, &(&1.kind == :restore))
 
   defp stop(state) do
-    log_days(state, "before stopping")
+    record_days(state)
 
     Logger.info(
       "alavi poller #{label(state)}: stopped at a round boundary, the endpoint #{retired_line(state)}"
@@ -949,14 +948,14 @@ defmodule Alavi.Poller do
   defp outcome({:error, error, _client}), do: error
 
   # The day each step counts in, from the wall clock; it only moves forward,
-  # so a clock set back does not log a day twice.
+  # so a clock set back does not record a day twice.
   defp dated(%{today: nil} = state), do: %{state | today: today(state)}
 
   defp dated(state) do
     today = today(state)
 
     if Date.after?(today, state.today) do
-      log_days(state, "day ended")
+      record_days(state)
       %{state | today: today}
     else
       state
@@ -970,19 +969,9 @@ defmodule Alavi.Poller do
     Status.latency(state.status, endpoint_ref(state.endpoint), by_unit)
   end
 
-  defp log_days(%{today: nil}, _why), do: :ok
-
-  defp log_days(state, why) do
-    for %Meter{unit_id: unit} <- state.endpoint.meters,
-        line = Latency.line(state.latency[unit], state.today),
-        line != nil do
-      Logger.info("alavi poller #{label(state)} unit #{unit}: latency, #{why}, #{line}")
-    end
-
-    record_days(state)
-  end
-
   # A refusal is the sink's to report, as for readings.
+  defp record_days(%{today: nil}), do: :ok
+
   defp record_days(state) do
     days =
       for %Meter{unit_id: unit} <- state.endpoint.meters,

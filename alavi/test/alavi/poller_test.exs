@@ -317,33 +317,6 @@ defmodule Alavi.PollerTest do
       )
     end
 
-    test "each meter's day is logged when the UTC day ends", ctx do
-      {_sim, port} = start_sim!(:tcp)
-      agent = start_supervised!({Agent, fn -> ~U[2026-11-13 23:59:59Z] end})
-      clock = fn -> Agent.get(agent, & &1) end
-      endpoints = [endpoint(port, "tcp", [meter(1, "elite_440")], %{"interval_ms" => 5})]
-
-      {_, log} =
-        with_log(fn ->
-          start_with_status!(endpoints, clock, ctx.tmp_dir)
-          assert [%Reading{timestamp: ~U[2026-11-13 23:59:59Z]} | _] = recorded!()
-          Agent.update(agent, fn _ -> ~U[2026-11-14 00:00:01Z] end)
-          await_unit!(1, &match?([%Reading{timestamp: ~U[2026-11-14 00:00:01Z]} | _], &1))
-          Agent.update(agent, fn _ -> ~U[2026-11-14 00:00:02Z] end)
-          recorded!()
-        end)
-
-      prefix = "alavi poller 127.0.0.1:#{port} unit 1: latency, day ended, "
-
-      assert [_one] =
-               Regex.scan(
-                 ~r/#{prefix}2026-11-13 UTC: \d+ answered \(0 on a retry\), 0 timed out; p50 \d+ ms/,
-                 log
-               )
-
-      refute log =~ "#{prefix}2026-11-14"
-    end
-
     test "each meter's day is recorded to the sink when the UTC day ends, under the poller's start",
          ctx do
       {_sim, port} = start_sim!(:tcp)
@@ -386,15 +359,14 @@ defmodule Alavi.PollerTest do
       pollers = start_pollers!(endpoints, fn -> ~U[2026-11-14 10:00:00Z] end)
       Process.sleep(1_000)
 
-      {:ok, log} = with_log(fn -> Alavi.Pollers.log_latency(pollers, 1_000) end)
+      :ok = Alavi.Pollers.record_latency(pollers, 1_000)
       assert_receive {:latency, [%LatencyDay{unit_id: 1, late: %{data: late}} = day]}
       assert late > 0 and day.timeouts > 0
-      assert log =~ ~r/unit 1: latency, before stopping, .*; late #{late} data/
     end
   end
 
-  describe "Pollers.log_latency/2" do
-    test "logs every poller's day so far, and passes over one that does not answer" do
+  describe "Pollers.record_latency/2" do
+    test "records every poller's day so far, and passes over one that does not answer" do
       {_sim, port} = start_sim!(:tcp)
       {slow_sim, slow} = start_sim!(:tcp)
       Simulator.faults(slow_sim, delay_ms: 300)
@@ -407,14 +379,7 @@ defmodule Alavi.PollerTest do
       pollers = start_pollers!(endpoints, fn -> ~U[2026-11-14 10:00:00Z] end)
       await_unit!(3, &match?([%Reading{} | _], &1))
 
-      {:ok, log} = with_log(fn -> Alavi.Pollers.log_latency(pollers, 100) end)
-
-      for unit <- [1, 3] do
-        assert log =~
-                 ~r/alavi poller 127.0.0.1:#{port} unit #{unit}: latency, before stopping, 2026-11-14 UTC: \d+ answered/
-      end
-
-      refute log =~ "127.0.0.1:#{slow}"
+      :ok = Alavi.Pollers.record_latency(pollers, 100)
       assert_receive {:latency, days}
       assert [%LatencyDay{unit_id: 1}, %LatencyDay{unit_id: 3}] = days
       assert Enum.all?(days, &match?(%LatencyDay{date: ~D[2026-11-14]}, &1))
@@ -488,7 +453,7 @@ defmodule Alavi.PollerTest do
       assert Alavi.Pollers.pollers(sup) == [{{Alavi.Poller, "127.0.0.1", port}, :undefined}]
     end
 
-    test "its latency so far is logged and recorded as it stops" do
+    test "its latency so far is recorded as it stops" do
       {_sim, port} = start_sim!(:tcp)
       sup = start_pollers!([endpoint(port, "tcp", [meter(1, "elite_440")])])
       recorded!()
@@ -501,7 +466,6 @@ defmodule Alavi.PollerTest do
           assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 2_000
         end)
 
-      assert log =~ "latency, before stopping"
       assert log =~ "stopped at a round boundary"
       assert_receive {:latency, [%LatencyDay{unit_id: 1}]}
     end

@@ -138,20 +138,6 @@ defmodule Alavi.Poller.Latency do
     days |> Enum.map(&elem(&1, 1)) |> Enum.reduce(&merge/2) |> summarised(since)
   end
 
-  # contract: test/alavi/poller/latency_test.exs "line/2"
-  @doc """
-  One day's figures as a log line, with its bucket counts (`bound:count`,
-  `>60000` above the last), so that days can be merged from the log; nil if
-  that day is not kept.
-  """
-  @spec line(t(), Date.t()) :: String.t() | nil
-  def line(%__MODULE__{days: days}, date) do
-    case List.keyfind(days, date, 0) do
-      nil -> nil
-      {^date, day} -> format(summarised(day, date), day.buckets) <> late_line(day.late)
-    end
-  end
-
   defp kind(:ok), do: :answered
   defp kind(:timeout), do: :timeout
   defp kind({:exception, 0x0B}), do: :timeout
@@ -241,30 +227,4 @@ defmodule Alavi.Poller.Latency do
 
   defp at_most(@over, max), do: max
   defp at_most(bucket, max), do: min(Enum.at(@bounds, bucket), max)
-
-  defp format(s, buckets) do
-    "#{s.since} UTC: #{s.answered} answered (#{s.retries} on a retry), " <>
-      "#{s.timeouts} timed out; p50 #{ms(s.p50)}, p90 #{ms(s.p90)}, p99 #{ms(s.p99)}, " <>
-      "max #{ms(s.max)}; buckets #{buckets(buckets)}"
-  end
-
-  defp late_line(%{data: data, exceptions: exceptions}) do
-    by_code =
-      exceptions
-      |> Enum.sort()
-      |> Enum.map_join("", fn {code, n} -> ", exception #{code}:#{n}" end)
-
-    "; late #{data} data#{by_code}"
-  end
-
-  defp ms(nil), do: "none"
-  defp ms(ms), do: "#{ms} ms"
-
-  defp buckets(buckets) when buckets == %{}, do: "none"
-
-  defp buckets(buckets),
-    do: buckets |> Enum.sort() |> Enum.map_join(" ", fn {b, n} -> "#{label(b)}:#{n}" end)
-
-  defp label(@over), do: ">#{List.last(@bounds)}"
-  defp label(bucket), do: Enum.at(@bounds, bucket)
 end

@@ -50,8 +50,8 @@ defmodule Alavi.Poller.LatencyTest do
 
       assert %{since: since, answered: 7} = Latency.summary(latency)
       assert since == Date.add(@day, 3)
-      assert Latency.line(latency, Date.add(@day, 2)) == nil
-      assert Latency.line(latency, Date.add(@day, 3)) =~ " 1 answered"
+      assert Latency.counts(latency, Date.add(@day, 2)) == nil
+      assert Enum.sum(Latency.counts(latency, Date.add(@day, 3)).buckets) == 1
     end
 
     test "a day with nothing between keeps the days still within the week" do
@@ -65,7 +65,7 @@ defmodule Alavi.Poller.LatencyTest do
     test "a date before the newest kept counts in the newest" do
       latency = answers([10]) |> answers(Date.add(@day, -1), [20])
       assert %{since: @day, answered: 2} = Latency.summary(latency)
-      assert Latency.line(latency, Date.add(@day, -1)) == nil
+      assert Latency.counts(latency, Date.add(@day, -1)) == nil
     end
 
     test "stays bounded whatever the number of requests" do
@@ -125,44 +125,6 @@ defmodule Alavi.Poller.LatencyTest do
 
       assert Latency.counts(latency, Date.add(@day, 1)).late == %{data: 1, exceptions: %{}}
       assert %{answered: 1} = Latency.summary(latency)
-    end
-  end
-
-  describe "line/2" do
-    test "one day's figures and its bucket counts" do
-      latency =
-        answers([3, 38, 40, 41, 75_000])
-        |> Latency.record(@day, 2, 44, :ok)
-        |> Latency.record(@day, 1, 3_000, :timeout)
-
-      assert Latency.line(latency, @day) ==
-               "2026-11-14 UTC: 6 answered (1 on a retry), 1 timed out; " <>
-                 "p50 40 ms, p90 75000 ms, p99 75000 ms, max 75000 ms; " <>
-                 "buckets 3:1 40:2 50:2 >60000:1; late 0 data"
-    end
-
-    test "a day of timeouts only" do
-      latency = Latency.record(Latency.new(), @day, 1, 100, :timeout)
-
-      assert Latency.line(latency, @day) ==
-               "2026-11-14 UTC: 0 answered (0 on a retry), 1 timed out; " <>
-                 "p50 none, p90 none, p99 none, max none; buckets none; late 0 data"
-    end
-
-    test "a day's late replies: its data, and its exceptions by code" do
-      latency =
-        Latency.new()
-        |> Latency.late(@day, {:exception, 11})
-        |> Latency.late(@day, :data)
-        |> Latency.late(@day, {:exception, 4})
-        |> Latency.late(@day, {:exception, 11})
-
-      assert Latency.line(latency, @day) =~
-               ~r/buckets none; late 1 data, exception 4:1, exception 11:2$/
-    end
-
-    test "nil for a day not kept" do
-      assert Latency.line(answers([5]), Date.add(@day, 1)) == nil
     end
   end
 
