@@ -348,17 +348,23 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
   `detail` describing it now. Kinds: `collector_silent` (no upload for
   `collector_silent_after`), `clock_unchecked` (unchecked in
   `health.collector_clocks`; its detail says since when and what the last check
-  was), `meter_silent` (no reading for
-  `meter_silent_intervals` × its interval, counted from when it came into
-  service if later; not listed when its collector or its target is silent),
+  was), `endpoint_silent` (every expected unit of the endpoint silent, as
+  below; not listed when its collector is silent; its detail gives the
+  units, the last reading at any, the last missed read and the address),
   `target_silent` (no reading at the unit for `meter_silent_intervals` × its
   interval, counted from when it came into service if later, whatever missed
-  reads there were; not listed when its collector is silent; its subject is
-  `<endpoint> unit <n>`, its detail the last missed read, the address, profile
-  and meter placed),
-  `endpoint_errors` (erroring in `health.endpoints`; its detail gives the
-  failed and due reads, the rate, the missed reads by reason and the
-  address), `backlog_near_capacity` (bytes at or above
+  reads there were; not listed when its collector or its endpoint is silent;
+  its subject is `<endpoint> unit <n>`, its detail the last missed read, the
+  address, profile and meter placed), `meter_silent` (no reading for
+  `meter_silent_intervals` × its interval, counted from when it came into
+  service if later; not listed when its collector or its target is silent).
+  Each of the three is `*_never_read` instead (`endpoint_never_read`,
+  `target_never_read`, `meter_never_read`) when its subject has had no reading
+  since it last came into service, so a meter that stopped reads apart from
+  one that never answered.
+  `endpoint_errors` (erroring in `health.endpoints`, and not silent; its
+  detail gives the failed and due reads, the rate, the missed reads by reason
+  and the address), `backlog_near_capacity` (bytes at or above
   `backlog_near_capacity` of the buffer), `backlog_refused`,
   `backlog_discarded`, `backlog_quarantined` (above zero in the latest
   upload; `refused` counts since the collector started, so it clears on a
