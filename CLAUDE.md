@@ -45,7 +45,9 @@ bin/dev simulator mix simulator.run --port 5020 --framing tcp --meter 1:elite_44
 docker compose up -d timescale postgrest mailpit   # the central store, for those below
 bin/dev central bin/test               # SQL tests, on a fresh test database
 bin/dev central bin/test-alert         # the alert job, against the mailpit mail catcher
-bin/dev central bin/dev-db --apply     # migrate the dev database PostgREST serves, then:
+bin/dev central bin/dev-db --apply     # migrate the dev database PostgREST serves
+docker compose up -d postgrest_e2e     # the end-to-end test's own store, then:
+bin/dev central bin/e2e-db             # recreate its database, and:
 bin/dev alavi mix test --only e2e      # simulator -> collector -> PostgREST -> database
 bin/dev . shellcheck bin/dev central/bin/* contract/bin/*   # shell scripts; and:
 bin/dev . shfmt -d -i 2 -ci bin central/bin contract/bin

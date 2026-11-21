@@ -29,6 +29,9 @@ services:
       MAILPIT_URL: http://mailpit:8025
       MAILPIT_SMTP_URL: smtp://mailpit:1025
       MINNALAVU_API_URL: http://postgrest:3000
+      # The end-to-end test's own store: see postgrest_e2e.
+      MINNALAVU_E2E_DB_URL: postgres://postgres:dev@timescale:5432/minnalavu_e2e?sslmode=disable
+      MINNALAVU_E2E_API_URL: http://postgrest_e2e:3000
       AUTHENTICATOR_PASSWORD: *authenticator_password
       JWT_SECRET: *jwt_secret
     volumes:
@@ -54,7 +57,7 @@ services:
       - timescale
     # It exits when it cannot log in, e.g. before central/bin/dev-db has run.
     restart: unless-stopped
-    environment:
+    environment: &postgrest_env
       # The database is a connection string, so it can live on another machine.
       PGRST_DB_URI: postgres://authenticator@timescale:5432/minnalavu?sslmode=disable
       PGPASSWORD: *authenticator_password
@@ -64,6 +67,18 @@ services:
       # Collectors need no description of the API.
       PGRST_OPENAPI_MODE: disabled
       PGRST_SERVER_PORT: "3000"
+
+  # The end-to-end test's store: database minnalavu_e2e, recreated by
+  # central/bin/e2e-db, so the test's collectors and its readings dated a day
+  # ahead never reach the dev store or the health views read from it.
+  postgrest_e2e:
+    image: postgrest/postgrest:v16.5
+    depends_on:
+      - timescale
+    restart: unless-stopped
+    environment:
+      <<: *postgrest_env
+      PGRST_DB_URI: postgres://authenticator@timescale:5432/minnalavu_e2e?sslmode=disable
 
   # Dev only, until a server exists: TLS in front of PostgREST, on
   # 127.0.0.1:9443 only, for a collector on another machine reaching the dev

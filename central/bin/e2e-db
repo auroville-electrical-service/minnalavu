@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+if ((BASH_VERSINFO[0] < 5)); then
+  echo "needs bash 5+, found $BASH_VERSION" >&2
+  exit 1
+fi
+set -euo pipefail
+
+# Recreate the end-to-end test's own database, apply every migration, load
+# contract/profiles, let PostgREST log in as authenticator, and wait until
+# postgrest_e2e serves it. The dev store is never touched.
+#   docker compose up -d timescale postgrest_e2e
+#   bin/dev central bin/e2e-db
+if (($# != 0)); then
+  printf 'usage: bin/e2e-db\n' >&2
+  exit 2
+fi
+
+url=${MINNALAVU_E2E_DB_URL:?set by compose.yaml}
+api=${MINNALAVU_E2E_API_URL:?set by compose.yaml}
+password=${AUTHENTICATOR_PASSWORD:?set by compose.yaml}
+central=$(cd "$(dirname "$0")/.." && pwd -P)
+cd "$central"
+
+name=${url##*/}
+name=${name%%\?*}
+admin=${url/\/"$name"/\/postgres}
+
+# FORCE: postgrest_e2e holds connections to the old database.
+psql "$admin" -X -q -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS \"$name\" WITH (FORCE)"
+psql "$admin" -X -q -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$name\""
+bin/migrate "$url" --apply >/dev/null
+bin/load-profiles "$url" --apply >/dev/null
+# psql substitutes :'password' (quoted) in a script, not in -c.
+printf '%s\n' "ALTER ROLE authenticator LOGIN PASSWORD :'password';" |
+  psql "$url" -X -q -v ON_ERROR_STOP=1 -v password="$password"
+
+# PostgREST answers 503 until it has reconnected to the new database; with
+# no anonymous role, a request without a token then gets 401.
+for _ in {1..60}; do
+  status=$(curl -s -o /dev/null -w '%{http_code}' -- "$api/" || true)
+  if [[ $status == 401 ]]; then
+    printf 'e2e database %s ready, served at %s\n' "$name" "$api"
+    exit 0
+  fi
+  sleep 1
+done
+printf 'postgrest at %s never served %s (last status %s); is postgrest_e2e up?\n' \
+  "$api" "$name" "$status" >&2
+exit 1

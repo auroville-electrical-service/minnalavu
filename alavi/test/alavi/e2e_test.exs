@@ -1,9 +1,9 @@
 defmodule Alavi.EndToEndTest do
   @moduledoc """
   Simulator -> pollers -> buffer -> uplink -> PostgREST -> database, with the
-  rows checked in the database. Needs the dev environment's central store,
-  migrated: see CLAUDE.md. Excluded from `mix test` and `mix check`; run with
-  `bin/dev alavi mix test --only e2e`.
+  rows checked in the database. Needs the end-to-end store, never the dev
+  store: `central/bin/e2e-db`, see CLAUDE.md. Excluded from `mix test` and
+  `mix check`; run with `bin/dev alavi mix test --only e2e`.
   """
 
   use ExUnit.Case, async: false
@@ -41,7 +41,7 @@ defmodule Alavi.EndToEndTest do
     {out, 0} =
       System.cmd(
         "psql",
-        [env!("MINNALAVU_DB_URL"), "-X", "-q", "-At", "-v", "ON_ERROR_STOP=1"] ++
+        [env!("MINNALAVU_E2E_DB_URL"), "-X", "-q", "-At", "-v", "ON_ERROR_STOP=1"] ++
           ["-c", query]
       )
 
@@ -79,7 +79,7 @@ defmodule Alavi.EndToEndTest do
 
   defp target!(token) do
     {:ok, target} =
-      Target.parse(env!("MINNALAVU_API_URL"), token, allow_http: true, cacerts: [])
+      Target.parse(env!("MINNALAVU_E2E_API_URL"), token, allow_http: true, cacerts: [])
 
     target
   end
@@ -124,7 +124,7 @@ defmodule Alavi.EndToEndTest do
 
   test "readings from the simulator land in the database, exactly, under the token's collector",
        ctx do
-    # Random, not unique_integer: the dev database keeps earlier runs' collectors.
+    # Random, not unique_integer: collector roles outlive the database.
     id = "e2e_#{Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)}"
     token = collector!(id)
 
@@ -236,7 +236,7 @@ defmodule Alavi.EndToEndTest do
   end
 
   defp new_collector! do
-    # Random, not unique_integer: the dev database keeps earlier runs' collectors.
+    # Random, not unique_integer: collector roles outlive the database.
     id = "e2e_#{Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)}"
     {id, collector!(id)}
   end
@@ -477,7 +477,8 @@ defmodule Alavi.EndToEndTest do
     {id, token} = new_collector!()
     {sim, port} = start_sim!(:tcp)
     Simulator.faults(sim, delay_ms: 301)
-    # The dev database keeps earlier runs' readings, which a fixed clock would repeat.
+    # The database keeps earlier runs' readings until it is recreated, and a
+    # fixed clock would repeat them.
     :ok = Simulator.identify(sim, 1, :serial, String.upcase(id))
     {:ok, clock} = Agent.start_link(fn -> ~U[2026-11-13 23:59:59Z] end)
 
