@@ -378,6 +378,21 @@ defmodule Alavi.PollerTest do
     end
   end
 
+  describe "late replies" do
+    test "a reply that comes after its request timed out is skipped, and counted late on its unit's day" do
+      {sim, port} = start_sim!(:tcp)
+      Simulator.faults(sim, delay_ms: 150)
+      endpoints = [endpoint(port, "tcp", [meter(1, "elite_440")], %{"timeout_ms" => 100})]
+      pollers = start_pollers!(endpoints, fn -> ~U[2026-11-14 10:00:00Z] end)
+      Process.sleep(1_000)
+
+      {:ok, log} = with_log(fn -> Alavi.Pollers.log_latency(pollers, 1_000) end)
+      assert_receive {:latency, [%LatencyDay{unit_id: 1, late: %{data: late}} = day]}
+      assert late > 0 and day.timeouts > 0
+      assert log =~ ~r/unit 1: latency, before stopping, .*; late #{late} data/
+    end
+  end
+
   describe "Pollers.log_latency/2" do
     test "logs every poller's day so far, and passes over one that does not answer" do
       {_sim, port} = start_sim!(:tcp)

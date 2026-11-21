@@ -13,6 +13,7 @@ defmodule Alavi.Sink do
 
   alias Alavi.{
     ClockCheck,
+    FillResult,
     FirmwareRead,
     LatencyDay,
     MeterClockRead,
@@ -29,6 +30,7 @@ defmodule Alavi.Sink do
           | LatencyDay.t()
           | StoredEntry.t()
           | MeterClockRead.t()
+          | FillResult.t()
   @type t :: {module(), term()}
 
   @callback record(arg :: term(), [event(), ...]) :: :ok | {:error, term()}

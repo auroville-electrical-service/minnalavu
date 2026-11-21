@@ -4,7 +4,9 @@ defmodule Alavi.Intake do
   each request once (`Alavi.Intake.Seen`): checked against what this
   collector runs (`Alavi.Intake.Request`), its serials resolved to the
   endpoints and units it polls (`Alavi.Intake.Resolve`), then read with
-  `Alavi.Pollers.read_now/4`, tagged with the request's ID.
+  `Alavi.Pollers.read_now/4`, tagged with the request's ID. A fill is handed
+  to the poller of each endpoint its serials resolve to
+  (`Alavi.Pollers.fill/3`), whose copy window runs it.
 
   The resolving and queueing wait on the pollers' steps, so they run in a
   process of their own per request, and the uplink goes on sending. A
@@ -17,6 +19,7 @@ defmodule Alavi.Intake do
 
   alias Alavi.{Config, Pollers}
   alias Alavi.Config.Endpoint
+  alias Alavi.Copy.Fill
   alias Alavi.Intake.{Request, Resolve, Seen}
 
   @enforce_keys [:pollers, :endpoints, :seen]
@@ -82,10 +85,10 @@ defmodule Alavi.Intake do
     intake
   end
 
-  defp run(%Request{id: id, meters: serials}, pollers, endpoints) do
+  defp run(%Request{id: id, meters: serials} = request, pollers, endpoints) do
     {plan, unresolved} = Resolve.plan(endpoints, Pollers.serials(pollers), serials)
     unresolved(id, unresolved, plan)
-    Enum.each(plan, fn {endpoint, units} -> queue(pollers, id, endpoint, units) end)
+    Enum.each(plan, fn {endpoint, units} -> queue(pollers, request, endpoint, units) end)
   end
 
   defp unresolved(_id, [], _plan), do: :ok
@@ -103,7 +106,22 @@ defmodule Alavi.Intake do
 
   defp why({serial, :ambiguous}), do: "#{inspect(serial)} read at more than one unit"
 
-  defp queue(pollers, id, {host, port} = endpoint, units) do
+  defp queue(pollers, %Request{kind: :fill_copies} = request, {host, port} = endpoint, _units) do
+    %Request{id: id, meters: meters, fill: fill, expires_at: expires_at} = request
+    copy = Fill.new(id, meters, fill.stores, fill.from, fill.to, expires_at)
+
+    case Pollers.fill(pollers, endpoint, copy) do
+      :ok ->
+        Logger.info("alavi intake: request #{id}: #{host}:#{port} fills in its copy window")
+
+      {:error, reason} ->
+        Logger.warning(
+          "alavi intake: request #{id}: #{host}:#{port} not filled: #{inspect(reason)}"
+        )
+    end
+  end
+
+  defp queue(pollers, %Request{id: id}, {host, port} = endpoint, units) do
     case Pollers.read_now(pollers, endpoint, units, id) do
       {:ok, _ref} ->
         Logger.info(

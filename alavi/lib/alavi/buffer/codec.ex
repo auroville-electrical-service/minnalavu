@@ -1,6 +1,6 @@
 defmodule Alavi.Buffer.Codec do
   @moduledoc false
-  # The on-disk format of a buffer segment, version 6. Pure: binaries in and out.
+  # The on-disk format of a buffer segment, version 7. Pure: binaries in and out.
   #
   #     segment = magic, header frame, record frame*
   #     magic   = "ALAVIBUF", format version (1 byte)
@@ -15,6 +15,7 @@ defmodule Alavi.Buffer.Codec do
   alias Alavi.{
     Clock,
     ClockCheck,
+    FillResult,
     FirmwareRead,
     LatencyDay,
     MeterClockRead,
@@ -24,7 +25,7 @@ defmodule Alavi.Buffer.Codec do
     StoredEntry
   }
 
-  @version 6
+  @version 7
   @magic <<"ALAVIBUF", @version>>
 
   @typedoc "`size` is the length of the longest valid prefix."
@@ -118,7 +119,8 @@ defmodule Alavi.Buffer.Codec do
 
   defp encode_event(%LatencyDay{} = l) do
     {:latency_day, l.endpoint.host, l.endpoint.port, l.unit_id, Date.to_iso8601(l.date),
-     iso(l.poller_started_at), l.buckets_version, l.retries, l.timeouts, l.max_ms, l.buckets}
+     iso(l.poller_started_at), l.buckets_version, l.retries, l.timeouts, l.max_ms, l.buckets,
+     {l.late.data, l.late.exceptions}}
   end
 
   defp encode_event(%StoredEntry{} = e) do
@@ -126,7 +128,12 @@ defmodule Alavi.Buffer.Codec do
 
     {:stored_entry, e.endpoint.host, e.endpoint.port, e.unit_id, e.meter_serial, e.product_code,
      e.profile, e.profile_version, e.store, naive(e.meter_time), e.interval_s, e.register_key,
-     {sign, coef, exp}, e.slot, iso(e.copied_at)}
+     {sign, coef, exp}, e.slot, iso(e.copied_at), e.request_id}
+  end
+
+  defp encode_event(%FillResult{} = r) do
+    {:fill_result, r.request_id, r.endpoint.host, r.endpoint.port, r.unit_id, r.meter_serial,
+     r.store, r.gone_before && naive(r.gone_before), iso(r.finished_at)}
   end
 
   defp encode_event(%MeterClockRead{} = r) do
@@ -200,7 +207,7 @@ defmodule Alavi.Buffer.Codec do
 
   defp decode_event(
          {:latency_day, host, port, unit_id, date, started, version, retries, timeouts, max_ms,
-          buckets}
+          buckets, {late_data, late_exceptions}}
        ) do
     %LatencyDay{
       endpoint: %{host: host, port: port},
@@ -211,13 +218,14 @@ defmodule Alavi.Buffer.Codec do
       retries: retries,
       timeouts: timeouts,
       max_ms: max_ms,
-      buckets: buckets
+      buckets: buckets,
+      late: %{data: late_data, exceptions: late_exceptions}
     }
   end
 
   defp decode_event(
          {:stored_entry, host, port, unit_id, serial, product_code, profile, version, store,
-          meter_time, interval_s, key, {sign, coef, exp}, slot, copied_at}
+          meter_time, interval_s, key, {sign, coef, exp}, slot, copied_at, request_id}
        )
        when store in [:history, :snapshot, :load_survey] do
     %StoredEntry{
@@ -233,7 +241,23 @@ defmodule Alavi.Buffer.Codec do
       register_key: key,
       value: %Decimal{sign: sign, coef: coef, exp: exp},
       slot: slot,
-      copied_at: datetime(copied_at)
+      copied_at: datetime(copied_at),
+      request_id: request_id
+    }
+  end
+
+  defp decode_event(
+         {:fill_result, request_id, host, port, unit_id, serial, store, gone_before, finished_at}
+       )
+       when store in [:history, :snapshot, :load_survey] do
+    %FillResult{
+      request_id: request_id,
+      endpoint: %{host: host, port: port},
+      unit_id: unit_id,
+      meter_serial: serial,
+      store: store,
+      gone_before: gone_before && NaiveDateTime.from_iso8601!(gone_before),
+      finished_at: datetime(finished_at)
     }
   end
 

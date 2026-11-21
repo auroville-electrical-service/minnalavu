@@ -213,8 +213,11 @@ defmodule Alavi.Modbus.ClientTest do
 
       assert {:ok, _, client} = Client.read(client, 2, :holding, 199, 2)
 
-      assert {[%{kind: :skipped, unit_id: 2, reasons: [:stale], bytes: stale}], _} =
+      assert {[%{kind: :skipped, unit_id: 2, reasons: [:stale], bytes: stale, late: late}], _} =
                Client.take_anomalies(client)
+
+      # Counted as unit 1's late data reply.
+      assert late == [{1, :data}]
 
       # The MBAP header of transaction 0, from unit 1.
       assert <<0::16, 0::16, _len::16, 1, 3, _::binary>> = stale

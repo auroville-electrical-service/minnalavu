@@ -37,6 +37,75 @@ defmodule Alavi.Copy.StoresTest do
     end
   end
 
+  describe "fill_scanned/5" do
+    @from ~N[2026-10-01 00:00:00]
+
+    test "a history or snapshot goes on while its stamp is at or after the range's start" do
+      assert {:more, [{1, @from}]} = Stores.fill_scanned([], 1, @from, :history, @from)
+
+      assert {:found, [{1, @from}]} =
+               Stores.fill_scanned([{1, @from}], 2, ~N[2026-09-30 23:59:59], :snapshot, @from)
+    end
+
+    test "a load-survey day goes on while the day ends after the range's start" do
+      assert {:more, [{0, ~N[2026-09-30 00:00:00]}]} =
+               Stores.fill_scanned(
+                 [],
+                 0,
+                 ~N[2026-09-30 00:00:00],
+                 :load_survey,
+                 ~N[2026-09-30 12:00:00]
+               )
+
+      assert {:found, []} =
+               Stores.fill_scanned([], 0, ~N[2026-09-30 00:00:00], :load_survey, @from)
+    end
+
+    test "before/2 keeps the entries stamped before the range's end" do
+      found = [{1, ~N[2026-11-01 00:00:00]}, {2, ~N[2026-10-31 23:59:59]}, {3, @from}]
+      assert Stores.before(found, ~N[2026-11-01 00:00:00]) == tl(found)
+    end
+  end
+
+  describe "gone_before/4" do
+    @from ~N[2026-10-01 00:00:00]
+    @to ~N[2026-11-01 00:00:00]
+
+    test "a scan that reached an older entry leaves nothing gone" do
+      assert Stores.gone_before(:older, [{1, ~N[2026-10-15 00:00:00]}], @from, @to) == nil
+      assert Stores.gone_before(:older, [], @from, @to) == nil
+    end
+
+    test "a scan out of slots: its oldest entry inside the range, else the range's end" do
+      assert Stores.gone_before(:exhausted, [{1, @to}, {2, ~N[2026-10-17 00:00:00]}], @from, @to) ==
+               ~N[2026-10-17 00:00:00]
+
+      assert Stores.gone_before(:exhausted, [{1, ~N[2026-11-02 00:00:00]}, {2, @to}], @from, @to) ==
+               @to
+
+      assert Stores.gone_before(:exhausted, [], @from, @to) == @to
+    end
+
+    test "a scan out of slots whose oldest entry is at or before the range's start leaves nothing gone" do
+      assert Stores.gone_before(
+               :exhausted,
+               [{1, ~N[2026-10-02 00:00:00]}, {2, @from}],
+               @from,
+               @to
+             ) ==
+               nil
+
+      # A load-survey day that starts before the range and ends inside it.
+      assert Stores.gone_before(
+               :exhausted,
+               [{0, ~N[2026-09-30 00:00:00]}],
+               ~N[2026-09-30 12:00:00],
+               @to
+             ) ==
+               nil
+    end
+  end
+
   describe "due/2" do
     test "oldest first; a load-survey day once per parameter, the last marked" do
       found = [{0, ~N[2026-11-16 00:00:00]}, {1, ~N[2026-11-15 00:00:00]}]

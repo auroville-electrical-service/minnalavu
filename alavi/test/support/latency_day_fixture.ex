@@ -6,13 +6,16 @@ defmodule Alavi.LatencyDayFixture do
 
   @endpoint %{host: "10.0.0.21", port: 502}
 
-  @doc "Answers at 3, 38, 40, 41 and 75000 ms, and 44 ms on a retry; one timeout."
+  @doc "Answers at 3, 38, 40, 41 and 75000 ms, and 44 ms on a retry; one timeout; two late data replies and a late 0B."
   @spec answered() :: LatencyDay.t()
   def answered do
     [3, 38, 40, 41, 75_000]
     |> Enum.reduce(Latency.new(), &Latency.record(&2, ~D[2026-11-14], 1, &1, :ok))
     |> Latency.record(~D[2026-11-14], 2, 44, :ok)
     |> Latency.record(~D[2026-11-14], 1, 3_000, :timeout)
+    |> Latency.late(~D[2026-11-14], :data)
+    |> Latency.late(~D[2026-11-14], :data)
+    |> Latency.late(~D[2026-11-14], {:exception, 11})
     |> day(1)
   end
 

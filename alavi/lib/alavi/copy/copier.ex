@@ -13,6 +13,12 @@ defmodule Alavi.Copy.Copier do
   leaves its restore owed, to the poller (`io.owe_restore`), and ends the
   run: the endpoint is faulted until the restore is done, and no copy starts.
 
+  A fill's pass (`Alavi.Copy.Fill`) scans its store back to the range's
+  start, copies the entries in the range with the request's ID, and never
+  moves the progress; once its entries are recorded, its
+  `Alavi.FillResult` is. A pass that fails sends no result, and the fill
+  tries it again the next night.
+
   A NaN or infinity where the meter's mask supports the quantity (or the
   profile has no mask) is not sent, and not a missed read, which is a live
   register's: it is logged with the entry it was in, and counted on the
@@ -22,9 +28,9 @@ defmodule Alavi.Copy.Copier do
   require Logger
 
   alias Alavi.Config.Meter
-  alias Alavi.Copy.{Progress, Run, Stores}
+  alias Alavi.Copy.{Fill, Progress, Run, Stores}
   alias Alavi.Decode.Stored, as: Decode
-  alias Alavi.{MeterClockRead, Sink, Status, StoredEntry}
+  alias Alavi.{FillResult, MeterClockRead, Sink, Status, StoredEntry}
   alias Alavi.Modbus.{Client, Selector}
   alias Alavi.Profile.{Identity, Stored}
   alias Alavi.Selectors.Session
@@ -139,7 +145,7 @@ defmodule Alavi.Copy.Copier do
         product_code: seen.product_code,
         progress: progress,
         clock: clock,
-        stores: Stores.all()
+        stores: Run.passes(run, seen.serial)
       }
 
       {%{run | phase: {:open, visit}}, state}
@@ -152,22 +158,31 @@ defmodule Alavi.Copy.Copier do
   defp open(run, %{stores: []} = visit, state, _io),
     do: {%{run | phase: {:end_visit, visit}}, state}
 
-  defp open(run, %{stores: [store | rest]} = visit, state, io) do
+  defp open(run, %{stores: [{store, pass} | rest]} = visit, state, io) do
     visit = %{visit | stores: rest}
 
     case counts(visit.meter, store, state, io) do
       {{:ok, %{available: 0}}, state} ->
-        {%{run | phase: {:open, visit}}, state}
+        held_none(run, visit, store, pass, state)
 
       {{:ok, %{parameters: []}}, state} ->
-        {%{run | phase: {:open, visit}}, state}
+        held_none(run, visit, store, pass, state)
 
       {{:ok, counts}, state} ->
-        session(run, visit, store, counts, state, io)
+        session(run, visit, {store, pass}, counts, state, io)
 
       {{:error, why}, state} ->
         {%{run | phase: {:open, visit}}, failed(state, visit.meter, {store, why})}
     end
+  end
+
+  # A store the meter holds nothing of: a fill's pass is finished, with all of its range gone.
+  defp held_none(run, visit, _store, :nightly, state), do: {%{run | phase: {:open, visit}}, state}
+
+  defp held_none(run, visit, store, %Fill{} = fill, state) do
+    scope = %{store: store, pass: fill, ended: :exhausted, found: []}
+    {run, state} = fill_result(run, visit, scope, state)
+    {%{run | phase: {:open, visit}}, state}
   end
 
   defp counts(meter, :load_survey, state, io) do
@@ -228,7 +243,7 @@ defmodule Alavi.Copy.Copier do
     end)
   end
 
-  defp session(run, visit, store, counts, state, io) do
+  defp session(run, visit, {store, pass}, counts, state, io) do
     meter = visit.meter
 
     {result, state} =
@@ -251,6 +266,8 @@ defmodule Alavi.Copy.Copier do
         scope =
           Map.merge(counts, %{
             store: store,
+            pass: pass,
+            ended: nil,
             session: session,
             connection: state.connections,
             slots: Stores.slots(store, counts.available),
@@ -308,23 +325,66 @@ defmodule Alavi.Copy.Copier do
          {:ok, at, state} <- decoded(Decode.stamp(stamp, words), state) do
       scope = %{scope | slots: rest, day: day(scope, slot)}
 
-      case Stores.scanned(scope.found, slot, at, visit.progress[scope.store]) do
+      case scanned_to(scope.pass, scope, slot, at, visit) do
         {:more, found} when rest != [] ->
           {%{run | phase: {:scan, visit, %{scope | found: found}}}, state}
 
-        {_, found} ->
-          scanned(run, visit, %{scope | found: found, slots: []}, state)
+        {:more, found} ->
+          scanned(run, visit, %{scope | found: found, slots: [], ended: :exhausted}, state)
+
+        {:found, found} ->
+          scanned(run, visit, %{scope | found: found, slots: [], ended: :older}, state)
       end
     else
       {:error, why, state} -> broke(run, visit, scope, state, io, why)
     end
   end
 
+  defp scanned_to(:nightly, scope, slot, at, visit),
+    do: Stores.scanned(scope.found, slot, at, visit.progress[scope.store])
+
+  defp scanned_to(%Fill{from: from}, scope, slot, at, _visit),
+    do: Stores.fill_scanned(scope.found, slot, at, scope.store, from)
+
+  defp scanned(run, visit, %{slots: []} = scope, state) when scope.ended == nil,
+    do: scanned(run, visit, %{scope | ended: :exhausted}, state)
+
   defp scanned(run, visit, scope, state) do
-    due = Stores.due(scope.found, scope.parameters)
+    due = Stores.due(in_range(scope.pass, scope.found), scope.parameters)
     scope = %{scope | due: due, of: length(due), done: 0}
-    phase = if due == [], do: {:close, visit, scope}, else: {:copy, visit, scope}
-    {%{run | phase: phase}, at(state, visit, scope)}
+    state = at(state, visit, scope)
+
+    if due == [],
+      do: finished(run, visit, scope, state),
+      else: {%{run | phase: {:copy, visit, scope}}, state}
+  end
+
+  defp in_range(:nightly, found), do: found
+  defp in_range(%Fill{to: to}, found), do: Stores.before(found, to)
+
+  # Every entry due is recorded: a fill's result next, then the session closed.
+  defp finished(run, visit, scope, state) do
+    {run, state} = fill_result(run, visit, scope, state)
+    {%{run | phase: {:close, visit, scope}}, state}
+  end
+
+  defp fill_result(run, _visit, %{pass: :nightly}, state), do: {run, state}
+
+  defp fill_result(run, visit, %{pass: %Fill{} = fill} = scope, state) do
+    result = %FillResult{
+      request_id: fill.id,
+      endpoint: endpoint(state),
+      unit_id: visit.meter.unit_id,
+      meter_serial: visit.serial,
+      store: scope.store,
+      gone_before: Stores.gone_before(scope.ended, scope.found, fill.from, fill.to),
+      finished_at: state.clock.()
+    }
+
+    case record(state, [result]) do
+      :ok -> {Run.filled(run, fill.id, visit.serial, scope.store), state}
+      {:error, why} -> {run, failed(state, visit.meter, {scope.store, {:fill, fill.id, why}})}
+    end
   end
 
   defp copy(run, visit, %{store: :load_survey} = scope, state, io),
@@ -343,7 +403,7 @@ defmodule Alavi.Copy.Copier do
 
       entries =
         for {key, value} <- decoded.entries,
-            do: entry(state, visit, scope.store, {stamp, nil}, key, value, slot, copied_at)
+            do: entry(state, visit, scope, {stamp, nil}, key, value, slot, copied_at)
 
       kept(run, visit, %{scope | due: rest}, stamp, entries, state)
     else
@@ -380,7 +440,7 @@ defmodule Alavi.Copy.Copier do
               entry(
                 state,
                 visit,
-                :load_survey,
+                scope,
                 {start, day.interval_s},
                 parameter.key,
                 value,
@@ -416,16 +476,23 @@ defmodule Alavi.Copy.Copier do
   # The entry's events recorded, then its progress saved: never the other way round.
   defp kept(run, visit, scope, progress, entries, state) do
     with :ok <- record(state, entries),
-         {:ok, visit} <- advanced(visit, scope.store, progress, state) do
+         {:ok, visit} <- advanced(visit, scope.store, nightly(scope.pass, progress), state) do
       scope = %{scope | done: scope.done + 1}
-      phase = if scope.due == [], do: {:close, visit, scope}, else: {:copy, visit, scope}
-      {%{run | phase: phase}, at(state, visit, scope)}
+      state = at(state, visit, scope)
+
+      if scope.due == [],
+        do: finished(run, visit, scope, state),
+        else: {%{run | phase: {:copy, visit, scope}}, state}
     else
       {:error, why} ->
         {%{run | phase: {:close, %{visit | stores: []}, scope}},
          failed(state, visit.meter, {scope.store, why})}
     end
   end
+
+  # A fill never moves the nightly mark.
+  defp nightly(:nightly, progress), do: progress
+  defp nightly(%Fill{}, _progress), do: nil
 
   defp record(_state, []), do: :ok
 
@@ -456,6 +523,7 @@ defmodule Alavi.Copy.Copier do
         found: [],
         due: [],
         of: 0,
+        ended: nil,
         rescans: 1
     }
 
@@ -549,7 +617,7 @@ defmodule Alavi.Copy.Copier do
     Decode.block(block, words.(block.stamp.address, 2), mask, registers)
   end
 
-  defp entry(state, visit, store, {meter_time, interval_s}, key, value, slot, copied_at) do
+  defp entry(state, visit, scope, {meter_time, interval_s}, key, value, slot, copied_at) do
     %StoredEntry{
       endpoint: endpoint(state),
       unit_id: visit.meter.unit_id,
@@ -557,15 +625,19 @@ defmodule Alavi.Copy.Copier do
       product_code: visit.product_code,
       profile: visit.meter.profile.name,
       profile_version: visit.meter.profile.version,
-      store: store,
+      store: scope.store,
       meter_time: meter_time,
       interval_s: interval_s,
       register_key: key,
       value: value,
       slot: slot,
-      copied_at: copied_at
+      copied_at: copied_at,
+      request_id: request_id(scope.pass)
     }
   end
+
+  defp request_id(:nightly), do: nil
+  defp request_id(%Fill{id: id}), do: id
 
   defp not_finite(_state, _visit, _what, _stamp, []), do: :ok
 

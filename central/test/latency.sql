@@ -289,6 +289,51 @@ SELECT pg_temp.is(
   '0 answered, 6 timed out; p50 none, p99 none, max none',
   'a meter that only timed out has no percentiles and no max');
 
+-- Late replies: kept with their entry; an entry without them was counted by
+-- a collector that does not count them, NULL, not zero.
+CREATE FUNCTION pg_temp.late(entry jsonb, late jsonb) RETURNS jsonb
+LANGUAGE sql AS $$ SELECT entry || jsonb_build_object('late', late) $$;
+
+CREATE TEMP TABLE late_entries (entries jsonb);
+INSERT INTO late_entries SELECT jsonb_build_array(
+  pg_temp.late(pg_temp.entry(1, '2026-11-04T00:00:00Z', 0, 0, 12, pg_temp.buckets(8, 3), '2026-11-04'),
+               '{"data": 4, "exceptions": {"11": 2, "4": 1}}'),
+  pg_temp.entry(2, '2026-11-04T00:00:00Z', 0, 0, 12, pg_temp.buckets(8, 3), '2026-11-04'),
+  pg_temp.late(pg_temp.entry(3, '2026-11-04T00:00:00Z', 0, 0, 12, pg_temp.buckets(8, 3), '2026-11-04'),
+               '{"data": 0, "exceptions": {}}'));
+
+SELECT pg_temp.is(
+  pg_temp.ingest_as('collector_sqltest_lat_a',
+    pg_temp.with_latency('d6d6d6d6-d6d6-4d6d-8d6d-d6d6d6d6d6d6', (SELECT entries FROM late_entries)))
+    -> 'latency',
+  '{"received": 3, "inserted": 3, "duplicate": 0, "conflicting": 0}',
+  'latency entries with late counts, and one without, are stored');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s %s %s', unit_id, coalesce(late_data::text, '-'),
+                            coalesce(late_exceptions::text, '-')), '; ' ORDER BY unit_id)
+   FROM store.latency_days WHERE collector_id = 'sqltest_lat_a' AND day = '2026-11-04'),
+  '1 4 {"4": 1, "11": 2}; 2 - -; 3 0 {}',
+  'late counts are kept as sent, by exception code; none counted is zero, none sent is NULL');
+
+SELECT pg_temp.is(
+  pg_temp.ingest_as('collector_sqltest_lat_a',
+    pg_temp.changed(
+      pg_temp.changed(
+        pg_temp.with_latency('d7d7d7d7-d7d7-4d7d-8d7d-d7d7d7d7d7d7', (SELECT entries FROM late_entries)),
+        '{"path": ["latency", 0, "late", "exceptions", "11"], "value": 3}'),
+      '{"path": ["latency", 2, "late"], "delete": true}'))
+    -> 'latency',
+  '{"received": 3, "inserted": 0, "duplicate": 1, "conflicting": 2}',
+  'an entry that differs from the stored one in its late counts, or lacks them, is conflicting');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s %s', unit_id, coalesce(late_exceptions::text, '-')), '; '
+                     ORDER BY unit_id)
+   FROM store.latency_days WHERE collector_id = 'sqltest_lat_a' AND day = '2026-11-04'),
+  '1 {"4": 1, "11": 2}; 2 -; 3 {}',
+  'and the stored late counts are unchanged');
+
 -- Health: per registered endpoint, its days within the lookback, at the
 -- addresses it had while in service. Rows inserted directly, dated relative
 -- to now().
@@ -382,5 +427,63 @@ SELECT pg_temp.is(pg_temp.day_lookups('SELECT * FROM health.endpoint_latency'),
 
 SELECT pg_temp.is(pg_temp.sqlstate_as('monitor', 'SELECT * FROM health.endpoint_latency'),
   '00000', 'monitor may read health.endpoint_latency');
+
+-- Late replies beside each endpoint's answered latency and its timeout now.
+CREATE FUNCTION pg_temp.late_on(host text, unit integer, days_ago integer, ms integer,
+                                data bigint, exceptions jsonb)
+RETURNS void
+LANGUAGE sql AS $$
+  INSERT INTO store.latency_days
+    (collector_id, endpoint_host, endpoint_port, unit_id, day, poller_started_at,
+     buckets_version, retries, timeouts, max_ms, buckets, batch_id, late_data, late_exceptions)
+    SELECT 'sqltest_lat_b', host, 502, unit, (now() AT TIME ZONE 'UTC')::date - days_ago,
+           ((now() AT TIME ZONE 'UTC')::date - days_ago - 1)::timestamp AT TIME ZONE 'UTC', 1,
+           0, 0, ms, (SELECT array_agg(CASE WHEN i = 13 THEN 2 ELSE 0 END::bigint ORDER BY i)
+                      FROM generate_series(0, 43) i), batch_id, data, exceptions
+    FROM store.batches WHERE collector_id = 'sqltest_lat_b' LIMIT 1
+$$;
+
+SELECT pg_temp.late_on('10.0.9.1', 3, 0, 30, 3, '{"11": 1}');
+SELECT pg_temp.late_on('10.0.9.1', 4, 0, 32, 1, '{"11": 2, "4": 1}');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s day -%s: timeout %s, %s entries, %s answered, p99 %s, max %s; '
+                            || 'late in %s: %s data, %s', endpoint_id,
+                            (now() AT TIME ZONE 'UTC')::date - day, timeout_ms, entries, answered,
+                            p99_ms, max_ms, late_entries, coalesce(late_data::text, '-'),
+                            coalesce(late_exceptions::text, '-')),
+                     '; ' ORDER BY day DESC)
+   FROM health.endpoint_timeouts WHERE endpoint_id = 'sqllat_chain'),
+  'sqllat_chain day -0: timeout 1000, 4 entries, 8 answered, p99 39, max 39; '
+  || 'late in 2: 4 data, {"4": 1, "11": 3}; '
+  || 'sqllat_chain day -1: timeout 1000, 1 entries, 2 answered, p99 35, max 35; '
+  || 'late in 0: - data, -',
+  'an endpoint''s days: its timeout now, what answered, and the late replies its entries '
+  || 'counted, summed by code; none, where no entry counted them');
+
+-- Each read of latency_days bounded by the day, whether as an index scan or a bitmap one.
+CREATE FUNCTION pg_temp.day_bounded(q text) RETURNS text
+LANGUAGE plpgsql AS $$
+DECLARE
+  plan jsonb;
+BEGIN
+  SET LOCAL enable_seqscan = off;
+  EXECUTE 'EXPLAIN (FORMAT JSON) ' || q INTO plan;
+  RESET enable_seqscan;
+  RETURN (SELECT CASE WHEN count(*) > 0 AND bool_and(coalesce(
+                        coalesce(n ->> 'Index Cond', n ->> 'Recheck Cond') ~ 'day', false))
+                      THEN 'bounded'
+                      ELSE string_agg(n ->> 'Node Type', ', ') END
+          FROM jsonb_path_query(plan, 'lax $.**') n
+          WHERE jsonb_typeof(n) = 'object' AND n ->> 'Relation Name' = 'latency_days');
+END
+$$;
+
+SELECT pg_temp.is(pg_temp.day_bounded('SELECT * FROM health.endpoint_timeouts'),
+  'bounded',
+  'it reads only the lookback''s latency days, each read bounded by the day');
+
+SELECT pg_temp.is(pg_temp.sqlstate_as('monitor', 'SELECT * FROM health.endpoint_timeouts'),
+  '00000', 'monitor may read health.endpoint_timeouts');
 
 ROLLBACK;

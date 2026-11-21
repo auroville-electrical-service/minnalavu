@@ -73,6 +73,30 @@ defmodule Alavi.Modbus.FramingTest do
     end
   end
 
+  describe "stale_reply/1" do
+    test "a stale frame's unit, and its data or its exception code" do
+      assert Framing.stale_reply(response_frame(:tcp, 4, 1, <<4, 2, 0, 1>>)) == {1, :data}
+      assert Framing.stale_reply(response_frame(:tcp, 4, 7, <<3, 2, 0, 1>>)) == {7, :data}
+
+      assert Framing.stale_reply(response_frame(:tcp, 4, 3, <<0x84, 0x0B>>)) ==
+               {3, {:exception, 11}}
+    end
+
+    test "bytes that are not one read's frame are nil" do
+      frame = response_frame(:tcp, 4, 1, <<4, 2, 0, 1>>)
+
+      for bytes <- [
+            frame <> frame,
+            binary_part(frame, 0, 5),
+            response_frame(:tcp, 4, 1, <<0x0B>>),
+            response_frame(:tcp, 4, 1, <<6, 0, 1, 0, 2>>),
+            response_frame(:tcp, 4, 1, <<0x84, 0>>),
+            <<0xAA>>
+          ],
+          do: assert(Framing.stale_reply(bytes) == nil)
+    end
+  end
+
   describe "take_reply/3" do
     test "take_reply skips a TCP reply to another request and rejects one from another unit" do
       expected = %{transaction_id: 5, unit_id: 1, function_code: 4}

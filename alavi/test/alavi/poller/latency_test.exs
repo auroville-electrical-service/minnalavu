@@ -112,6 +112,22 @@ defmodule Alavi.Poller.LatencyTest do
     end
   end
 
+  describe "late/3" do
+    test "counted apart from answers and timeouts, on its day, and kept in that day's counts" do
+      latency =
+        answers([10])
+        |> Latency.late(@day, :data)
+        |> Latency.late(@day, {:exception, 11})
+        |> Latency.late(Date.add(@day, 1), :data)
+
+      assert %{retries: 0, timeouts: 0, late: %{data: 1, exceptions: %{11 => 1}}} =
+               Latency.counts(latency, @day)
+
+      assert Latency.counts(latency, Date.add(@day, 1)).late == %{data: 1, exceptions: %{}}
+      assert %{answered: 1} = Latency.summary(latency)
+    end
+  end
+
   describe "line/2" do
     test "one day's figures and its bucket counts" do
       latency =
@@ -122,7 +138,7 @@ defmodule Alavi.Poller.LatencyTest do
       assert Latency.line(latency, @day) ==
                "2026-11-14 UTC: 6 answered (1 on a retry), 1 timed out; " <>
                  "p50 40 ms, p90 75000 ms, p99 75000 ms, max 75000 ms; " <>
-                 "buckets 3:1 40:2 50:2 >60000:1"
+                 "buckets 3:1 40:2 50:2 >60000:1; late 0 data"
     end
 
     test "a day of timeouts only" do
@@ -130,7 +146,19 @@ defmodule Alavi.Poller.LatencyTest do
 
       assert Latency.line(latency, @day) ==
                "2026-11-14 UTC: 0 answered (0 on a retry), 1 timed out; " <>
-                 "p50 none, p90 none, p99 none, max none; buckets none"
+                 "p50 none, p90 none, p99 none, max none; buckets none; late 0 data"
+    end
+
+    test "a day's late replies: its data, and its exceptions by code" do
+      latency =
+        Latency.new()
+        |> Latency.late(@day, {:exception, 11})
+        |> Latency.late(@day, :data)
+        |> Latency.late(@day, {:exception, 4})
+        |> Latency.late(@day, {:exception, 11})
+
+      assert Latency.line(latency, @day) =~
+               ~r/buckets none; late 1 data, exception 4:1, exception 11:2$/
     end
 
     test "nil for a day not kept" do

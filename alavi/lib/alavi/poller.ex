@@ -44,7 +44,9 @@ defmodule Alavi.Poller do
   session whose connection is lost leaves its restore owed and ends the
   night's copy. When the window closes the copy stops at an entry boundary,
   its session closed, and the next night's resumes from the progress kept
-  on disk, in `copied/` under the selectors directory. Once a day, with the
+  on disk, in `copied/` under the selectors directory. Fills it keeps
+  (`fill/2`) ride the next night's copy, and each meter and store a fill
+  finishes is not copied for it again. Once a day, with the
   firmware names, each meter's clock is read and recorded beside ours.
 
   A poller retired (`retire/2`) starts no more rounds, and stops once the job
@@ -69,7 +71,7 @@ defmodule Alavi.Poller do
   require Logger
 
   alias Alavi.Config.{CopyWindow, Endpoint, Meter}
-  alias Alavi.Copy.{Copier, Run}
+  alias Alavi.Copy.{Copier, Fill, Run}
   alias Alavi.{Decode, FirmwareRead, LatencyDay, LocalTime, MissedRead, Reading, Sink, Status}
   alias Alavi.Modbus.Client
   alias Alavi.Poller.{Job, Latency, Names, Policy, RawLog, Schedule}
@@ -119,6 +121,15 @@ defmodule Alavi.Poller do
           | {:error, :no_units | {:unknown_units, [term()]} | :busy | :retiring}
   def read_now(server, units, request_id \\ nil),
     do: GenServer.call(server, {:read_now, units, request_id}, :infinity)
+
+  # contract: test/alavi/copy_test.exs "fill"
+  @doc """
+  Keep a fill request until it expires, for the copy window's runs to copy
+  what it owes (`Alavi.Copy.Fill`). One already kept is left as it is, with
+  what it has done. Only an endpoint whose `copy` is set takes one.
+  """
+  @spec fill(GenServer.server(), Fill.t()) :: :ok | {:error, :not_copied | :retiring}
+  def fill(server, %Fill{} = fill), do: GenServer.call(server, {:fill, fill}, :infinity)
 
   # contract: test/alavi/intake_test.exs "Pollers.serials/1"
   @doc """
@@ -191,6 +202,15 @@ defmodule Alavi.Poller do
     end
   end
 
+  def handle_call({:fill, _fill}, _from, %{retiring: why} = state) when why != nil,
+    do: {:reply, {:error, :retiring}, state}
+
+  def handle_call({:fill, _fill}, _from, %{endpoint: %Endpoint{copy: false}} = state),
+    do: {:reply, {:error, :not_copied}, state}
+
+  def handle_call({:fill, fill}, _from, state),
+    do: {:reply, :ok, %{state | fills: Map.put_new(state.fills, fill.id, fill)}}
+
   def handle_call(:serials, _from, state), do: {:reply, state.serials, state}
 
   def handle_call(:log_latency, _from, state),
@@ -240,6 +260,7 @@ defmodule Alavi.Poller do
       selectors_dir: selectors_dir,
       copies_dir: Path.join(selectors_dir, "copied"),
       copy_done_at: nil,
+      fills: %{},
       connections: 0,
       restore: nil,
       timer: nil,
@@ -357,11 +378,19 @@ defmodule Alavi.Poller do
       opened == nil -> state
       Enum.any?(state.queue, &(&1.kind == :copy)) -> state
       state.copy_done_at != nil and not NaiveDateTime.before?(state.copy_done_at, opened) -> state
-      true -> %{state | queue: state.queue ++ [Job.copy(state.endpoint.meters, now())]}
+      true -> queue_copy(state)
     end
   end
 
   defp copy_due(state), do: state
+
+  # Fills expired by now are dropped; the rest ride tonight's copy.
+  defp queue_copy(state) do
+    now = state.clock.()
+    fills = Map.reject(state.fills, fn {_id, fill} -> Fill.expired?(fill, now) end)
+    copy = Job.copy(state.endpoint.meters, Map.values(fills), now())
+    %{state | fills: fills, queue: state.queue ++ [copy]}
+  end
 
   # Milliseconds until the window next opens, for a poller that would sleep past it.
   defp copy_wait(%{endpoint: %Endpoint{copy: true}, retiring: nil} = state) do
@@ -486,7 +515,7 @@ defmodule Alavi.Poller do
     Status.copy(state.status, endpoint_ref(state.endpoint), {:finished, outcome})
     Logger.info("alavi poller #{label(state)}: tonight's copy ended: #{outcome}")
     latency(state)
-    %{state | job: nil, copy_done_at: local_now(state)}
+    %{state | job: nil, copy_done_at: local_now(state), fills: filled(state.fills, run.filled)}
   end
 
   defp done(%{job: %Job{kind: :read_on_demand, requester: {pid, ref}} = job} = state) do
@@ -496,6 +525,14 @@ defmodule Alavi.Poller do
     nudge(state.uplink)
     send(pid, {:alavi_read, ref, events})
     %{state | job: nil}
+  end
+
+  defp filled(fills, finished) do
+    Enum.reduce(finished, fills, fn {id, serial, store}, fills ->
+      if Map.has_key?(fills, id),
+        do: Map.update!(fills, id, &Fill.done(&1, serial, store)),
+        else: fills
+    end)
   end
 
   defp restored({:ok, outcome, client}, state) do
@@ -900,7 +937,7 @@ defmodule Alavi.Poller do
   defp with_client(state, call) do
     {result, client} = call.(state.client)
     {anomalies, client} = Client.take_anomalies(client)
-    {result, log_raw(%{state | client: client}, &RawLog.note(&1, anomalies, now()))}
+    {result, noted(%{state | client: client}, anomalies)}
   end
 
   defp timed(state, unit, n, ms, reply) do
@@ -960,7 +997,23 @@ defmodule Alavi.Poller do
 
   defp anomalies({tag, value, client}, state) do
     {anomalies, client} = Client.take_anomalies(client)
-    {{tag, value, client}, log_raw(state, &RawLog.note(&1, anomalies, now()))}
+    {{tag, value, client}, noted(state, anomalies)}
+  end
+
+  # Logged raw, and each late reply counted on the day of the unit it came from.
+  defp noted(state, anomalies) do
+    state = log_raw(state, &RawLog.note(&1, anomalies, now()))
+    day = state.today || today(state)
+
+    late =
+      for %{kind: :skipped, late: late} <- anomalies,
+          {unit, kind} <- late,
+          Map.has_key?(state.latency, unit),
+          do: {unit, kind}
+
+    Enum.reduce(late, state, fn {unit, kind}, state ->
+      %{state | latency: Map.update!(state.latency, unit, &Latency.late(&1, day, kind))}
+    end)
   end
 
   defp log_raw(state, step) do

@@ -272,12 +272,12 @@ SELECT pg_temp.is(
   (SELECT string_agg(c.relname::text, ', ' ORDER BY c.relname)
    FROM pg_class c WHERE c.relnamespace = 'health'::regnamespace AND c.relkind = 'v'),
   'collector_clocks, collectors, copy_meters, copy_stores, copy_targets, endpoint_latency, '
-  || 'endpoints, energy_drops, meter_clock_offsets, meter_clock_read_conflicts, '
+  || 'endpoint_timeouts, endpoints, energy_drops, meter_clock_offsets, meter_clock_read_conflicts, '
   || 'meter_clock_reads, meter_clock_steps, meter_clocks, meter_firmware, meter_rounds, '
   || 'meters, misplaced_serials, missed_snapshots, place_serials, problems, stored_entries, '
   || 'stored_entry_conflicts, targets, thresholds, unregistered_serial_places, '
   || 'unregistered_serials',
-  'health holds the twenty-six health views');
+  'health holds the twenty-seven health views');
 
 SELECT pg_temp.is(
   (SELECT count(*) FROM pg_class c

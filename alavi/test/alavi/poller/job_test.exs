@@ -110,7 +110,7 @@ defmodule Alavi.Poller.JobTest do
   describe "copy/2" do
     test "steps its run until the run is done" do
       [m1, _m2] = ms = meters()
-      job = Job.copy(ms, 5)
+      job = Job.copy(ms, [], 5)
       assert %Job{kind: :copy, started: 5} = job
       assert {:copy, %Run{phase: {:visit, ^m1}} = run} = Job.next(job)
       assert Job.next(Job.copied(job, Run.faulted(run))) == :done

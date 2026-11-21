@@ -4,31 +4,37 @@ defmodule Alavi.Copy.Run do
   poller runs one phase of it per step (`Alavi.Copy.Copier`). Per meter, a
   visit: its identity and clock, then per store a selector session opened,
   its stamps scanned newest first, the entries due copied one per step, and
-  the session closed; then its clock again.
+  the session closed; then its clock again. After its nightly stores, the
+  visit copies those the night's fills (`Alavi.Copy.Fill`) still owe for the
+  serial the meter reported, one pass each, and `filled` collects each fill's
+  meter and store that finished.
 
   A run asked to stop (`stop/2`) stops at an entry boundary: a session open
   is closed first, and the visit's clock read, before it is done.
   """
 
   alias Alavi.Config.Meter
-  alias Alavi.Copy.{Progress, Stores}
+  alias Alavi.Copy.{Fill, Progress, Stores}
   alias Alavi.Profile.Stored
   alias Alavi.Selectors.Session
 
-  @enforce_keys [:meters, :phase, :stop, :fault]
+  @enforce_keys [:meters, :fills, :filled, :phase, :stop, :fault]
   defstruct @enforce_keys
 
   @typedoc "Why a run stopped before its meters were done."
   @type stop :: :window | :retiring
 
-  @typedoc "A meter visited: what it reported, its progress so far and the stores left."
+  @typedoc "A store's copy in a visit: the nightly one, from its progress, or a fill's."
+  @type pass :: {Stores.store(), :nightly | Fill.t()}
+
+  @typedoc "A meter visited: what it reported, its progress so far and the passes left."
   @type visit :: %{
           meter: Meter.t(),
           serial: String.t(),
           product_code: String.t(),
           progress: Progress.t(),
           clock: [0..0xFFFF],
-          stores: [Stores.store()]
+          stores: [pass()]
         }
 
   @typedoc """
@@ -40,6 +46,8 @@ defmodule Alavi.Copy.Run do
   """
   @type scope :: %{
           store: Stores.store(),
+          pass: :nightly | Fill.t(),
+          ended: :older | :exhausted | nil,
           session: Session.t(),
           connection: non_neg_integer(),
           available: non_neg_integer(),
@@ -67,15 +75,39 @@ defmodule Alavi.Copy.Run do
   @typedoc "`fault`: a visit was cut short, or the run ended with a restore owed."
   @type t :: %__MODULE__{
           meters: [Meter.t()],
+          fills: [Fill.t()],
+          filled: [{String.t(), String.t(), Stores.store()}],
           phase: phase(),
           stop: stop() | nil,
           fault: boolean()
         }
 
   # contract: test/alavi/copy/run_test.exs "new/1"
-  @spec new([Meter.t()]) :: t()
-  def new(meters),
-    do: next_meter(%__MODULE__{meters: meters, phase: :done, stop: nil, fault: false})
+  @spec new([Meter.t()], [Fill.t()]) :: t()
+  def new(meters, fills \\ []),
+    do:
+      next_meter(%__MODULE__{
+        meters: meters,
+        fills: fills,
+        filled: [],
+        phase: :done,
+        stop: nil,
+        fault: false
+      })
+
+  # contract: test/alavi/copy_test.exs "fill"
+  @doc "The passes a visit makes of the meter that reported `serial`: its nightly stores, then the fills'."
+  @spec passes(t(), String.t()) :: [pass()]
+  def passes(%__MODULE__{fills: fills}, serial),
+    do:
+      Enum.map(Stores.all(), &{&1, :nightly}) ++
+        for(fill <- fills, store <- Fill.due(fill, serial), do: {store, fill})
+
+  # contract: test/alavi/copy_test.exs "fill"
+  @doc "The fill `id`'s copy of `serial`'s `store` has finished."
+  @spec filled(t(), String.t(), String.t(), Stores.store()) :: t()
+  def filled(%__MODULE__{} = run, id, serial, store),
+    do: %{run | filled: [{id, serial, store} | run.filled]}
 
   # contract: test/alavi/copy/run_test.exs "new/1"
   @doc "Stop at the next entry boundary; the first reason given stands."

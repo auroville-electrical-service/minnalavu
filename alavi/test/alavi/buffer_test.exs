@@ -8,6 +8,7 @@ defmodule Alavi.BufferTest do
     Buffer,
     Clock,
     ClockCheckFixture,
+    FillResult,
     FirmwareRead,
     LatencyDayFixture,
     MeterClockRead,
@@ -419,8 +420,8 @@ defmodule Alavi.BufferTest do
          "active_energy_import", "2026-11-01T00:00:00Z", [0x4700, 0x0000], {1, 25, -1}, "Wh", nil}
 
       paths =
-        for version <- 1..5 do
-          path = Path.join(dir, "0000000000000000000#{version + 4}.seg")
+        for version <- 1..6 do
+          path = Path.join(dir, "0000000000000000000#{version + 3}.seg")
           segment = <<"ALAVIBUF", version>> <> frame({<<version::128>>, {:unsynced, nil}})
           File.write!(path, segment <> frame([reading]))
           path
@@ -430,7 +431,7 @@ defmodule Alavi.BufferTest do
       assert_received {:buffer, buffer}
       assert log =~ "no valid header"
       assert Enum.all?(paths, &File.exists?(&1 <> ".discarded"))
-      assert %{discarded_files: 5, events: 3} = Buffer.backlog(buffer)
+      assert %{discarded_files: 6, events: 3} = Buffer.backlog(buffer)
     end
 
     test "a request id is kept with its reading and missed read, across a restart",
@@ -502,7 +503,7 @@ defmodule Alavi.BufferTest do
       assert Buffer.backlog(buffer).oldest == ~U[2026-11-01 00:00:04.000123Z]
     end
 
-    test "stored entries and meter-clock reads are kept, across a restart, the oldest by the collector's clock",
+    test "stored entries, meter-clock reads and fill results are kept, across a restart, the oldest by the collector's clock",
          %{tmp_dir: dir} do
       entry = %StoredEntry{
         endpoint: %{host: "127.0.0.1", port: 5020},
@@ -517,16 +518,32 @@ defmodule Alavi.BufferTest do
         register_key: "active_energy_import",
         value: Decimal.new("-0.0"),
         slot: 3,
-        copied_at: ~U[2026-11-14 02:00:01.5Z]
+        copied_at: ~U[2026-11-14 02:00:01.5Z],
+        request_id: nil
       }
+
+      id = "7d2c1f0e-4b3a-4c5d-8e6f-1a2b3c4d5e6f"
 
       history = %{
         entry
         | store: :history,
           interval_s: nil,
           value: Decimal.new("47208.1"),
-          slot: 1
+          slot: 1,
+          request_id: id
       }
+
+      gone = %FillResult{
+        request_id: id,
+        endpoint: %{host: "127.0.0.1", port: 5020},
+        unit_id: 1,
+        meter_serial: "SIM-1",
+        store: :history,
+        gone_before: ~N[2026-06-01 00:00:00],
+        finished_at: ~U[2026-11-14 02:00:03.5Z]
+      }
+
+      held = %{gone | store: :load_survey, gone_before: nil}
 
       clock = %MeterClockRead{
         endpoint: %{host: "127.0.0.1", port: 5020},
@@ -541,9 +558,11 @@ defmodule Alavi.BufferTest do
       buffer = start!(dir)
       :ok = Buffer.record(buffer, [entry, history])
       :ok = Buffer.record(buffer, [clock])
+      :ok = Buffer.record(buffer, [gone])
+      :ok = Buffer.record(buffer, [held])
       buffer = restart!(dir)
 
-      assert {:ok, %Batch{events: [^entry, ^history, ^clock]}} = Buffer.take(buffer)
+      assert {:ok, %Batch{events: [^entry, ^history, ^clock, ^gone, ^held]}} = Buffer.take(buffer)
       assert Buffer.backlog(buffer).oldest == ~U[2026-11-14 02:00:00.25Z]
     end
 

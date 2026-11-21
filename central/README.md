@@ -44,7 +44,9 @@ The directory is not named `minnalavu/`, since that is the repo itself.
   counted it, keyed on `(collector_id, endpoint_host, endpoint_port, unit_id,
   day, poller_started_at)`, so a restart's part of a day is a row of its own:
   the bucket version, retries, timeouts, the exact `max_ms` (NULL when nothing
-  answered) and `buckets`, every bucket's count. The views on it are under
+  answered) and `buckets`, every bucket's count, and the late replies:
+  `late_data` and `late_exceptions` (by code, `{"11": 2}`), both NULL for an
+  entry from a collector that does not count them. The views on it are under
   *Request latency* below.
   `stored_entries` (a hypertable on `meter_time`): each quantity of each
   history, snapshot and load-survey entry a collector copied from a meter,
@@ -285,6 +287,12 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
   day: meters, entries, answered, retries, timeouts, p50, p90, p99 and max.
   Only the lookback's days are read (by index on the day). No problem kind
   is raised on it.
+- `health.endpoint_timeouts`: the same rows with the endpoint's `timeout_ms`
+  now and its meters' late replies: `late_entries` of the entries counted
+  them, and `late_data` and `late_exceptions` summed over those (NULL when
+  none did). A late data reply is the sign to raise the timeout; a late
+  exception 11, that a dead meter costs retries. No problem kind is raised
+  on it.
 - `health.unregistered_serials`: serials with readings within the lookback
   that are not in the registry.
 - `health.unregistered_serial_places`: the same serials, one row per place

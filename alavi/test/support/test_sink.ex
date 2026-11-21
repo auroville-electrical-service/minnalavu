@@ -3,8 +3,8 @@ defmodule Alavi.TestSink do
   A sink that sends each call's events to a process: a meter's readings and
   missed reads as `{:recorded, events}`, a firmware read as `{:firmware, read}`,
   a poller's latency days as `{:latency, days}`, a meter-clock read as
-  `{:meter_clock, read}`, and one copied entry's stored entries as
-  `{:stored, entries}`.
+  `{:meter_clock, read}`, one copied entry's stored entries as
+  `{:stored, entries}`, and a fill's result as `{:fill_result, result}`.
   """
 
   @behaviour Alavi.Sink
@@ -22,6 +22,11 @@ defmodule Alavi.TestSink do
 
   def record(pid, [%Alavi.MeterClockRead{} = read]) do
     send(pid, {:meter_clock, read})
+    :ok
+  end
+
+  def record(pid, [%Alavi.FillResult{} = result]) do
+    send(pid, {:fill_result, result})
     :ok
   end
 

@@ -156,7 +156,12 @@ answers in each bucket in order, every bucket given: one per bound, and one
 for answers above the last. The answers are the sum of `buckets`; the store
 refuses an entry whose bucket count is not its version's, whose `max_ms` is
 not in its last counted bucket, whose retries outnumber its answers, or
-whose poller started after its date ended.
+whose poller started after its date ended. An entry may carry `late`: the
+replies from its unit that came too late for their request, after it had
+timed out or been retried, and were skipped as stale (Modbus TCP only): its
+`data` replies, and its `exceptions` by code in decimal (`{"11": 2}`). An
+entry without `late` comes from a collector that does not count them, which
+is not the same as none.
 Percentiles are the store's to compute, never sent. Ingest keys an entry on
 (collector, endpoint, `unit_id`, `date`, `poller_started_at`).
 
@@ -176,7 +181,16 @@ an item on (`meter_serial`, `store`, `register_key`, `meter_time`), never the
 slot. A batch may also carry `meter_clock_reads`: the meter's clock
 (`meter_time`, decoded under the profile version's `meter_clock`) and the
 collector's (`collector_at`), read at the start and end of each copy visit
-and once a day per meter. Offsets are the store's to compute.
+and once a day per meter. Offsets are the store's to compute. A batch may
+also carry `fill_results`: one item per meter and store a fill request
+named, once the collector has copied what the meter holds of the request's
+range (its entries go in `stored_entries`, with the request's `request_id`):
+the `request_id`, the meter as a stored entry names it, the `store`,
+`gone_before` (entries of the range stamped before it are no longer on the
+meter: the stamp of its oldest entry inside the range, the range's end when
+it holds none of it, null when it holds entries older than the range's
+start) and `finished_at`, the collector's clock. Ingest keys an item on
+(`request_id`, `meter_serial`, `store`).
 
 The backlog may carry `config`: the `digest` of the polling config the
 collector is applying, and the `refused_digest` of a served config it refused

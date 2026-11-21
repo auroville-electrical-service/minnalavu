@@ -4,8 +4,8 @@ defmodule Alavi.CopyTest do
   import Alavi.PollerCase
   import ExUnit.CaptureLog
 
-  alias Alavi.{Config, MeterClockRead, StoredEntry}
-  alias Alavi.Copy.Progress
+  alias Alavi.{Config, FillResult, MeterClockRead, Pollers, StoredEntry}
+  alias Alavi.Copy.{Fill, Progress}
   alias Alavi.Selectors.Store
   alias Simulator.Meter
 
@@ -62,18 +62,21 @@ defmodule Alavi.CopyTest do
     document = Map.put(document([endpoint(port, "tcp", units, changes)]), "copy_window", window())
     {:ok, config} = Config.parse(document, profiles())
 
-    start_supervised!(
-      {Alavi.Pollers,
-       [
-         config: config,
-         sink: Keyword.get(opts, :sink, {Alavi.TestSink, self()}),
-         clock: clock,
-         raw_log: raw_log(),
-         status: self(),
-         selectors_dir: ctx.tmp_dir
-       ]}
-    )
+    pollers =
+      start_supervised!(
+        {Alavi.Pollers,
+         [
+           config: config,
+           sink: Keyword.get(opts, :sink, {Alavi.TestSink, self()}),
+           clock: clock,
+           raw_log: raw_log(),
+           status: self(),
+           selectors_dir: ctx.tmp_dir,
+           recheck_ms: Keyword.get(opts, :recheck_ms, 60_000)
+         ]}
+      )
 
+    send(self(), {:pollers, pollers})
     {sim, %{host: "127.0.0.1", port: port}}
   end
 
@@ -99,6 +102,7 @@ defmodule Alavi.CopyTest do
     else
       receive do
         {:stored, entries} -> collect([{:stored, entries} | acc], opts)
+        {:fill_result, result} -> collect([{:fill_result, result} | acc], opts)
         {:meter_clock, read} -> collect([{:clock, read} | acc], opts)
         {:recorded, _events} when opts.rounds -> collect([:round | acc], opts)
         {:"$gen_cast", {:copy, _endpoint, {:finished, outcome}}} -> {outcome, Enum.reverse(acc)}
@@ -497,6 +501,119 @@ defmodule Alavi.CopyTest do
 
       assert length(Enum.uniq_by(history, &{&1.meter_time, &1.register_key})) == 6 * 8
       assert Store.owed(ctx.tmp_dir, endpoint) == :none
+    end
+  end
+
+  describe "fill" do
+    @a "7d2c1f0e-4b3a-4c5d-8e6f-1a2b3c4d5e6f"
+    @b "0b6f8d2e-5c1a-4e7b-9a3d-2f4c6e8a0b1c"
+
+    test "a fill copies its range of each store it names with its request id, outside the nightly " <>
+           "mark, which it leaves where it was, and says what of the range the meter no longer held",
+         ctx do
+      {agent, clock} = clock!()
+
+      {_sim, endpoint} =
+        start!(ctx, [meter_440()], [meter(1, "elite_440")], clock, recheck_ms: 50)
+
+      assert_received {:pollers, pollers}
+
+      {:done, first} = night!()
+
+      [newest, second_newest | _] =
+        histories = first |> stored(:history) |> stamps() |> Enum.reverse()
+
+      oldest = List.last(histories)
+      {:ok, progress} = copied(ctx, "SIM-1")
+
+      # The next night, before its window opens.
+      move!(agent, DateTime.add(@night, 86_400 - 7200))
+      expires = DateTime.add(@night, 3 * 86_400)
+      from_a = NaiveDateTime.add(oldest, -1, :day)
+      a = Fill.new(@a, ["SIM-1", "SIM-9"], [:history], from_a, second_newest, expires)
+      from_b = midnight(Date.add(today(), -3))
+      to_b = midnight(Date.add(today(), -1))
+      b = Fill.new(@b, ["SIM-1"], [:snapshot, :load_survey], from_b, to_b, expires)
+      assert Pollers.fill(pollers, {endpoint.host, endpoint.port}, a) == :ok
+      assert Pollers.fill(pollers, {endpoint.host, endpoint.port}, b) == :ok
+      move!(agent, DateTime.add(@night, 86_400))
+
+      {:done, second} = night!()
+      results = Enum.sort_by(for({:fill_result, r} <- second, do: r), & &1.store)
+
+      # Fill A: every history but the two newest; the meter holds none older than its oldest.
+      a_history = for %StoredEntry{request_id: @a} = e <- stored(second, :history), do: e
+      assert stamps(a_history) == histories |> Enum.drop(2) |> Enum.reverse()
+      refute newest in stamps(a_history)
+      assert keys(a_history) == Enum.sort(@e445)
+      assert stored(second, :history) == a_history
+
+      # Fill B: the two days before yesterday, whole; the snapshot holds only today's.
+      b_survey = for %StoredEntry{request_id: @b} = e <- stored(second, :load_survey), do: e
+      by_day = days(b_survey)
+
+      assert by_day |> Map.keys() |> Enum.map(&elem(&1, 0)) |> Enum.uniq() |> Enum.sort(Date) ==
+               [Date.add(today(), -3), Date.add(today(), -2)]
+
+      assert Enum.all?(by_day, fn {_day, intervals} -> length(intervals) == 48 end)
+      assert keys(b_survey) == Enum.sort(@survey_445)
+      assert for(%StoredEntry{request_id: @b} = e <- stored(second, :snapshot), do: e) == []
+
+      # Tonight's own copy of today's survey is nightly, untagged.
+      assert second
+             |> stored(:load_survey)
+             |> Enum.reject(&(&1.request_id == @b))
+             |> days()
+             |> Map.keys()
+             |> Enum.map(&elem(&1, 0))
+             |> Enum.uniq() == [today()]
+
+      assert [
+               %FillResult{
+                 request_id: @a,
+                 store: :history,
+                 meter_serial: "SIM-1",
+                 unit_id: 1,
+                 gone_before: ^oldest
+               },
+               %FillResult{request_id: @b, store: :load_survey, gone_before: nil},
+               %FillResult{request_id: @b, store: :snapshot, gone_before: ^to_b}
+             ] = results
+
+      assert copied(ctx, "SIM-1") == {:ok, progress}
+      assert Store.owed(ctx.tmp_dir, endpoint) == :none
+
+      # A third night: what the fills finished is not copied again.
+      move!(agent, DateTime.add(@night, 2 * 86_400))
+      {:done, third} = night!()
+      assert for({:fill_result, r} <- third, do: r) == []
+
+      assert Enum.all?(
+               for({:stored, entries} <- third, e <- entries, do: e.request_id),
+               &is_nil/1
+             )
+    end
+
+    test "only an endpoint that copies keeps a fill", ctx do
+      {_agent, clock} = clock!()
+
+      {_sim, endpoint} =
+        start!(ctx, [meter_440()], [meter(1, "elite_440")], clock, endpoint: %{"copy" => false})
+
+      assert_received {:pollers, pollers}
+
+      fill =
+        Fill.new(
+          @a,
+          ["SIM-1"],
+          [:history],
+          ~N[2026-01-01 00:00:00],
+          ~N[2026-02-01 00:00:00],
+          @night
+        )
+
+      assert Pollers.fill(pollers, {endpoint.host, endpoint.port}, fill) == {:error, :not_copied}
+      assert Pollers.fill(pollers, {endpoint.host, 1}, fill) == {:error, :unknown_endpoint}
     end
   end
 

@@ -164,7 +164,7 @@ defmodule Alavi.Poller.ScheduleTest do
   describe "next/4, with a copy queued" do
     test "a copy ranks below every other job: a round due, a round under way, a read on demand" do
       [m1, m2, _m3] = ms = meters()
-      copy = Job.copy(ms, 0)
+      copy = Job.copy(ms, [], 0)
       rod = elem(Job.read_on_demand(ms, [1], 0, {self(), make_ref()}), 1)
       round = [m1, m2] |> Job.poll_round(0) |> Job.polled([:read], {m1, seen(1), nil})
       later = ran(%{1 => 60_000, 2 => 60_000, 3 => 60_000})

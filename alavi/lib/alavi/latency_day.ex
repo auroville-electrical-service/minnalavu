@@ -4,7 +4,7 @@ defmodule Alavi.LatencyDay do
   `Alavi.Poller.Latency` counted it: sent when the date ends and when the
   poller stops. Counts only, never percentiles (the store computes those).
   `poller_started_at` sets apart a restart's part of a day from the part
-  before it.
+  before it. `late` counts the replies that came too late for their request.
   """
 
   alias Alavi.Poller.Latency
@@ -19,7 +19,8 @@ defmodule Alavi.LatencyDay do
     :retries,
     :timeouts,
     :max_ms,
-    :buckets
+    :buckets,
+    :late
   ]
   defstruct @enforce_keys
 
@@ -36,7 +37,8 @@ defmodule Alavi.LatencyDay do
           retries: non_neg_integer(),
           timeouts: non_neg_integer(),
           max_ms: non_neg_integer() | nil,
-          buckets: [non_neg_integer(), ...]
+          buckets: [non_neg_integer(), ...],
+          late: Latency.late()
         }
 
   @spec new(Reading.endpoint(), 1..247, DateTime.t(), Date.t(), Latency.counts()) :: t()
@@ -50,7 +52,8 @@ defmodule Alavi.LatencyDay do
       retries: counts.retries,
       timeouts: counts.timeouts,
       max_ms: counts.max,
-      buckets: counts.buckets
+      buckets: counts.buckets,
+      late: counts.late
     }
   end
 
@@ -72,7 +75,12 @@ defmodule Alavi.LatencyDay do
       "retries" => l.retries,
       "timeouts" => l.timeouts,
       "max_ms" => l.max_ms,
-      "buckets" => l.buckets
+      "buckets" => l.buckets,
+      "late" => %{
+        "data" => l.late.data,
+        "exceptions" =>
+          Map.new(l.late.exceptions, fn {code, n} -> {Integer.to_string(code), n} end)
+      }
     }
   end
 end

@@ -58,6 +58,63 @@ defmodule Alavi.Copy.Stores do
       else: {:found, found}
   end
 
+  # contract: test/alavi/copy/stores_test.exs "fill_scanned/5"
+  @doc """
+  A fill's scan newest first, with `stamp` read at `slot`: `:more` while each
+  entry may still reach the range starting at `from` (a load-survey day
+  until its end, any other entry at its stamp), and `:found` once one cannot.
+  """
+  @spec fill_scanned(
+          [{slot(), NaiveDateTime.t()}],
+          slot(),
+          NaiveDateTime.t(),
+          store(),
+          NaiveDateTime.t()
+        ) :: {:more | :found, [{slot(), NaiveDateTime.t()}]}
+  def fill_scanned(found, slot, stamp, store, from) do
+    if reaches?(store, stamp, from),
+      do: {:more, found ++ [{slot, stamp}]},
+      else: {:found, found}
+  end
+
+  defp reaches?(:load_survey, day, from),
+    do: NaiveDateTime.after?(NaiveDateTime.add(day, 1, :day), from)
+
+  defp reaches?(_store, stamp, from), do: not NaiveDateTime.before?(stamp, from)
+
+  # contract: test/alavi/copy/stores_test.exs "fill_scanned/5"
+  @doc "Of a fill's scan, the entries stamped before the range's end `to`."
+  @spec before([{slot(), NaiveDateTime.t()}], NaiveDateTime.t()) :: [{slot(), NaiveDateTime.t()}]
+  def before(found, to),
+    do: Enum.filter(found, fn {_slot, at} -> NaiveDateTime.before?(at, to) end)
+
+  # contract: test/alavi/copy/stores_test.exs "gone_before/4"
+  @doc """
+  What of the range `from`..`to` a meter no longer holds, from how its scan
+  ended: `:older` when it reached an entry that ends at or before `from`, so
+  nothing is gone (nil); `:exhausted` when it ran out of slots, so the oldest
+  entry `found` (newest first), or `to` when there is none or it is not
+  before `to`. An oldest entry at or before `from` leaves nothing gone either.
+  """
+  @spec gone_before(
+          :older | :exhausted,
+          [{slot(), NaiveDateTime.t()}],
+          NaiveDateTime.t(),
+          NaiveDateTime.t()
+        ) :: NaiveDateTime.t() | nil
+  def gone_before(:older, _found, _from, _to), do: nil
+  def gone_before(:exhausted, [], _from, to), do: to
+
+  def gone_before(:exhausted, found, from, to) do
+    {_slot, oldest} = List.last(found)
+
+    cond do
+      not NaiveDateTime.after?(oldest, from) -> nil
+      NaiveDateTime.before?(oldest, to) -> oldest
+      true -> to
+    end
+  end
+
   # contract: test/alavi/copy/stores_test.exs "due/2"
   @doc """
   The entries due, oldest first, from a scan's `found` (newest first): for

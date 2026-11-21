@@ -12,6 +12,7 @@ defmodule Alavi.Pollers do
   use Supervisor
 
   alias Alavi.{Config, ConfigKeeper, Poller, Sink}
+  alias Alavi.Copy.Fill
   alias Alavi.Poller.RawLog
   alias Alavi.Pollers.Applier
 
@@ -115,17 +116,33 @@ defmodule Alavi.Pollers do
              | {:unknown_units, [term()]}
              | :busy
              | :retiring}
-  def read_now(pollers, {host, port}, units, request_id \\ nil) do
+  def read_now(pollers, endpoint, units, request_id \\ nil),
+    do: on(pollers, endpoint, &Poller.read_now(&1, units, request_id))
+
+  # contract: test/alavi/copy_test.exs "fill"
+  @doc "`Alavi.Poller.fill/2` on the poller of the endpoint at `host` and `port`, as `read_now/4` finds it."
+  @spec fill(Supervisor.supervisor(), {String.t(), :inet.port_number()}, Fill.t()) ::
+          :ok
+          | {:error,
+             :unknown_endpoint
+             | :polled_by_other_system
+             | :restarting
+             | :poller_down
+             | :not_copied
+             | :retiring}
+  def fill(pollers, endpoint, %Fill{} = fill), do: on(pollers, endpoint, &Poller.fill(&1, fill))
+
+  defp on(pollers, {host, port}, call) do
     case List.keyfind(pollers(pollers), {Poller, host, port}, 0) do
-      {_id, pid} when is_pid(pid) -> call(pid, units, request_id)
+      {_id, pid} when is_pid(pid) -> called(pid, call)
       {_id, :undefined} -> {:error, :polled_by_other_system}
       {_id, :restarting} -> {:error, :restarting}
       nil -> {:error, :unknown_endpoint}
     end
   end
 
-  defp call(pid, units, request_id) do
-    Poller.read_now(pid, units, request_id)
+  defp called(pid, call) do
+    call.(pid)
   catch
     :exit, _reason -> {:error, :poller_down}
   end

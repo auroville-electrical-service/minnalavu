@@ -23,7 +23,7 @@ defmodule Alavi.Poller.Job do
   # contract: test/alavi/poller/job_test.exs "poll_round/2"
 
   alias Alavi.Config.Meter
-  alias Alavi.Copy.Run
+  alias Alavi.Copy.{Fill, Run}
   alias Alavi.{MissedRead, Reading}
   alias Alavi.Profile.Identity
 
@@ -93,9 +93,13 @@ defmodule Alavi.Poller.Job do
   end
 
   # contract: test/alavi/poller/job_test.exs "copy/2"
-  @doc "A copy of the stored entries of `meters`, started at `started` (monotonic milliseconds)."
-  @spec copy([Meter.t()], integer()) :: t()
-  def copy(meters, started), do: %{poll_round([], started) | kind: :copy, copy: Run.new(meters)}
+  @doc """
+  A copy of the stored entries of `meters`, and of what `fills` still owe,
+  started at `started` (monotonic milliseconds).
+  """
+  @spec copy([Meter.t()], [Fill.t()], integer()) :: t()
+  def copy(meters, fills, started),
+    do: %{poll_round([], started) | kind: :copy, copy: Run.new(meters, fills)}
 
   @doc "The copy's run after its step."
   @spec copied(t(), Run.t()) :: t()

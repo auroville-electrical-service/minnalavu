@@ -50,10 +50,66 @@ defmodule Alavi.IntakeTest do
                {:ok,
                 %Request{
                   id: @id,
+                  kind: :read_on_demand,
                   meters: ["A", "B"],
+                  fill: nil,
                   expires_at: ~U[2026-11-01 01:00:00Z],
                   ttl_ms: 3_600_000
                 }}
+    end
+
+    test "a fill: its stores in the order asked, and its range in the meters' clock" do
+      fill = %{
+        "kind" => "fill_copies",
+        "meters" => ["A"],
+        "stores" => ["load_survey", "history"],
+        "from" => "2026-10-01T00:00:00",
+        "to" => "2026-11-01T00:00:00"
+      }
+
+      assert Request.parse(job(fill)) ==
+               {:ok,
+                %Request{
+                  id: @id,
+                  kind: :fill_copies,
+                  meters: ["A"],
+                  fill: %{
+                    stores: [:load_survey, :history],
+                    from: ~N[2026-10-01 00:00:00],
+                    to: ~N[2026-11-01 00:00:00]
+                  },
+                  expires_at: ~U[2026-11-01 01:00:00Z],
+                  ttl_ms: 3_600_000
+                }}
+    end
+
+    test "a fill without distinct stores, or a range of meter times, is refused under its id" do
+      expires = ~U[2026-11-01 01:00:00Z]
+
+      fill = %{
+        "kind" => "fill_copies",
+        "stores" => ["history"],
+        "from" => "2026-10-01T00:00:00",
+        "to" => "2026-11-01T00:00:00"
+      }
+
+      for changes <- [
+            %{"stores" => []},
+            %{"stores" => ["history", "history"]},
+            %{"stores" => ["event_log"]},
+            %{"stores" => "history"},
+            %{"from" => "2026-10-01T00:00:00Z"},
+            %{"from" => "2026-10-01T00:00:00+05:30"},
+            %{"from" => "2026-10-01"},
+            %{"from" => "2026-10-01T00:00:00.5"},
+            %{"to" => nil},
+            %{"to" => "2026-10-01T00:00:00"},
+            %{"to" => "2026-09-30T23:59:59"}
+          ] do
+        assert {:refuse, @id, ^expires, _why} = Request.parse(job(Map.merge(fill, changes)))
+      end
+
+      assert {:refuse, @id, ^expires, _why} = Request.parse(job(Map.delete(fill, "stores")))
     end
 
     test "another kind, or meters that are not distinct serials, is refused under its id" do

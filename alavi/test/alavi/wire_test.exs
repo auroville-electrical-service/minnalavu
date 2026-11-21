@@ -3,7 +3,7 @@ defmodule Alavi.WireTest do
 
   alias Alavi.Buffer.Batch
   alias Alavi.{Clock, ClockCheck, ClockCheckFixture, FirmwareRead, LatencyDay, LatencyDayFixture}
-  alias Alavi.{MeterClockRead, MissedRead, Reading, StoredEntry, Wire}
+  alias Alavi.{FillResult, MeterClockRead, MissedRead, Reading, StoredEntry, Wire}
 
   doctest Alavi.Clock
   doctest Alavi.Wire
@@ -117,7 +117,8 @@ defmodule Alavi.WireTest do
         register_key: "active_energy_import",
         value: Decimal.new("47208.1"),
         slot: 1,
-        copied_at: ~U[2026-11-14 02:00:01.5Z]
+        copied_at: ~U[2026-11-14 02:00:01.5Z],
+        request_id: nil
       }
 
       survey = %{
@@ -152,6 +153,7 @@ defmodule Alavi.WireTest do
              ] = wire["stored_entries"]
 
       refute Map.has_key?(h, "interval_s")
+      refute Enum.any?(wire["stored_entries"], &Map.has_key?(&1, "request_id"))
 
       assert wire["meter_clock_reads"] == [
                %{
@@ -167,6 +169,66 @@ defmodule Alavi.WireTest do
 
       refute Map.has_key?(wire([reading()]), "stored_entries")
       refute Map.has_key?(wire([reading()]), "meter_clock_reads")
+    end
+
+    test "a fill's entries carry its request id, and its results go in fill_results, valid in the schema; none, and none is sent" do
+      id = "7d2c1f0e-4b3a-4c5d-8e6f-1a2b3c4d5e6f"
+
+      entry = %StoredEntry{
+        endpoint: @endpoint,
+        unit_id: 9,
+        meter_serial: "SIM-9",
+        product_code: "ELITE440-445",
+        profile: "elite_440",
+        profile_version: 2,
+        store: :history,
+        meter_time: ~N[2026-10-01 00:00:00],
+        interval_s: nil,
+        register_key: "active_energy_import",
+        value: Decimal.new("47208.1"),
+        slot: 2,
+        copied_at: ~U[2026-11-14 02:00:01.5Z],
+        request_id: id
+      }
+
+      gone = %FillResult{
+        request_id: id,
+        endpoint: @endpoint,
+        unit_id: 9,
+        meter_serial: "SIM-9",
+        store: :load_survey,
+        gone_before: ~N[2026-10-17 00:00:00],
+        finished_at: ~U[2026-11-14 02:10:00.25Z]
+      }
+
+      held = %{gone | store: :history, gone_before: nil}
+
+      wire = wire([reading(), entry, gone, held])
+      assert valid?(wire)
+      assert [%{"request_id" => ^id}] = wire["stored_entries"]
+
+      assert wire["fill_results"] == [
+               %{
+                 "request_id" => id,
+                 "endpoint" => %{"host" => "10.0.0.21", "port" => 502},
+                 "unit_id" => 9,
+                 "meter_serial" => "SIM-9",
+                 "store" => "load_survey",
+                 "gone_before" => "2026-10-17T00:00:00",
+                 "finished_at" => "2026-11-14T02:10:00.25Z"
+               },
+               %{
+                 "request_id" => id,
+                 "endpoint" => %{"host" => "10.0.0.21", "port" => 502},
+                 "unit_id" => 9,
+                 "meter_serial" => "SIM-9",
+                 "store" => "history",
+                 "gone_before" => nil,
+                 "finished_at" => "2026-11-14T02:10:00.25Z"
+               }
+             ]
+
+      refute Map.has_key?(wire([reading()]), "fill_results")
     end
 
     test "a heartbeat, a batch with no events, still carries the clock and backlog" do
@@ -321,13 +383,15 @@ defmodule Alavi.WireTest do
                "retries" => 1,
                "timeouts" => 1,
                "max_ms" => 75_000,
-               "buckets" => buckets
+               "buckets" => buckets,
+               "late" => %{"data" => 2, "exceptions" => %{"11" => 1}}
              }
     end
 
     test "a day of timeouts only has a null max and every bucket empty" do
       wire = LatencyDay.to_wire(LatencyDayFixture.timeouts_only())
       assert %{"max_ms" => nil, "timeouts" => 1, "retries" => 0} = wire
+      assert wire["late"] == %{"data" => 0, "exceptions" => %{}}
       assert wire["buckets"] == List.duplicate(0, 44)
     end
 

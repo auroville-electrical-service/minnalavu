@@ -5,7 +5,8 @@ defmodule Alavi.StoredEntry do
   meter's own stamp, `meter_time`, never `slot`, the selector value it was
   read at. `value` is decoded under `profile` at `profile_version`, whose
   stored section gives `register_key` its unit and kind; `interval_s` is a
-  load-survey entry's length, nil on any other.
+  load-survey entry's length, nil on any other. `request_id` names the fill
+  request it was copied for, nil for a nightly copy.
   """
 
   alias Alavi.{Profile, Reading}
@@ -23,7 +24,8 @@ defmodule Alavi.StoredEntry do
     :register_key,
     :value,
     :slot,
-    :copied_at
+    :copied_at,
+    :request_id
   ]
   defstruct @enforce_keys
 
@@ -43,7 +45,8 @@ defmodule Alavi.StoredEntry do
           register_key: String.t(),
           value: Decimal.t(),
           slot: 0..0xFFFF,
-          copied_at: DateTime.t()
+          copied_at: DateTime.t(),
+          request_id: String.t() | nil
         }
 
   # contract: test/alavi/wire_test.exs "batch/4"
@@ -64,8 +67,12 @@ defmodule Alavi.StoredEntry do
       "copied_at" => DateTime.to_iso8601(e.copied_at)
     }
     |> interval(e.interval_s)
+    |> request(e.request_id)
   end
 
   defp interval(wire, nil), do: wire
   defp interval(wire, seconds), do: Map.put(wire, "interval_s", seconds)
+
+  defp request(wire, nil), do: wire
+  defp request(wire, id), do: Map.put(wire, "request_id", id)
 end

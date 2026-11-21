@@ -19,7 +19,9 @@ defmodule Alavi.Poller.Latency do
   An answer is a sample: a reply with words, or a meter's own exception. A
   timeout is censored, so counted and never a sample; so is exception 0B, the
   gateway's word that the meter did not answer in time. Anything else (0A,
-  a closed socket, a reply that could not be parsed) is neither.
+  a closed socket, a reply that could not be parsed) is neither. A reply that
+  came too late for its request, skipped as stale, is counted apart
+  (`late/3`): its data, or its exception by code.
   """
 
   alias Alavi.Modbus.Client
@@ -35,8 +37,12 @@ defmodule Alavi.Poller.Latency do
           retries: non_neg_integer(),
           timeouts: non_neg_integer(),
           max: non_neg_integer() | nil,
-          buckets: %{bucket() => pos_integer()}
+          buckets: %{bucket() => pos_integer()},
+          late: late()
         }
+
+  @typedoc "Late replies: data replies, and exception replies by code."
+  @type late :: %{data: non_neg_integer(), exceptions: %{(1..255) => pos_integer()}}
 
   @typedoc "Newest day first; each day is at most #{@days - 1} days older than the newest."
   @type t :: %__MODULE__{days: [{Date.t(), day()}]}
@@ -64,7 +70,8 @@ defmodule Alavi.Poller.Latency do
           retries: non_neg_integer(),
           timeouts: non_neg_integer(),
           max: non_neg_integer() | nil,
-          buckets: [non_neg_integer(), ...]
+          buckets: [non_neg_integer(), ...],
+          late: late()
         }
 
   @spec new() :: t()
@@ -91,7 +98,8 @@ defmodule Alavi.Poller.Latency do
           retries: day.retries,
           timeouts: day.timeouts,
           max: day.max,
-          buckets: Enum.map(0..@over, &Map.get(day.buckets, &1, 0))
+          buckets: Enum.map(0..@over, &Map.get(day.buckets, &1, 0)),
+          late: day.late
         }
     end
   end
@@ -109,6 +117,16 @@ defmodule Alavi.Poller.Latency do
       :neither -> latency
     end
   end
+
+  # contract: test/alavi/poller/latency_test.exs "late/3"
+  @doc "A reply that came too late for its request on `date`: data, or an exception with its code."
+  @spec late(t(), Date.t(), :data | {:exception, 1..255}) :: t()
+  def late(%__MODULE__{} = latency, date, kind), do: on(latency, date, &late_one(&1, kind))
+
+  defp late_one(%{late: late} = day, :data), do: %{day | late: %{late | data: late.data + 1}}
+
+  defp late_one(%{late: late} = day, {:exception, code}),
+    do: %{day | late: %{late | exceptions: Map.update(late.exceptions, code, 1, &(&1 + 1))}}
 
   # contract: test/alavi/poller/latency_test.exs "summary/1"
   @doc "Over every day kept; nil before anything was recorded."
@@ -130,7 +148,7 @@ defmodule Alavi.Poller.Latency do
   def line(%__MODULE__{days: days}, date) do
     case List.keyfind(days, date, 0) do
       nil -> nil
-      {^date, day} -> format(summarised(day, date), day.buckets)
+      {^date, day} -> format(summarised(day, date), day.buckets) <> late_line(day.late)
     end
   end
 
@@ -152,7 +170,15 @@ defmodule Alavi.Poller.Latency do
 
   defp kept?({date, _day}, newest), do: Date.diff(newest, date) < @days
 
-  defp empty, do: %{answered: 0, retries: 0, timeouts: 0, max: nil, buckets: %{}}
+  defp empty,
+    do: %{
+      answered: 0,
+      retries: 0,
+      timeouts: 0,
+      max: nil,
+      buckets: %{},
+      late: %{data: 0, exceptions: %{}}
+    }
 
   defp answered(day, attempt, ms) do
     %{
@@ -172,7 +198,11 @@ defmodule Alavi.Poller.Latency do
       retries: a.retries + b.retries,
       timeouts: a.timeouts + b.timeouts,
       max: larger(a.max, b.max),
-      buckets: Map.merge(a.buckets, b.buckets, fn _bucket, m, n -> m + n end)
+      buckets: Map.merge(a.buckets, b.buckets, fn _bucket, m, n -> m + n end),
+      late: %{
+        data: a.late.data + b.late.data,
+        exceptions: Map.merge(a.late.exceptions, b.late.exceptions, fn _code, m, n -> m + n end)
+      }
     }
   end
 
@@ -216,6 +246,15 @@ defmodule Alavi.Poller.Latency do
     "#{s.since} UTC: #{s.answered} answered (#{s.retries} on a retry), " <>
       "#{s.timeouts} timed out; p50 #{ms(s.p50)}, p90 #{ms(s.p90)}, p99 #{ms(s.p99)}, " <>
       "max #{ms(s.max)}; buckets #{buckets(buckets)}"
+  end
+
+  defp late_line(%{data: data, exceptions: exceptions}) do
+    by_code =
+      exceptions
+      |> Enum.sort()
+      |> Enum.map_join("", fn {code, n} -> ", exception #{code}:#{n}" end)
+
+    "; late #{data} data#{by_code}"
   end
 
   defp ms(nil), do: "none"

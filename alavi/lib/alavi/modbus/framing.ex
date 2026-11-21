@@ -20,6 +20,8 @@ defmodule Alavi.Modbus.Framing do
           function_code: 3 | 4 | Selector.function_code()
         }
   @type skipped :: :stale | :noise | :bad_crc
+  @typedoc "A stale reply's unit, and whether it carried data or an exception, with its code."
+  @type late :: {unit_id(), :data | {:exception, 1..255}}
 
   # contract: test/alavi/modbus/framing_test.exs "encode/4"
   @spec encode(t(), transaction_id(), unit_id(), PDU.t()) :: binary()
@@ -129,6 +131,25 @@ defmodule Alavi.Modbus.Framing do
     do: {:error, :unexpected_response}
 
   defp tcp_reply(_frame, rest, _expected), do: {:skip, :stale, rest}
+
+  # contract: test/alavi/modbus/framing_test.exs "stale_reply/1"
+  @doc """
+  Whom a stale TCP frame, skipped whole, came from: a read's data, or an
+  exception with its code. nil for bytes that are not one such frame.
+  """
+  @spec stale_reply(binary()) :: late() | nil
+  def stale_reply(bytes) do
+    case decode_response(:tcp, bytes) do
+      {:ok, %{unit_id: unit, pdu: <<fc, _::binary>>}, <<>>} when fc in [0x03, 0x04] ->
+        {unit, :data}
+
+      {:ok, %{unit_id: unit, pdu: <<fc, code>>}, <<>>} when fc in [0x83, 0x84] and code > 0 ->
+        {unit, {:exception, code}}
+
+      _other ->
+        nil
+    end
+  end
 
   defp take_rtu(buffer, body_len) do
     with <<body::binary-size(^body_len), crc::little-16, tail::binary>> <- buffer,

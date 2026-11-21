@@ -35,15 +35,18 @@ defmodule Alavi.Modbus.Client do
   @typedoc """
   Bytes from the endpoint that were not a usable reply, during a request to
   `unit_id`. `:skipped` is what was dropped ahead of the reply (or of the
-  timeout, if none came); `:rejected` is what was in hand when the request failed
-  on it. `bytes` is not capped here; capping what is logged is the caller's.
+  timeout, if none came), with `late`, the stale replies among it
+  (`Alavi.Modbus.Framing.stale_reply/1`); `:rejected` is what was in hand when
+  the request failed on it. `bytes` is not capped here; capping what is logged
+  is the caller's.
   """
   @type anomaly ::
           %{
             kind: :skipped,
             unit_id: 1..247,
             reasons: [Framing.skipped(), ...],
-            bytes: binary()
+            bytes: binary(),
+            late: [Framing.late()]
           }
           | %{kind: :rejected, unit_id: 1..247, reason: error() | :echo_mismatch, bytes: binary()}
 
@@ -242,15 +245,28 @@ defmodule Alavi.Modbus.Client do
     end
   end
 
-  defp skip(nil, why, dropped), do: %{reasons: [why], bytes: dropped}
+  defp skip(nil, why, dropped), do: %{reasons: [why], bytes: dropped, late: late(why, dropped)}
 
-  defp skip(%{reasons: reasons, bytes: bytes}, why, dropped),
-    do: %{reasons: Enum.uniq(reasons ++ [why]), bytes: bytes <> dropped}
+  defp skip(%{reasons: reasons, bytes: bytes, late: late}, why, dropped),
+    do: %{
+      reasons: Enum.uniq(reasons ++ [why]),
+      bytes: bytes <> dropped,
+      late: late ++ late(why, dropped)
+    }
+
+  defp late(:stale, dropped) do
+    case Framing.stale_reply(dropped) do
+      nil -> []
+      reply -> [reply]
+    end
+  end
+
+  defp late(_why, _dropped), do: []
 
   defp noted(client, _expected, nil), do: client
 
-  defp noted(client, %{unit_id: unit_id}, %{reasons: reasons, bytes: bytes}),
-    do: note(client, %{kind: :skipped, unit_id: unit_id, reasons: reasons, bytes: bytes})
+  defp noted(client, %{unit_id: unit_id}, skipped),
+    do: note(client, Map.merge(%{kind: :skipped, unit_id: unit_id}, skipped))
 
   defp rejected(client, unit_id, reason, bytes),
     do: note(client, %{kind: :rejected, unit_id: unit_id, reason: reason, bytes: bytes})

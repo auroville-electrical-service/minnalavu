@@ -499,7 +499,7 @@ defmodule Alavi.EndToEndTest do
       rows!("""
       SELECT endpoint_host, endpoint_port, unit_id, day::text AS day,
              (poller_started_at AT TIME ZONE 'UTC')::text AS started, buckets_version, retries,
-             timeouts, max_ms, buckets
+             timeouts, max_ms, buckets, late_data, late_exceptions
       FROM store.latency_days WHERE collector_id = '#{id}'
       """)
     end
@@ -517,7 +517,9 @@ defmodule Alavi.EndToEndTest do
                "retries" => 0,
                "timeouts" => 0,
                "max_ms" => max,
-               "buckets" => buckets
+               "buckets" => buckets,
+               "late_data" => 0,
+               "late_exceptions" => %{}
              }
            ] = days.()
 
@@ -539,6 +541,34 @@ defmodule Alavi.EndToEndTest do
              SELECT answered, p50_ms, p90_ms, p99_ms, max_ms
              FROM store.latency_meter_days WHERE collector_id = '#{id}'
              """)
+  end
+
+  test "replies that come after their request timed out are counted late, and stored with the day",
+       ctx do
+    {id, token} = new_collector!()
+    {sim, port} = start_sim!(:tcp)
+    Simulator.faults(sim, delay_ms: 150)
+    :ok = Simulator.identify(sim, 1, :serial, String.upcase(id))
+    {:ok, clock} = Agent.start_link(fn -> ~U[2026-11-13 23:59:59Z] end)
+
+    endpoints = [
+      endpoint(port, "tcp", [meter(1, "elite_440")], %{"interval_ms" => 5, "timeout_ms" => 100})
+    ]
+
+    start_collector!(ctx.tmp_dir, endpoints, token, [], fn -> Agent.get(clock, & &1) end)
+    Process.sleep(1_500)
+    Agent.update(clock, fn _ -> ~U[2026-11-14 00:00:01Z] end)
+
+    late = fn ->
+      rows!("""
+      SELECT timeouts, late_data, late_exceptions
+      FROM store.latency_days WHERE collector_id = '#{id}' AND day = '2026-11-13'
+      """)
+    end
+
+    await!("the day's latency stored", fn -> late.() != [] end)
+    assert [%{"timeouts" => timeouts, "late_data" => data, "late_exceptions" => %{}}] = late.()
+    assert timeouts > 0 and data > 0
   end
 
   test "a registry change is fetched, saved and reported; one the collector cannot parse is refused, raised in health",
@@ -994,6 +1024,152 @@ defmodule Alavi.EndToEndTest do
 
     assert %{"inserted" => ^rows, "duplicate" => 0, "conflicting" => 0, "clocks" => 6} =
              upload_totals!(id)
+  end
+
+  # The poller of the endpoint at `port`, as `Alavi.Pollers` runs it.
+  defp poller!(port) do
+    [pid] =
+      for {{Alavi.Poller, _host, ^port}, pid, _type, _modules} <-
+            Supervisor.which_children(Alavi.Pollers),
+          do: pid
+
+    pid
+  end
+
+  test "a fill made through admin.request_fill is copied in the next copy window and answered: " <>
+         "its entries linked, and what of its range the meter no longer held",
+       ctx do
+    {id, token} = new_collector!()
+    s440 = serial()
+    m440 = copying_meter(1, "elite_440", [])
+    {_sim, port, start} = start_copy_chain!([{m440, s440}])
+
+    sql!("""
+    SELECT to_json(admin.register_endpoint(
+      endpoint_id => '#{id}_ep', valid_from => '2026-01-01Z', collector_id => '#{id}',
+      host => '127.0.0.1', port => #{port}, framing => 'tcp', polled_by_other_system => false,
+      timeout_ms => 100, max_timeouts => 3, retries => 2, busy_backoff_ms => 10,
+      reconnect_backoff_min_ms => 10, reconnect_backoff_max_ms => 40, interval_ms => 1500,
+      retry_ms => 60000, copy => true))
+    """)
+
+    register_target!(id, "ep", 1, "elite_440")
+
+    sql!("""
+    SELECT to_json(admin.register_meter(serial => '#{s440}', valid_from => '2026-01-01Z',
+      endpoint_id => '#{id}_ep', unit_id => 1))
+    """)
+
+    units = [meter(1, "elite_440", %{"serial" => s440})]
+    endpoint = endpoint(port, "tcp", units, %{"copy" => true, "interval_ms" => 1_500})
+    {shift, clock} = shifted_clock!()
+    start_copying!(ctx.tmp_dir, endpoint, token, clock, pollers: Alavi.Pollers)
+
+    copy_ended!(port, :done)
+    await!("the buffer emptied", fn -> Buffer.backlog(Buffer).events == 0 end)
+
+    # The range, in the meter's clock: from before its oldest history to its second
+    # newest, and of its load survey one whole day.
+    held = held(m440, start)
+    at = fn {_store, _key, at} -> NaiveDateTime.from_iso8601!(at) end
+    of = fn store -> held |> Map.keys() |> Enum.filter(&(elem(&1, 0) == store)) end
+    histories = "history" |> of.() |> Enum.map(at) |> Enum.uniq() |> Enum.sort(NaiveDateTime)
+    [oldest | _] = histories
+    to = Enum.at(histories, -2)
+    from = NaiveDateTime.add(oldest, -1, :day)
+
+    days =
+      "load_survey"
+      |> of.()
+      |> Enum.map(&NaiveDateTime.to_date(at.(&1)))
+      |> Enum.uniq()
+      |> Enum.sort(Date)
+
+    day = NaiveDateTime.new!(Enum.at(days, -3), ~T[00:00:00])
+
+    # Requested once the window has closed, and carried by the next night's copy. A fill
+    # expires by the collector's clock, which the test moves a day on: three days, not one.
+    shift!(shift, 86_400 - 7_200)
+
+    request =
+      sql!("""
+      SELECT to_json(admin.request_fill(collector_id => '#{id}', meters => ARRAY['#{s440}'],
+        stores => ARRAY['history'], from_time => '#{from}', to_time => '#{to}',
+        requester => 'operator', expires_after => '3 days'))
+      """)
+
+    survey =
+      sql!("""
+      SELECT to_json(admin.request_fill(collector_id => '#{id}', meters => ARRAY['#{s440}'],
+        stores => ARRAY['load_survey'], from_time => '#{day}',
+        to_time => '#{NaiveDateTime.add(day, 1, :day)}', requester => 'operator',
+        expires_after => '3 days'))
+      """)
+
+    await!("both fills kept by the poller", fn ->
+      map_size(:sys.get_state(poller!(port)).fills) == 2
+    end)
+
+    shift!(shift, 86_400)
+    copy_ended!(port, :done)
+
+    status = fn r ->
+      [row] =
+        rows!("""
+        SELECT state::text AS state, stored_entries, fill_results
+        FROM jobs.request_status WHERE request_id = '#{r}'
+        """)
+
+      row
+    end
+
+    await!("both fills answered", fn ->
+      status.(request)["state"] == "answered" and status.(survey)["state"] == "answered"
+    end)
+
+    results =
+      rows!("""
+      SELECT request_id::text AS request_id, store::text AS store, gone_before::text AS gone_before,
+             meter_serial
+      FROM jobs.request_fill_results WHERE request_id IN ('#{request}', '#{survey}')
+      ORDER BY store
+      """)
+
+    assert results == [
+             %{
+               "request_id" => request,
+               "store" => "history",
+               "gone_before" => NaiveDateTime.to_string(oldest),
+               "meter_serial" => s440
+             },
+             %{
+               "request_id" => survey,
+               "store" => "load_survey",
+               "gone_before" => nil,
+               "meter_serial" => s440
+             }
+           ]
+
+    linked = fn r ->
+      rows!("""
+      SELECT store::text AS store, register_key, meter_time::text AS at
+      FROM jobs.request_stored_entries WHERE request_id = '#{r}'
+      """)
+      |> MapSet.new(&{&1["store"], &1["register_key"], &1["at"]})
+    end
+
+    in_range = fn store, from, to ->
+      store
+      |> of.()
+      |> Enum.filter(
+        &(not NaiveDateTime.before?(at.(&1), from) and NaiveDateTime.before?(at.(&1), to))
+      )
+      |> MapSet.new()
+    end
+
+    assert linked.(request) == in_range.("history", from, to)
+    assert linked.(survey) == in_range.("load_survey", day, NaiveDateTime.add(day, 1, :day))
+    assert status.(request)["stored_entries"] == MapSet.size(in_range.("history", from, to))
   end
 
   defp post!(target, batch) do

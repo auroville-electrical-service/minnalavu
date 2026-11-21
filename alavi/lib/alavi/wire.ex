@@ -9,6 +9,7 @@ defmodule Alavi.Wire do
     Clock,
     ClockCheck,
     ConfigKeeper,
+    FillResult,
     FirmwareRead,
     LatencyDay,
     MeterClockRead,
@@ -22,7 +23,7 @@ defmodule Alavi.Wire do
   # contract: test/alavi/wire_test.exs "batch/4"
   @doc """
   `sent_at` is the collector's clock. `firmware_reads`, `clock_checks`,
-  `latency`, `stored_entries` and `meter_clock_reads` only when the batch
+  `latency`, `stored_entries`, `meter_clock_reads` and `fill_results` only when the batch
   holds any; the backlog's `config` only from a
   collector that fetches its config, `:none` otherwise.
   """
@@ -45,6 +46,7 @@ defmodule Alavi.Wire do
     |> optional("latency", wire(events, LatencyDay))
     |> optional("stored_entries", wire(events, StoredEntry))
     |> optional("meter_clock_reads", wire(events, MeterClockRead))
+    |> optional("fill_results", wire(events, FillResult))
   end
 
   defp wire(events, kind), do: events |> Map.get(kind, []) |> Enum.map(&kind.to_wire/1)
