@@ -5,6 +5,7 @@
 -- inserted directly, batches received relative to now().
 
 \ir lib/assert.sql
+\ir lib/problems.sql
 
 BEGIN;
 
@@ -152,6 +153,8 @@ SELECT pg_temp.is(
   'active_energy_import 29 kWh at 2026-11-01 00:15:00+00 (sqle_b, clock unsynced, unchecked) '
   || 'after 30 kWh at 2026-11-01 00:00:00+00 (sqle_a, clock ntp, checked)',
   'a drop''s problem names both readings, their collectors and clock signals');
+SELECT pg_temp.is(pg_temp.keys('energy_backwards', 'SQLE-HALF'), '-/-/-:-/-/SQLE-HALF',
+  'a drop''s problem, over readings from any collector, names only the meter');
 
 SELECT pg_temp.is(
   (SELECT detail FROM health.problems WHERE kind = 'energy_backwards' AND subject = 'SQLE-SUSPECT'),

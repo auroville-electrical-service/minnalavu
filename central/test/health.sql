@@ -4,6 +4,7 @@
 -- since api.ingest stamps everything with the time of the call.
 
 \ir lib/assert.sql
+\ir lib/problems.sql
 
 BEGIN;
 
@@ -195,6 +196,30 @@ SELECT pg_temp.is(
   || 'unregistered_serial SQLH-TWIN; unregistered_serial SQLS-A; unregistered_serial SQLS-B',
   'exactly the problems there are are flagged');
 
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s %s: %s', kind, subject, pg_temp.keys(kind, subject)), '; '
+                     ORDER BY kind, subject)
+   FROM health.problems),
+  'backlog_discarded sqlh_d: sqlh_d/-/-:-/-/-; backlog_near_capacity sqlh_a: sqlh_a/-/-:-/-/-; '
+  || 'backlog_quarantined sqlh_a: sqlh_a/-/-:-/-/-; backlog_refused sqlh_d: sqlh_d/-/-:-/-/-; '
+  || 'collector_silent sqlh_b: sqlh_b/-/-:-/-/-; '
+  || 'endpoint_errors sqlh_a_ep: sqlh_a/sqlh_a_ep/10.0.0.1:502/-/-; '
+  || 'misplaced_serial SQLH-0003: -/-/-:-/-/SQLH-0003; '
+  || 'misplaced_serial SQLH-0007: -/-/-:-/-/SQLH-0007; '
+  || 'serial_at_several_places SQLH-TWIN: -/-/-:-/-/SQLH-TWIN; '
+  || 'several_serials_at_place 10.0.0.1:502 unit 12 via sqlh_a: sqlh_a/-/10.0.0.1:502/12/-; '
+  || 'several_serials_at_place 10.0.0.1:502 unit 2 via sqlh_a: sqlh_a/-/10.0.0.1:502/2/-; '
+  || 'several_serials_at_place 10.0.0.1:502 unit 9 via sqlh_a: sqlh_a/-/10.0.0.1:502/9/-; '
+  || 'target_never_read sqlh_d_ep unit 13: sqlh_d/sqlh_d_ep/10.0.0.1:502/13/-; '
+  || 'target_never_read sqlh_d_ep unit 14: sqlh_d/sqlh_d_ep/10.0.0.1:502/14/-; '
+  || 'target_never_read sqlh_d_ep unit 15: sqlh_d/sqlh_d_ep/10.0.0.1:502/15/SQLT-0001; '
+  || 'target_never_read sqlh_m_ep unit 2: sqlh_d/sqlh_m_ep/10.0.0.3:502/2/-; '
+  || 'target_silent sqlh_a_ep unit 2: sqlh_a/sqlh_a_ep/10.0.0.1:502/2/SQLH-0002; '
+  || 'unregistered_serial SQLH-STRAY: -/-/-:-/-/SQLH-STRAY; '
+  || 'unregistered_serial SQLH-TWIN: -/-/-:-/-/SQLH-TWIN; '
+  || 'unregistered_serial SQLS-A: -/-/-:-/-/SQLS-A; unregistered_serial SQLS-B: -/-/-:-/-/SQLS-B',
+  'each problem names what it is about in its key columns');
+
 SAVEPOINT swapped;
 -- Another serial answering at SQLH-0002's unit, as an unrecorded swap would.
 SELECT pg_temp.reading('SQLH-SWAPPED', (SELECT batch FROM b WHERE collector = 'sqlh_a'),
@@ -210,6 +235,8 @@ SELECT pg_temp.is(
   format('no reading since %s (expected every 00:15:00), on sqlh_a_ep unit 2, collector sqlh_a',
          now() - interval '2 hours'),
   'a silent meter''s problem says since when, how often it is due, and where it is');
+SELECT pg_temp.is(pg_temp.keys('meter_silent', 'SQLH-0002'),
+  'sqlh_a/sqlh_a_ep/10.0.0.1:502/2/SQLH-0002', 'a silent meter''s problem names it and its target');
 ROLLBACK TO SAVEPOINT swapped;
 
 SELECT pg_temp.is(
@@ -620,6 +647,9 @@ SELECT pg_temp.is(
          || 'at 10.0.0.1:502 unit 25 via sqlh_a',
          now() - interval '3 days', now() - interval '10 minutes'),
   'a firmware change''s problem says the names before and after, when each was read, and where');
+SELECT pg_temp.is(pg_temp.keys('firmware_changed', 'SQLF-0005'),
+  'sqlh_a/-/10.0.0.1:502/25/SQLF-0005',
+  'a firmware change''s problem names the meter and the place it was read at');
 
 -- Copies, on collector sqlh_e (last upload 5 minutes ago) and sqlh_f (last
 -- upload 20 hours ago), at 10.0.0.5:502. Each meter's clock is set by the
@@ -776,6 +806,8 @@ SELECT pg_temp.is(
          || '%s from UTC at %s; at sqlc_on:502 unit 1 via sqlh_e',
          '2026-06-15 12:00'::timestamp - (now() AT TIME ZONE 'UTC'), now() - interval '1 hour'),
   'a missed snapshot''s problem says the meter days, the meter''s clock as read, and where');
+SELECT pg_temp.is(pg_temp.keys('snapshot_missed', 'SQLC-0001'),
+  'sqlh_e/sqlc_on/sqlc_on:502/1/SQLC-0001', 'a missed snapshot''s problem names the meter and its target');
 
 SELECT pg_temp.is(
   (SELECT string_agg(format('%s %s %s', serial, store, coalesce(newest_entry::text, '-')), ', '
@@ -803,6 +835,8 @@ SELECT pg_temp.is(
          '2026-06-15 11:55'::timestamp),
   'a store behind says its newest entry, the threshold, the meter''s clock at the last upload, '
   || 'and where');
+SELECT pg_temp.is(pg_temp.keys('copy_behind', 'SQLC-5001 history'),
+  'sqlh_e/sqlc_on/sqlc_on:502/7/SQLC-5001', 'a store behind names its meter and target');
 
 SAVEPOINT caught_up;
 SELECT pg_temp.copied('SQLC-0001', 'elite_440', 'snapshot', '2026-06-14 00:00');
@@ -847,6 +881,8 @@ SELECT pg_temp.is(
   || 'often than 00:30:00; at sqlc_on:502 unit 7 via sqlh_e, profile elite_500',
   'a meter polled slowly while its copies fail is a problem, saying what fails and how often it '
   || 'is polled');
+SELECT pg_temp.is(pg_temp.keys('copy_failing_polled_slowly', 'SQLC-5001'),
+  'sqlh_e/sqlc_on/sqlc_on:502/7/SQLC-5001', 'a meter polled slowly names itself and its target');
 ROLLBACK TO SAVEPOINT polling;
 
 SELECT pg_temp.is(pg_temp.unkeyed_scans('SELECT * FROM health.copy_meters'), NULL,
@@ -916,6 +952,8 @@ SELECT pg_temp.is(
   format('clock moved 17:00:00 between %s and %s (-11:30:20 to 05:29:40 from UTC), at sqlk_g:502 '
          || 'unit 4 via sqlh_g', now() - interval '25 hours', now() - interval '2 hours'),
   'a clock step''s problem says how far it moved, between which reads, and where');
+SELECT pg_temp.is(pg_temp.keys('meter_clock_step', 'SQLK-g-4'), '-/-/-:-/-/SQLK-g-4',
+  'a clock step''s problem, over the steps at any place, names only the meter');
 
 SELECT pg_temp.is(
   (SELECT string_agg(format('%s %s %s %s', serial, collector_meters, from_median = interval '-44 hours',
@@ -930,6 +968,9 @@ SELECT pg_temp.is(
   format('clock -1 days -14:30:20 from UTC at %s, -1 days -20:00:00 from the median of the 4 '
          || 'meters on sqlh_g; at sqlk_g:502 unit 3', now() - interval '2 hours'),
   'a far clock''s problem says its offset, how far from the median, of how many meters, and where');
+SELECT pg_temp.is(
+  (SELECT pg_temp.keys(kind, subject) FROM health.problems WHERE kind = 'meter_clock_far'),
+  'sqlh_g/sqlk_g/sqlk_g:502/3/SQLK-g-3', 'a far clock''s problem names the meter and its target');
 
 SAVEPOINT two_meters;
 SELECT admin.retire_target(endpoint_id => 'sqlk_g', unit_id => u, valid_from => now() - interval '1 minute')
@@ -996,6 +1037,8 @@ SELECT pg_temp.is(
   'no reading from its one unit since it came into service (expected every 00:15:00; '
   || 'no missed read), at 10.0.0.1:502 via sqlh_b',
   'an endpoint of one unit is described as one');
+SELECT pg_temp.is(pg_temp.keys('endpoint_never_read', 'sqlh_b_ep'),
+  'sqlh_b/sqlh_b_ep/10.0.0.1:502/-/-', 'a silent endpoint''s problem names it, not its units');
 
 SELECT pg_temp.is(
   (SELECT string_agg(format('%s %s', serial, readings), ', ' ORDER BY serial)

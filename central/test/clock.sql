@@ -5,6 +5,7 @@
 -- with times relative to now().
 
 \ir lib/assert.sql
+\ir lib/problems.sql
 
 BEGIN;
 
@@ -205,6 +206,8 @@ SELECT pg_temp.is(
   'clock_unchecked sqlc_kiss; clock_unchecked sqlc_math; clock_unchecked sqlc_never; '
   || 'clock_unchecked sqlc_old; clock_unchecked sqlc_other; collector_silent sqlc_silent',
   'each unchecked collector is a problem, and a silent one only silent');
+SELECT pg_temp.is(pg_temp.keys('clock_unchecked', 'sqlc_kiss'), 'sqlc_kiss/-/-:-/-/-',
+  'an unchecked clock''s problem names only its collector');
 
 SELECT pg_temp.is(
   (SELECT string_agg(detail, '; ' ORDER BY subject) FROM health.problems

@@ -353,7 +353,16 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
   polling interval; polled slowly when its copies fail and it is polled less
   often than `copy_failing_interval`.
 - `health.problems`: one row per problem, `(kind, subject)` naming it and
-  `detail` describing it now. Kinds: `collector_silent` (no upload for
+  `detail` describing it now. Beside them, the key columns `collector_id`,
+  `endpoint_id`, `host`, `port`, `unit_id` and `serial` say what the problem
+  is about, for a reader to join on rather than parse `subject`: each is set
+  where the problem is about that one thing and NULL where it spans several
+  or none. A target's problem names the meter placed there; a problem about
+  a place as read (`several_serials_at_place`, `firmware_changed`) has its
+  host, port and unit but no `endpoint_id`; one gathered over a meter's
+  readings from anywhere (`unregistered_serial`, `misplaced_serial`,
+  `serial_at_several_places`, `energy_backwards`, `meter_clock_step`) has
+  only its serial. Kinds: `collector_silent` (no upload for
   `collector_silent_after`), `clock_unchecked` (unchecked in
   `health.collector_clocks`; its detail says since when and what the last check
   was), `endpoint_silent` (every expected unit of the endpoint silent, as

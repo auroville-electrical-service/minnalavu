@@ -6,6 +6,7 @@
 -- report of a refused config is kept and raised as config_refused.
 
 \ir lib/assert.sql
+\ir lib/problems.sql
 \set basic `cat ../contract/fixtures/config.v1.basic.json`
 \set digests `cat ../contract/fixtures/config.v1.digests.json`
 \set batch `cat ../contract/fixtures/batch.v1.basic.json`
@@ -226,6 +227,8 @@ SELECT pg_temp.is(
          :'refused'::jsonb #>> '{}', :'applied'::jsonb #>> '{}'),
   'a collector whose latest upload reports a refused config raises config_refused, '
   || 'with the digests and the reason, control characters shown as ?');
+SELECT pg_temp.is(pg_temp.keys('config_refused', 'sqltest_srv_a'), 'sqltest_srv_a/-/-:-/-/-',
+  'a refused config''s problem names only its collector');
 
 SELECT pg_temp.ingest_as('collector_sqltest_srv_c',
   pg_temp.heartbeat(:'batch', 'd0000000-0000-4000-8000-000000000005',
