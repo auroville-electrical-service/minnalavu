@@ -553,7 +553,8 @@ unlinked), and a fill is offered until every meter and store has its result;
 To move a store, freeze the collector's uploads (it buffers, as offline),
 back up, restore into the new store, point the collector at it, then make
 one fill per collector for what its meters hold. Without the freeze, readings
-the old store accepted after the backup are in neither store nor buffer.
+the old store accepted after the backup are in neither store nor buffer. The
+steps are the `store-move` skill (`skills/store-move/`).
 
 ## The served polling config
 
