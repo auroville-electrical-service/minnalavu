@@ -474,7 +474,7 @@ learns of it from its next upload's answer (a doorbell on a message broker
 will wake it sooner), runs it, and tags what it reads with the request's id.
 
 - `jobs.requests` (with `jobs.request_meters`): one row per request, the
-  collector, the kind (only `read_on_demand`), the meters by serial, an opaque
+  collector, the kind (`read_on_demand` here; `fill_copies`, below), the meters by serial, an opaque
   `requester` reference `minkanakku` resolves (1 to 200 characters, no control
   characters; nothing about the person), `requested_at` and `expires_at`, an
   hour later.
@@ -516,6 +516,43 @@ request, it sends `NOTIFY request_answered` with the payload
 batch newly linked); a resend that links nothing new sends nothing. Any role
 may `LISTEN`, and any role with a connection may `NOTIFY` on that channel, so a
 notice says only "look again": read `jobs.request_status`.
+
+## Copy fills
+
+A collector copies each meter's stored entries newer than its own
+high-water mark, so entries the store lacks behind that mark (a buffer
+segment lost after it was accepted, a store moved or restored) are found and
+filled on request, as the operator (ADR 0025).
+
+    SELECT * FROM admin.copy_holes(since => '2026-10-01');   -- meter-clock time
+
+lists, per meter copied now whose clock has been read and per store its
+profile copies, each day (a month, for history) between the store's oldest
+entry of the serial (or `since`, if later) and its newest that holds no entry,
+with `gone` (a fill result showed the meter no longer held it) and
+`pending_request` (a fill offered now that will copy it). A store with no
+entry of the serial has no holes: `health.problems` shows it as
+`copy_behind`. Judging which holes to fill is the operator's.
+
+    SELECT admin.request_fill(collector_id => 'pilot_01', meters => ARRAY['…'],
+      stores => ARRAY['load_survey', 'history'], from_time => '2026-10-01',
+      to_time => '2026-11-01', requester => 'operator', expires_after => '3 days');
+
+asks the collector to copy what its meters hold of those stores in the
+range (from, to excluded), in its copy window. Each meter must be copied by
+that collector now; anything else is refused with SQLSTATE 22023. The
+collector sends the entries with the request's id (linked in
+`jobs.request_stored_entries`, an entry the store already held among them)
+and one `fill_results` item per meter and store: what of the range the meter
+no longer held (`gone_before`, kept in `jobs.request_fill_results`). The
+ingest answer counts them (`fill_results`: received, inserted, duplicate,
+unlinked), and a fill is offered until every meter and store has its result;
+`jobs.request_status` then shows it `answered`.
+
+To move a store, freeze the collector's uploads (it buffers, as offline),
+back up, restore into the new store, point the collector at it, then make
+one fill per collector for what its meters hold. Without the freeze, readings
+the old store accepted after the backup are in neither store nor buffer.
 
 ## The served polling config
 

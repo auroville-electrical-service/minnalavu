@@ -21,7 +21,8 @@ SELECT pg_temp.is((SELECT answer FROM answers WHERE name = 'first') - 'first_rec
     "clock_checks": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
     "latency": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
     "stored_entries": {"received": 3, "inserted": 3, "duplicate": 0, "conflicting": 0},
-    "meter_clock_reads": {"received": 1, "inserted": 1, "duplicate": 0, "conflicting": 0}}'::jsonb,
+    "meter_clock_reads": {"received": 1, "inserted": 1, "duplicate": 0, "conflicting": 0},
+    "fill_results": {"received": 0, "inserted": 0, "duplicate": 0, "unlinked": 0}}'::jsonb,
   'a new batch is stored, and the answer counts what was inserted');
 
 SELECT pg_temp.is(
@@ -83,7 +84,8 @@ SELECT pg_temp.is((SELECT answer FROM answers WHERE name = 'resent') - 'first_re
     "clock_checks": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
     "latency": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
     "stored_entries": {"received": 3, "inserted": 0, "duplicate": 3, "conflicting": 0},
-    "meter_clock_reads": {"received": 1, "inserted": 0, "duplicate": 1, "conflicting": 0}}'::jsonb,
+    "meter_clock_reads": {"received": 1, "inserted": 0, "duplicate": 1, "conflicting": 0},
+    "fill_results": {"received": 0, "inserted": 0, "duplicate": 0, "unlinked": 0}}'::jsonb,
   'a resent batch is accepted, and nothing in it is stored twice');
 
 SELECT pg_temp.is(
@@ -226,7 +228,8 @@ SELECT pg_temp.is(
     "clock_checks": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
     "latency": {"received": 0, "inserted": 0, "duplicate": 0, "conflicting": 0},
     "stored_entries": {"received": 3, "inserted": 0, "duplicate": 3, "conflicting": 0},
-    "meter_clock_reads": {"received": 1, "inserted": 0, "duplicate": 1, "conflicting": 0}}'::jsonb,
+    "meter_clock_reads": {"received": 1, "inserted": 0, "duplicate": 1, "conflicting": 0},
+    "fill_results": {"received": 0, "inserted": 0, "duplicate": 0, "unlinked": 0}}'::jsonb,
   'missed reads at different addresses are each stored, with or without the serial read');
 
 SELECT pg_temp.is(

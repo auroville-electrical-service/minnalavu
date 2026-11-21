@@ -110,6 +110,11 @@
       "description": "A meter's own clock, read beside the collector's: at the start and end of each copy visit, and once a day per meter. Raw evidence: an offset is the store's to compute, against the collector's clock checks either side of it. Optional: a batch with no read in it has none.",
       "type": "array",
       "items": { "$ref": "#/$defs/meter_clock_read" }
+    },
+    "fill_results": {
+      "description": "One item per meter and store a fill request named, once the collector has copied what the meter holds of the request's range; the entries themselves go in stored_entries, carrying the request_id. Keyed by (request_id, meter_serial, store): a resent item is a duplicate. Optional: a batch with no fill finished in it has none.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/fill_result" }
     }
   },
   "$defs": {
@@ -556,6 +561,31 @@
         },
         "meter_time": { "$ref": "#/$defs/meter_time" },
         "collector_at": { "$ref": "#/$defs/collector_time" }
+      }
+    },
+    "fill_result": {
+      "description": "A fill request's copy of one meter's store, finished: what of the range the meter no longer held.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id", "endpoint", "unit_id", "meter_serial", "store", "gone_before", "finished_at"],
+      "properties": {
+        "request_id": { "$ref": "#/$defs/request_id" },
+        "endpoint": { "$ref": "#/$defs/endpoint" },
+        "unit_id": { "$ref": "#/$defs/unit_id" },
+        "meter_serial": {
+          "description": "The serial the meter reported in the visit the fill ran in.",
+          "type": "string",
+          "minLength": 1
+        },
+        "store": { "enum": ["history", "snapshot", "load_survey"] },
+        "gone_before": {
+          "description": "The requested range's entries stamped before this are no longer on the meter: the stamp of its oldest entry when that falls inside the range, the range's end when the meter holds none of it, or null when the meter holds entries older than the range's start.",
+          "oneOf": [{ "$ref": "#/$defs/meter_time" }, { "type": "null" }]
+        },
+        "finished_at": {
+          "description": "When the copy of this store finished, by the collector's clock.",
+          "$ref": "#/$defs/collector_time"
+        }
       }
     }
   }
