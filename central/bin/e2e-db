@@ -25,8 +25,27 @@ name=${url##*/}
 name=${name%%\?*}
 admin=${url/\/"$name"/\/postgres}
 
+# A collector's role belongs to the cluster, not the database, so the old
+# database's are dropped with it, or every run leaves its collectors' roles.
+exists=$(psql "$admin" -X -At -v ON_ERROR_STOP=1 -v name="$name" \
+  <<<"SELECT count(*) FROM pg_database WHERE datname = :'name';")
+drops=
+if [[ $exists == 1 ]]; then
+  drops=$(
+    psql "$url" -X -At -v ON_ERROR_STOP=1 <<'SQL'
+SELECT to_regclass('store.collectors') IS NOT NULL AS migrated \gset
+\if :migrated
+SELECT format('DROP ROLE IF EXISTS %I;', role) FROM store.collectors ORDER BY role;
+\endif
+SQL
+  )
+fi
+
 # FORCE: postgrest_e2e holds connections to the old database.
 psql "$admin" -X -q -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS \"$name\" WITH (FORCE)"
+if [[ -n $drops ]]; then
+  psql "$admin" -X -q -v ON_ERROR_STOP=1 <<<"$drops"
+fi
 psql "$admin" -X -q -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$name\""
 bin/migrate "$url" --apply >/dev/null
 bin/load-profiles "$url" --apply >/dev/null
