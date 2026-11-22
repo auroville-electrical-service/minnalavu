@@ -94,7 +94,15 @@ To upgrade to a new release, run `rel\windows\upgrade.ps1` from the clone
 aside, lays down the release with the steps above, carries the buffer, the
 log, `settings.json` (or one given) and the polling config over, copies the
 profiles, and starts and checks the service. Without `-Apply` it only checks
-and prints what it would do.
+and prints what it would do. It stops the old one with `stop.ps1`, below.
+
+To stop the service for anything else, run `rel\windows\stop.ps1 -Root
+<install root>` (`-Apply` to act; `Get-Help -Full` for the rest). It first
+asks the collector to quiesce, by a file under the buffer's `control`
+directory (`Alavi.Control`, which looks every 30 s): every poller retires, a
+copy at its next entry boundary with its session closed, and the collector
+answers before the service is told to stop. A file, not a port, because a
+collector opens none (*No other listening ports*, below).
 
 ## Logs
 
@@ -212,6 +220,6 @@ The Windows service is the exception: erlsrv always runs a named node, so
 node from listening or starting epmd.
 
 So `bin/alavi remote`, `rpc`, `stop`, `restart` and `pid` do not work: they
-need distribution. Stop a collector with its service manager (or SIGTERM on
-Linux and macOS). To see what a running collector is doing, read its log file,
+need distribution. Stop a collector with `stop.ps1` on Windows (above), its
+service manager, or SIGTERM on Linux and macOS. To see what a running collector is doing, read its log file,
 and the server's health views for what has reached the server.

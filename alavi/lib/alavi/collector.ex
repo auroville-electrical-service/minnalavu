@@ -2,8 +2,9 @@ defmodule Alavi.Collector do
   @moduledoc """
   The running collector: on Windows the clock's status, then the buffer, then
   the config keeper, then one poller per endpoint writing into the buffer,
-  then the uplink, then the clock check, also writing into the buffer. Each of
-  them casts what it did to `status` (an `Alavi.Status`, started elsewhere).
+  then the uplink, then the clock check, also writing into the buffer, then,
+  with named pollers, `Alavi.Control` for a planned stop. Each of them casts
+  what it did to `status` (an `Alavi.Status`, started elsewhere).
   """
 
   use Supervisor
@@ -13,6 +14,7 @@ defmodule Alavi.Collector do
     Clock,
     Config,
     ConfigKeeper,
+    Control,
     Intake,
     Poller,
     Pollers,
@@ -156,8 +158,14 @@ defmodule Alavi.Collector do
         check -> [{Clock.Check, check ++ [sink: sink, status: status]}]
       end
 
+    # Last, so that it stops nothing by stopping; only with pollers it can name.
+    control =
+      for {:pollers, name} <- opts,
+          do:
+            {Control, dir: buffer |> Keyword.fetch!(:dir) |> Path.join("control"), pollers: name}
+
     Supervisor.init(
-      watch ++ [{Buffer, buffer}] ++ keeper ++ [{Pollers, pollers}] ++ uplink ++ check,
+      watch ++ [{Buffer, buffer}] ++ keeper ++ [{Pollers, pollers}] ++ uplink ++ check ++ control,
       strategy: :rest_for_one
     )
   end

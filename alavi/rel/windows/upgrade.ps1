@@ -7,8 +7,9 @@ the buffer, the log, the settings and the polling config over.
 Without -Apply it checks everything it can and prints the plan, changing
 nothing. With -Apply, in an administrator's PowerShell:
 
- 1. stops the service alavi_alavi and removes it, refusing if any process
-    still runs from the install;
+ 1. stops the service alavi_alavi through stop.ps1 beside it (a planned
+    quiesce first, for a collector that answers), then removes it, refusing
+    if any process still runs from the install;
  2. renames the install root aside, to <Root>-<yyyyMMdd-HHmmss>;
  3. creates a fresh root with the README's ACL (Administrators and SYSTEM),
     lays the release down in it, and settings.json (the old one, or
@@ -63,6 +64,7 @@ $ErrorActionPreference = 'Stop'
 $ServiceName = 'alavi_alavi'
 $StopWaitSeconds = 60
 $StartWaitSeconds = 180
+$QuiesceSeconds = 180
 
 function Get-FullPath([string]$Path) {
   [IO.Path]::GetFullPath($Path).TrimEnd('\')
@@ -156,6 +158,7 @@ function Assert-Plan($Plan) {
   if (Test-Path -LiteralPath $Plan.Aside) { throw "$($Plan.Aside) exists already; wait a second and rerun." }
   if ($Plan.Release -eq $Plan.Root) { throw "-Release is the install root; give the built release, _build\prod\rel\alavi." }
   Assert-Leaf "$($Plan.Release)\bin\alavi.bat" 'built release (bin\alavi.bat)'
+  Assert-Leaf "$PSScriptRoot\stop.ps1" 'stop.ps1 beside this script'
   $null = Find-Erlsrv $Plan.Release
   $null = Find-Erlsrv $Plan.Root
   if (@(Get-ChildItem -LiteralPath $Plan.Profiles -Filter *.json).Count -eq 0) { throw "No *.json profiles in $($Plan.Profiles)." }
@@ -175,9 +178,10 @@ function Show-Plan($Plan) {
   Write-Output "Served config:  $(if ($Plan.Served) { "$($Plan.Served) -> $($Plan.Paths.buffer_dir)\config\served.json" } else { 'not placed' })"
 }
 
+# stop.ps1 beside this script quiesces a collector that answers, then stops it.
 function Stop-Collector($Plan) {
   $erlsrv = Find-Erlsrv $Plan.Root
-  if ((Get-Service -Name $ServiceName).Status -ne 'Stopped') { $null = Invoke-Native $erlsrv @('stop', $ServiceName) }
+  & "$PSScriptRoot\stop.ps1" -Root $Plan.Root -TimeoutSeconds $QuiesceSeconds -Apply
   (Get-Service -Name $ServiceName).WaitForStatus('Stopped', [TimeSpan]::FromSeconds($StopWaitSeconds))
   $running = @(Get-Process | Where-Object { $_.Path -and (Test-Under $_.Path $Plan.Root) })
   if ($running.Count -gt 0) {
