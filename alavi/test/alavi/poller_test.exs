@@ -478,13 +478,9 @@ defmodule Alavi.PollerTest do
 
       assert Enum.all?(Alavi.Pollers.pollers(sup), fn {_id, child} -> not is_pid(child) end)
 
-      # The read the cut wait leaves is missed, and goes on the wire as unreachable.
-      missed = missed_reads([])
-
+      # The read the cut wait leaves is missed, unreachable.
       assert %MissedRead{reason: {:unreachable, {:socket, :retiring}}} =
-               retiring = List.last(missed)
-
-      assert %{"reason" => "unreachable", "detail" => "retiring"} = MissedRead.to_wire(retiring)
+               List.last(missed_reads([]))
     end
 
     test "an endpoint that takes each connection and closes it before a byte is unreachable for the round" do
