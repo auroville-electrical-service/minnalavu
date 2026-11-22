@@ -93,15 +93,15 @@ SELECT pg_temp.is(
 
 SELECT pg_temp.is(
   (SELECT string_agg(format('%s may execute %s', r.role, f.oid::regprocedure), '; '
-                     ORDER BY r.role)
+                     ORDER BY r.role, f.oid::regprocedure::text)
    FROM postgrest_roles r
    CROSS JOIN pg_proc f
    JOIN pg_namespace n ON n.oid = f.pronamespace
    WHERE n.nspname IN ('store', 'api', 'admin', 'registry', 'health')
      AND has_function_privilege(r.role, f.oid, 'EXECUTE')),
-  (SELECT string_agg(format('%s may execute %s', role, f), '; ' ORDER BY role)
+  (SELECT string_agg(format('%s may execute %s', role, f), '; ' ORDER BY role, f)
    FROM collector_roles
-   CROSS JOIN unnest(ARRAY['api.ingest(jsonb)', 'api.collector_config()']) f),
+   CROSS JOIN unnest(ARRAY['api.collector_config()', 'api.ingest(jsonb)']) f),
   'the only functions a PostgREST role may execute are api.ingest and api.collector_config, '
   || 'and authenticator may execute neither');
 
