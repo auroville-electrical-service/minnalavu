@@ -86,7 +86,9 @@ defmodule Alavi.Poller do
   @typedoc """
   `copy_window` is the config's, for its endpoint's `copy`. `recheck_ms`
   bounds each wait, so that a wall clock set while waiting moves the next
-  round to its slot within that time.
+  round to its slot within that time. `first_connect_ms`: how long after
+  start the first connect waits, so that pollers started together connect
+  apart; jobs due meanwhile wait for it.
   """
   @type option ::
           {:endpoint, Endpoint.t()}
@@ -98,6 +100,8 @@ defmodule Alavi.Poller do
           | {:uplink, GenServer.server() | :none}
           | {:selectors_dir, Path.t()}
           | {:recheck_ms, pos_integer()}
+          | {:first_connect_ms, non_neg_integer()}
+          | {:connect_spacing_ms, non_neg_integer()}
 
   # contract: test/alavi/poller_test.exs "start_link/1"
   # contract: test/alavi/poller/slots_test.exs "start_link/1"
@@ -180,7 +184,8 @@ defmodule Alavi.Poller do
     raw_log = RawLog.new("#{endpoint.host}:#{endpoint.port}", Keyword.fetch!(opts, :raw_log))
     feeds = {sink, Keyword.fetch!(opts, :status), Keyword.fetch!(opts, :uplink)}
     local = {raw_log, Keyword.fetch!(opts, :selectors_dir), Keyword.fetch!(opts, :copy_window)}
-    start(endpoint, feeds, {clock, Keyword.fetch!(opts, :recheck_ms)}, local)
+    timing = {clock, Keyword.fetch!(opts, :recheck_ms), Keyword.get(opts, :first_connect_ms, 0)}
+    start(endpoint, feeds, timing, local)
   end
 
   @impl true
@@ -241,7 +246,7 @@ defmodule Alavi.Poller do
 
   defp start(%Endpoint{polled_by_other_system: true}, _feeds, _clock, _logs), do: :ignore
 
-  defp start(endpoint, {sink, status, uplink}, {clock, recheck_ms}, local) do
+  defp start(endpoint, {sink, status, uplink}, {clock, recheck_ms, first_connect_ms}, local) do
     {raw_log, selectors_dir, copy_window} = local
     now = now()
 
@@ -272,7 +277,7 @@ defmodule Alavi.Poller do
       started: clock.(),
       serials: %{},
       backoff: endpoint.reconnect_backoff_ms.min,
-      reconnect_at: now,
+      reconnect_at: now + first_connect_ms,
       retiring: nil
     }
 

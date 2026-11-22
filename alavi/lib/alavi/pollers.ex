@@ -6,7 +6,10 @@ defmodule Alavi.Pollers do
   (`Alavi.Pollers.Applier`), whichever of them restarts.
 
   Each poller rechecks the clock at least every `recheck_ms`, a minute
-  unless given (tests give less).
+  unless given (tests give less). Pollers started together connect
+  `connect_spacing_ms` apart, 200 ms unless given: with all 79 of a site's
+  gateways connected at once, three that answer one at a time timed out
+  (2026-11-22).
   """
 
   use Supervisor
@@ -17,6 +20,7 @@ defmodule Alavi.Pollers do
   alias Alavi.Pollers.Applier
 
   @recheck_ms 60_000
+  @connect_spacing_ms 200
 
   @type option ::
           {:config, Config.t() | {:keeper, GenServer.server()}}
@@ -27,6 +31,7 @@ defmodule Alavi.Pollers do
           | {:uplink, GenServer.server() | :none}
           | {:selectors_dir, Path.t()}
           | {:recheck_ms, pos_integer()}
+          | {:connect_spacing_ms, non_neg_integer()}
           | {:name, atom()}
 
   # contract: test/alavi/poller_test.exs "Pollers.start_link/1"
@@ -42,14 +47,27 @@ defmodule Alavi.Pollers do
     # No uplink to nudge (tests that read the sink) unless one is named.
     shared = [
       {:uplink, Keyword.get(opts, :uplink, :none)},
-      {:recheck_ms, Keyword.get(opts, :recheck_ms, @recheck_ms)} | shared
+      {:recheck_ms, Keyword.get(opts, :recheck_ms, @recheck_ms)},
+      {:connect_spacing_ms, Keyword.get(opts, :connect_spacing_ms, @connect_spacing_ms)} | shared
     ]
 
     {%Config{endpoints: endpoints, copy_window: window}, follow} =
       config(Keyword.fetch!(opts, :config), shared)
 
-    children = Enum.map(endpoints, &{Poller, [{:endpoint, &1}, {:copy_window, window} | shared]})
+    children =
+      endpoints
+      |> Enum.with_index()
+      |> Enum.map(fn {endpoint, n} -> {Poller, child(endpoint, window, n, shared)} end)
+
     Supervisor.init(children ++ follow, strategy: :one_for_one)
+  end
+
+  @doc false
+  @spec child(Config.Endpoint.t(), Config.CopyWindow.t(), non_neg_integer(), keyword()) ::
+          keyword()
+  def child(endpoint, window, n, shared) do
+    first = n * Keyword.fetch!(shared, :connect_spacing_ms)
+    [{:endpoint, endpoint}, {:copy_window, window}, {:first_connect_ms, first} | shared]
   end
 
   # In a supervisor's `init/1`, `self()` is the supervisor.

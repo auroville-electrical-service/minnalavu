@@ -412,6 +412,32 @@ defmodule Alavi.PollerTest do
       assert length(running) == 1
     end
 
+    test "pollers started together first connect connect_spacing_ms apart, in config order" do
+      ports = for _ <- 1..3, do: elem(start_sim!(:tcp), 1)
+      # Unit n on the nth: serials are unique across a config.
+      models = ["elite_440", "elite_440", "elite_500"]
+
+      endpoints =
+        for {port, n} <- Enum.with_index(ports, 1),
+            do: endpoint(port, "tcp", [meter(n, Enum.at(models, n - 1))])
+
+      start_supervised!(
+        {Alavi.Pollers,
+         [
+           config: config!(endpoints),
+           sink: {Alavi.TestSink, self()},
+           clock: &DateTime.utc_now/0,
+           raw_log: raw_log(),
+           status: no_status(),
+           selectors_dir: selectors_dir!(),
+           connect_spacing_ms: 300
+         ]}
+      )
+
+      [a, b, c] = ports |> first_read_at(%{}) |> then(fn at -> Enum.map(ports, &at[&1]) end)
+      assert b - a >= 250 and c - b >= 250
+    end
+
     test "endpoints are polled in parallel: a slow chain does not hold up another" do
       {slow, slow_port} = start_sim!(:tcp)
       Simulator.faults(slow, delay_ms: 300)
@@ -468,6 +494,16 @@ defmodule Alavi.PollerTest do
 
       assert log =~ "stopped at a round boundary"
       assert_receive {:latency, [%LatencyDay{unit_id: 1}]}
+    end
+  end
+
+  # When each port's first reading arrives, in monotonic ms.
+  defp first_read_at(ports, at) do
+    if map_size(at) == length(ports) do
+      at
+    else
+      [%{endpoint: %{port: port}} | _] = recorded!(5_000)
+      first_read_at(ports, Map.put_new(at, port, System.monotonic_time(:millisecond)))
     end
   end
 end

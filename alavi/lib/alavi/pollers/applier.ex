@@ -82,7 +82,12 @@ defmodule Alavi.Pollers.Applier do
     present =
       for {{Poller, host, port}, _child} <- Pollers.pollers(state.pollers), do: {host, port}
 
-    wanted |> Map.drop(present) |> Map.values() |> Enum.each(&start(&1, state))
+    wanted
+    |> Map.drop(present)
+    |> Map.values()
+    |> Enum.with_index()
+    |> Enum.each(&start(&1, state))
+
     state
   end
 
@@ -126,8 +131,9 @@ defmodule Alavi.Pollers.Applier do
     state
   end
 
-  defp start({%Endpoint{host: host, port: port} = endpoint, window}, state) do
-    opts = [{:endpoint, endpoint}, {:copy_window, window} | state.shared]
+  # Pollers started together connect apart (`Alavi.Pollers`).
+  defp start({{%Endpoint{host: host, port: port} = endpoint, window}, n}, state) do
+    opts = Pollers.child(endpoint, window, n, state.shared)
     {:ok, _child} = Supervisor.start_child(state.pollers, {Poller, opts})
 
     Logger.info("alavi pollers: #{host}:#{port} started")

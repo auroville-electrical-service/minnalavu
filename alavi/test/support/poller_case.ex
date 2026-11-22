@@ -116,7 +116,8 @@ defmodule Alavi.PollerCase do
       clock: clock,
       raw_log: raw_log,
       status: no_status(),
-      selectors_dir: selectors_dir!()
+      selectors_dir: selectors_dir!(),
+      connect_spacing_ms: 0
     ]
 
     start_supervised!({Alavi.Pollers, opts})
