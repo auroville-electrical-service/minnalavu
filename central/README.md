@@ -381,7 +381,13 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
   one that never answered.
   `endpoint_errors` (erroring in `health.endpoints`, and not silent; its
   detail gives the failed and due reads, the rate, the missed reads by reason
-  and the address), `backlog_near_capacity` (bytes at or above
+  and the address), `endpoint_closes_connections` (in place of the
+  endpoint's `endpoint_silent`, `endpoint_never_read` or `endpoint_errors`
+  when its last missed read within the lookback was a connection closed
+  before a byte, `unreachable` with detail `closed`, and nothing at it has
+  been read since: a gateway whose one connection another client holds; its
+  detail gives that time, the last reading within the lookback and the
+  address), `backlog_near_capacity` (bytes at or above
   `backlog_near_capacity` of the buffer), `backlog_refused`,
   `backlog_discarded`, `backlog_quarantined` (above zero in the latest
   upload; `refused` counts since the collector started, so it clears on a

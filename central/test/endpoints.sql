@@ -132,6 +132,50 @@ SELECT pg_temp.is(
   'sqlp_edge, sqlp_flaky, sqlp_moved',
   'each erroring endpoint is one problem');
 
+-- n missed reads unreachable with detail at host:502 by sqlp_a, a minute
+-- apart, the last `ago`.
+CREATE FUNCTION pg_temp.unreachable(host text, n integer, ago interval, detail text)
+RETURNS void
+LANGUAGE sql AS $$
+  INSERT INTO store.missed_reads
+    (meter_serial, register_key, read_at, reason, detail, attempts, profile, profile_version,
+     endpoint_host, endpoint_port, unit_id, collector_id, batch_id)
+  SELECT NULL, 'active_energy_import', now() - ago - i * interval '1 minute', 'unreachable',
+         detail, 1, 'elite_440', 2, host, 502, 1, 'sqlp_a', b.bid
+  FROM generate_series(0, n - 1) i
+  JOIN b ON b.collector = 'sqlp_a'
+$$;
+
+-- closing: read, then its last missed reads connections closed before a byte;
+-- reopened: closed, then read again; refused: its last missed reads failed
+-- connects; mid_read: closed after a connection had answered.
+SELECT pg_temp.endpoint('sqlq_closing', '10.0.2.1', false);
+SELECT pg_temp.endpoint('sqlq_reopened', '10.0.2.2', false);
+SELECT pg_temp.endpoint('sqlq_refused', '10.0.2.3', false);
+SELECT pg_temp.endpoint('sqlq_mid_read', '10.0.2.4', false);
+SELECT pg_temp.readings('sqlp_a', '10.0.2.1', 2, '30 minutes');
+SELECT pg_temp.missed('sqlp_a', '10.0.2.1', 1, '40 minutes', 'timeout');
+SELECT pg_temp.unreachable('10.0.2.1', 3, '5 minutes', 'closed');
+SELECT pg_temp.unreachable('10.0.2.2', 3, '30 minutes', 'closed');
+SELECT pg_temp.readings('sqlp_a', '10.0.2.2', 2, '5 minutes');
+SELECT pg_temp.unreachable('10.0.2.3', 3, '5 minutes', 'econnrefused');
+SELECT pg_temp.missed('sqlp_a', '10.0.2.4', 3, '5 minutes', 'closed');
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s %s', kind, subject), '; ' ORDER BY kind, subject)
+   FROM health.problems WHERE subject LIKE 'sqlq_%'),
+  'endpoint_closes_connections sqlq_closing; endpoint_errors sqlq_mid_read; '
+  || 'endpoint_errors sqlq_refused; endpoint_errors sqlq_reopened',
+  'an erroring endpoint whose last missed read was a connection closed before a byte, with '
+  || 'no reading since, is that problem instead');
+
+SELECT pg_temp.is(
+  (SELECT detail FROM health.problems WHERE subject = 'sqlq_closing'),
+  format('took the last connection and closed it before sending a byte, at %s; '
+         || 'no reading since %s; at 10.0.2.1:502 via sqlp_a',
+         now() - interval '5 minutes', now() - interval '30 minutes'),
+  'an endpoint that closes connections says when it last did, its last reading and where it is');
+
 SELECT pg_temp.is(pg_temp.unkeyed_scans('SELECT * FROM health.endpoints'), NULL,
   'the view reads readings and missed reads only by index lookups, never by a scan');
 

@@ -392,6 +392,30 @@ SELECT pg_temp.is(
   || '(expected every 00:15:00; no missed read), at 10.0.0.6:502 via sqlh_d',
   'a silent endpoint''s problem says how many units, since its last reading at any, '
   || 'how often they are due, its last missed read and where it is');
+
+-- sqlh_g_ep's every unit missed again 5 minutes ago, each connection closed
+-- before a byte.
+INSERT INTO store.missed_reads
+SELECT NULL, 'active_energy_import', now() - interval '5 minutes', 'unreachable', NULL, 'closed',
+       3, NULL, 'elite_440', '10.0.0.5', 502, unit, 'sqlh_d',
+       (SELECT batch FROM b WHERE collector = 'sqlh_d'), 2
+FROM unnest(ARRAY[1, 2, 3]) unit;
+
+SELECT pg_temp.is(
+  (SELECT string_agg(format('%s %s', kind, subject), '; ' ORDER BY kind, subject)
+   FROM health.problems WHERE subject ~ '^sqlh_(g|n)_ep'),
+  'endpoint_closes_connections sqlh_g_ep; endpoint_never_read sqlh_n_ep',
+  'a silent endpoint whose last connection closed before a byte is that problem instead');
+
+SELECT pg_temp.is(
+  (SELECT detail FROM health.problems WHERE kind = 'endpoint_closes_connections'),
+  format('took the last connection and closed it before sending a byte, at %s; '
+         || 'no reading since %s; at 10.0.0.5:502 via sqlh_d',
+         now() - interval '5 minutes', now() - interval '3 hours'),
+  'an endpoint that closes connections says when it last did, its last reading and where it is');
+
+SELECT pg_temp.is(pg_temp.keys('endpoint_closes_connections', 'sqlh_g_ep'),
+  'sqlh_d/sqlh_g_ep/10.0.0.5:502/-/-', 'an endpoint that closes connections names the endpoint');
 ROLLBACK TO SAVEPOINT endpoint_down;
 
 SELECT pg_temp.is(pg_temp.unkeyed_scans('SELECT * FROM health.targets'), NULL,
