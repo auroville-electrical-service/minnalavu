@@ -95,6 +95,33 @@ defmodule Alavi.Pollers do
     :exit, _reason -> :ok
   end
 
+  # contract: test/alavi/copy_test.exs "Pollers.stop/2"
+  @doc """
+  Retire every poller `:stopping` and wait up to `timeout` ms for them all to
+  stop: each at its round boundary, a copy at its next entry boundary with
+  its session closed. One still running then is passed over. Config applied
+  meanwhile starts no poller: the applier is stopped first.
+  """
+  @spec stop(Supervisor.supervisor(), timeout()) :: :ok
+  def stop(pollers, timeout) do
+    _absent = Supervisor.terminate_child(pollers, Applier)
+    pids = for {_id, pid} <- pollers(pollers), is_pid(pid), do: pid
+    monitors = Enum.map(pids, &Process.monitor/1)
+    Enum.each(pids, &Poller.retire(&1, :stopping))
+    deadline = System.monotonic_time(:millisecond) + timeout
+    Enum.each(monitors, &stopped(&1, deadline))
+  end
+
+  defp stopped(monitor, deadline) do
+    left = max(deadline - System.monotonic_time(:millisecond), 0)
+
+    receive do
+      {:DOWN, ^monitor, :process, _pid, _reason} -> :ok
+    after
+      left -> Process.demonitor(monitor, [:flush])
+    end
+  end
+
   # contract: test/alavi/read_on_demand_test.exs "Pollers.read_now/3"
   @doc """
   `Alavi.Poller.read_now/3` on the poller of the endpoint at `host` and

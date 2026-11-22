@@ -12,11 +12,17 @@ defmodule Alavi.Application do
     end
   end
 
-  # Before the pollers stop, their latency so far goes to the buffer, which
-  # outlives them; a poller has a few seconds to finish the step under way.
+  # Before the supervisors stop them, the pollers stop as if retired: a copy at
+  # its next entry boundary, its session closed, and their latency so far to
+  # the buffer, which outlives them. Windows waits on a service stopping, so
+  # the wait is bounded; latency is then taken from any poller still running.
   @impl true
   def prep_stop(state) do
-    if Process.whereis(Alavi.Pollers), do: Alavi.Pollers.record_latency(Alavi.Pollers, 5_000)
+    if Process.whereis(Alavi.Pollers) do
+      Alavi.Pollers.stop(Alavi.Pollers, 10_000)
+      Alavi.Pollers.record_latency(Alavi.Pollers, 2_000)
+    end
+
     state
   end
 

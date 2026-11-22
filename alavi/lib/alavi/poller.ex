@@ -56,8 +56,9 @@ defmodule Alavi.Poller do
   and closes its session first. Retired `:removed`, it first puts back any owed
   selectors, retrying as before however long that takes; retired
   `:replaced`, it leaves them owed on disk, for the poller that replaces it
-  finds them at start. Its latency so far is recorded as when the collector
-  stops.
+  finds them at start; retired `:stopping`, as the collector stops, it leaves
+  them for the next start the same way. Its latency so far is recorded as
+  when the collector stops.
 
   Each request's round trip, from send to reply, not the connect, counts in
   its meter's `Alavi.Poller.Latency`: shown on the status page after each
@@ -152,11 +153,11 @@ defmodule Alavi.Poller do
   # contract: test/alavi/restore_test.exs "retire/2"
   @doc """
   Stop at the next round boundary: `:removed`, the endpoint is no longer
-  polled; `:replaced`, a poller with new settings takes it over. Retiring
-  again changes only which.
+  polled; `:replaced`, a poller with new settings takes it over; `:stopping`,
+  the collector is stopping. Retiring again changes only which.
   """
-  @spec retire(GenServer.server(), :removed | :replaced) :: :ok
-  def retire(server, why) when why in [:removed, :replaced],
+  @spec retire(GenServer.server(), :removed | :replaced | :stopping) :: :ok
+  def retire(server, why) when why in [:removed, :replaced, :stopping],
     do: GenServer.cast(server, {:retire, why})
 
   # Transient: a poller that stops once retired is not started again.
@@ -316,8 +317,7 @@ defmodule Alavi.Poller do
   defp retired?(%{retiring: nil}), do: false
   defp retired?(%{retiring: :removed, queue: queue}), do: queue == []
 
-  defp retired?(%{retiring: :replaced, queue: queue}),
-    do: Enum.all?(queue, &(&1.kind == :restore))
+  defp retired?(%{queue: queue}), do: Enum.all?(queue, &(&1.kind == :restore))
 
   defp stop(state) do
     record_days(state)
@@ -333,6 +333,9 @@ defmodule Alavi.Poller do
 
   defp retired_line(%{retiring: :replaced}),
     do: "polled with new settings, any owed restore left to them"
+
+  defp retired_line(%{retiring: :stopping}),
+    do: "not polled while the collector stops, any owed restore left for its next start"
 
   defp act(state) do
     state = copy_due(state)

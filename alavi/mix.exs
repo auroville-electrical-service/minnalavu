@@ -52,6 +52,9 @@ defmodule Alavi.MixProject do
   # - a generated internal (SCM) name, under which a start at boot cannot find
   #   erlsrv's registry keys, which are under the service name: the service
   #   then does not start at boot. The internal name is set only on add.
+  # - no stop action, so stopping the service kills the node: no copy stops at
+  #   an entry boundary and no session closes. `init:stop()` stops the
+  #   application, and its prep_stop stops the pollers first.
   defp service_options(release) do
     bat = Path.join([release.path, "bin", "#{release.name}.bat"])
     add = ~s|"!ERLSRV!" add "!RELEASE_NAME!_!RELEASE_NAME!" ^\n|
@@ -60,6 +63,7 @@ defmodule Alavi.MixProject do
       -onfail restart ^
       -workdir "!RELEASE_ROOT!" ^
       -internalservicename "!RELEASE_NAME!_!RELEASE_NAME!" ^
+      -stopaction "init:stop()." ^
     """
 
     case String.split(File.read!(bat), add) do

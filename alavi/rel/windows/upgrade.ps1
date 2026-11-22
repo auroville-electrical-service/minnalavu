@@ -19,9 +19,9 @@ nothing. With -Apply, in an administrator's PowerShell:
     copies -Profiles into profiles_dir;
  5. places -ServedConfig as <buffer>\config\served.json, when given;
  6. installs the service from the new root, starts it, checks erlsrv's
-    OnFail, WorkDir and InternalServiceName, and waits for status.json to be
-    written by the new start, then prints its version, config digests and
-    clock check.
+    OnFail, StopAction, WorkDir and InternalServiceName, and waits for
+    status.json to be written by the new start, then prints its version,
+    config digests and clock check.
 
 settings.json's paths (polling_config, profiles_dir, buffer.dir, log.dir)
 must be the same in the old file and in -Settings: this script carries an
@@ -213,7 +213,7 @@ function Start-Collector($Plan) {
   $erlsrv = Find-Erlsrv $Plan.Root
   $null = Invoke-Native $erlsrv @('start', $ServiceName)
   $list = Invoke-Native $erlsrv @('list', $ServiceName)
-  $expected = @('OnFail:\s*restart', "WorkDir:\s*$([regex]::Escape($Plan.Root))\s", "InternalServiceName:\s*$ServiceName")
+  $expected = @('OnFail:\s*restart', 'StopAction:\s*init:stop\(\)\.', "WorkDir:\s*$([regex]::Escape($Plan.Root))\s", "InternalServiceName:\s*$ServiceName")
   $missing = @($expected | Where-Object { $list -notmatch $_ })
   if ($missing.Count -gt 0) { throw "erlsrv list lacks $($missing -join ', '):`n$list" }
   Write-Output $list

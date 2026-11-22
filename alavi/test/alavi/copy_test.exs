@@ -345,6 +345,32 @@ defmodule Alavi.CopyTest do
       assert last == midnight(Date.add(today(), -1))
     end
 
+    test "Pollers.stop/2 mid-copy stops it at an entry boundary, session closed, " <>
+           "nothing owed, and every poller stopped",
+         ctx do
+      {_agent, clock} = clock!()
+
+      {sim, endpoint} =
+        start!(ctx, [meter_440()], [meter(1, "elite_440")], clock,
+          endpoint: %{"interval_ms" => 50}
+        )
+
+      assert_received {:pollers, pollers}
+      Simulator.faults(sim, delay_ms: 5)
+      {:partial, _first} = night!(stop_after: 12)
+
+      log =
+        capture_log(fn ->
+          assert Pollers.stop(pollers, 5_000) == :ok
+          assert {:retiring, _rest} = night!()
+        end)
+
+      assert Store.owed(ctx.tmp_dir, endpoint) == :none
+      assert {:ok, %{load_survey_day: 0, load_survey_parameter: 0}} = left(ctx, endpoint)
+      assert Pollers.pollers(pollers) |> Enum.all?(fn {_id, child} -> not is_pid(child) end)
+      assert log =~ "not polled while the collector stops"
+    end
+
     test "a connection dropped mid-copy leaves the restore owed, done on reconnect; " <>
            "what was copied stays copied, and the next night copies the rest",
          ctx do
