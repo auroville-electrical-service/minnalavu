@@ -259,6 +259,7 @@ defmodule Alavi.Poller do
       selectors_dir: selectors_dir,
       copies_dir: Path.join(selectors_dir, "copied"),
       copy_done_at: nil,
+      copy_retry: nil,
       fills: %{},
       connections: 0,
       restore: nil,
@@ -369,27 +370,40 @@ defmodule Alavi.Poller do
   defp decide(state), do: Schedule.next(state.queue, clocks(state), %{}, [])
 
   # A copy is queued once a night, when the window has opened since the last
-  # one ended, unless one is queued, a restore is owed or the poller retiring.
+  # one ended, unless one is queued, a restore is owed or the poller retiring;
+  # and again, for the meters an unreached endpoint left, once their retry is due.
   defp copy_due(%{endpoint: %Endpoint{copy: true}, retiring: nil, restore: nil} = state) do
     opened = CopyWindow.opened_at(state.copy_window, local_now(state))
 
     cond do
       opened == nil -> state
       Enum.any?(state.queue, &(&1.kind == :copy)) -> state
-      state.copy_done_at != nil and not NaiveDateTime.before?(state.copy_done_at, opened) -> state
-      true -> queue_copy(state)
+      not copied_since?(state.copy_done_at, opened) -> queue_copy(state, state.endpoint.meters)
+      retry_due?(state.copy_retry) -> queue_copy(state, state.copy_retry.meters)
+      true -> state
     end
   end
 
   defp copy_due(state), do: state
 
+  defp copied_since?(nil, _opened), do: false
+  defp copied_since?(done_at, opened), do: not NaiveDateTime.before?(done_at, opened)
+
+  defp retry_due?(nil), do: false
+  defp retry_due?(%{at: at}), do: now() >= at
+
   # Fills expired by now are dropped; the rest ride tonight's copy.
-  defp queue_copy(state) do
+  defp queue_copy(state, meters) do
     now = state.clock.()
     fills = Map.reject(state.fills, fn {_id, fill} -> Fill.expired?(fill, now) end)
-    copy = Job.copy(state.endpoint.meters, Map.values(fills), now())
-    %{state | fills: fills, queue: state.queue ++ [copy]}
+    copy = Job.copy(meters, Map.values(fills), now())
+    %{state | fills: fills, queue: state.queue ++ [copy], copy_retry: nil}
   end
+
+  defp copy_retry(%Run{unreached: []}), do: nil
+
+  defp copy_retry(%Run{unreached: [first | _] = meters}),
+    do: %{at: now() + first.retry_ms, meters: meters}
 
   # Milliseconds until the window next opens, for a poller that would sleep past it.
   defp copy_wait(%{endpoint: %Endpoint{copy: true}, retiring: nil} = state) do
@@ -514,7 +528,14 @@ defmodule Alavi.Poller do
     Status.copy(state.status, endpoint_ref(state.endpoint), {:finished, outcome})
     Logger.info("alavi poller #{label(state)}: tonight's copy ended: #{outcome}")
     latency(state)
-    %{state | job: nil, copy_done_at: local_now(state), fills: filled(state.fills, run.filled)}
+
+    %{
+      state
+      | job: nil,
+        copy_done_at: local_now(state),
+        copy_retry: copy_retry(run),
+        fills: filled(state.fills, run.filled)
+    }
   end
 
   defp done(%{job: %Job{kind: :read_on_demand, requester: {pid, ref}} = job} = state) do

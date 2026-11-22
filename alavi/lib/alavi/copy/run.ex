@@ -18,7 +18,7 @@ defmodule Alavi.Copy.Run do
   alias Alavi.Profile.Stored
   alias Alavi.Selectors.Session
 
-  @enforce_keys [:meters, :fills, :filled, :phase, :stop, :fault]
+  @enforce_keys [:meters, :fills, :filled, :phase, :stop, :fault, :unreached]
   defstruct @enforce_keys
 
   @typedoc "Why a run stopped before its meters were done."
@@ -72,14 +72,19 @@ defmodule Alavi.Copy.Run do
           | {:end_visit, visit()}
           | :done
 
-  @typedoc "`fault`: a visit was cut short, or the run ended with a restore owed."
+  @typedoc """
+  `fault`: a visit was cut short, or the run ended with a restore owed.
+  `unreached`: the meters not visited because the endpoint could not be
+  reached, the first of them the one whose identity read found it so.
+  """
   @type t :: %__MODULE__{
           meters: [Meter.t()],
           fills: [Fill.t()],
           filled: [{String.t(), String.t(), Stores.store()}],
           phase: phase(),
           stop: stop() | nil,
-          fault: boolean()
+          fault: boolean(),
+          unreached: [Meter.t()]
         }
 
   # contract: test/alavi/copy/run_test.exs "new/1"
@@ -92,7 +97,8 @@ defmodule Alavi.Copy.Run do
         filled: [],
         phase: :done,
         stop: nil,
-        fault: false
+        fault: false,
+        unreached: []
       })
 
   # contract: test/alavi/copy_test.exs "fill"
@@ -135,12 +141,24 @@ defmodule Alavi.Copy.Run do
   @spec cut(t()) :: t()
   def cut(%__MODULE__{} = run), do: %{next_meter(run) | fault: true}
 
+  @doc """
+  The endpoint could not be reached for `meter`'s visit: the run ends, and
+  `meter` and those after it are left to copy again (`unreached`).
+  """
+  @spec unreached(t(), Meter.t()) :: t()
+  def unreached(%__MODULE__{} = run, meter),
+    do: %{run | meters: [], phase: :done, unreached: [meter | run.meters]}
+
   @spec done?(t()) :: boolean()
   def done?(%__MODULE__{phase: phase}), do: phase == :done
 
-  @doc "How the run ended: done, stopped, or faulted (a visit cut short on the way)."
-  @spec outcome(t()) :: :done | stop() | :fault
+  @doc """
+  How the run ended: done, stopped, faulted (a visit cut short on the way),
+  or with meters unreached.
+  """
+  @spec outcome(t()) :: :done | stop() | :fault | :unreachable
   def outcome(%__MODULE__{fault: true}), do: :fault
+  def outcome(%__MODULE__{unreached: [_ | _]}), do: :unreachable
   def outcome(%__MODULE__{stop: nil}), do: :done
   def outcome(%__MODULE__{stop: why}), do: why
 

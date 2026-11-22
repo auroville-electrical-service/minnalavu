@@ -131,6 +131,9 @@ defmodule Alavi.Copy.Copier do
       {{:ok, seen}, state} ->
         visited(run, meter, seen, state, io)
 
+      {{:missed, {:unreachable, _} = reason, _n, _serial}, state} ->
+        {Run.unreached(run, meter), unreached(state, meter, reason)}
+
       {{:missed, reason, _n, _serial}, state} ->
         {Run.next_meter(run), failed(state, meter, {:identity, reason})}
     end
@@ -683,6 +686,16 @@ defmodule Alavi.Copy.Copier do
   defp failed(state, meter, why) do
     Status.copy(state.status, endpoint(state), {:error, meter.unit_id, inspect(why)})
     warned(state, meter, "not copied tonight: #{inspect(why)}")
+  end
+
+  defp unreached(state, meter, why) do
+    Status.copy(state.status, endpoint(state), {:error, meter.unit_id, inspect(why)})
+
+    warned(
+      state,
+      meter,
+      "endpoint not reached, copied again in #{meter.retry_ms} ms: #{inspect(why)}"
+    )
   end
 
   defp warned(state, meter, message) do

@@ -338,7 +338,8 @@ defmodule Alavi.StatusTest do
             done: "done",
             window: "window_closed",
             retiring: "retiring",
-            fault: "faulted"
+            fault: "faulted",
+            unreachable: "unreachable"
           ] do
         ended = Snapshot.copy(copy, @endpoint, {:finished, outcome}, @now)
 

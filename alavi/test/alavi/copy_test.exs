@@ -61,6 +61,7 @@ defmodule Alavi.CopyTest do
 
     document = Map.put(document([endpoint(port, "tcp", units, changes)]), "copy_window", window())
     {:ok, config} = Config.parse(document, profiles())
+    if Keyword.get(opts, :offline, false), do: Simulator.offline(sim)
 
     pollers =
       start_supervised!(
@@ -412,6 +413,33 @@ defmodule Alavi.CopyTest do
       assert {:ok, %{load_survey: _}} = copied(ctx, "SIM-2")
       assert {:ok, progress} = copied(ctx, "SIM-1")
       refute Map.has_key?(progress, :load_survey)
+    end
+
+    test "an endpoint not reached when its copy starts is copied the same night, " <>
+           "once its retry is due and it answers",
+         ctx do
+      {_agent, clock} = clock!()
+
+      {sim, _endpoint} =
+        start!(ctx, [meter_440()], [meter(1, "elite_440")], clock,
+          offline: true,
+          recheck_ms: 50,
+          endpoint: %{"retry_ms" => 500}
+        )
+
+      log =
+        capture_log(fn ->
+          {:unreachable, first} = night!()
+          assert stored(first, :history) == []
+          Simulator.online(sim)
+
+          {:done, second} = night!()
+          assert length(stored(second, :history)) == 6 * 8
+          assert keys(stored(second, :load_survey)) == Enum.sort(@survey_445)
+        end)
+
+      assert log =~ "endpoint not reached, copied again in 500 ms"
+      refute log =~ "not copied tonight"
     end
 
     for {key, read} <- [{"logger_type", 3}, {"energy_storage_type", 1}] do

@@ -140,7 +140,7 @@ defmodule Alavi.Status.Snapshot do
   count reached, `of` the entries held) or `copying` it (`entry` done `of`
   due), on `unit_id`; then how the night's copy ended: `done` for tonight,
   `window_closed` or `retiring` before it was done, `faulted` with a restore
-  owed. `not_finite` counts the quantities and intervals not sent for a NaN
+  owed, `unreachable` with meters left to copy again once their retry is due. `not_finite` counts the quantities and intervals not sent for a NaN
   under a supported mask bit, since start; `last_error` is the last meter's
   copy that failed.
   """
@@ -162,7 +162,7 @@ defmodule Alavi.Status.Snapshot do
            non_neg_integer(), non_neg_integer()}
           | {:not_finite, pos_integer()}
           | {:error, 1..247, String.t()}
-          | {:finished, :done | :window | :retiring | :fault}
+          | {:finished, :done | :window | :retiring | :fault | :unreachable}
 
   @type endpoint :: %{
           host: String.t(),
@@ -379,6 +379,7 @@ defmodule Alavi.Status.Snapshot do
   defp finished(:window), do: "window_closed"
   defp finished(:retiring), do: "retiring"
   defp finished(:fault), do: "faulted"
+  defp finished(:unreachable), do: "unreachable"
 
   defp selectors_view({:owed, detail, attempts}), do: {"owed", detail, attempts}
   defp selectors_view(:restored), do: {"restored", nil, 0}
