@@ -477,6 +477,42 @@ defmodule Alavi.PollerTest do
       end)
 
       assert Enum.all?(Alavi.Pollers.pollers(sup), fn {_id, child} -> not is_pid(child) end)
+
+      # The read the cut wait leaves is missed, and goes on the wire as unreachable.
+      missed = missed_reads([])
+
+      assert %MissedRead{reason: {:unreachable, {:socket, :retiring}}} =
+               retiring = List.last(missed)
+
+      assert %{"reason" => "unreachable", "detail" => "retiring"} = MissedRead.to_wire(retiring)
+    end
+
+    test "an endpoint that takes each connection and closes it before a byte is unreachable for the round" do
+      {:ok, listen} = :gen_tcp.listen(0, ip: {127, 0, 0, 1}, active: false, reuseaddr: true)
+      {:ok, port} = :inet.port(listen)
+      closer = spawn_link(fn -> close_each(listen) end)
+      on_exit(fn -> Process.exit(closer, :kill) end)
+      meters = [meter(1, "elite_440"), meter(2, "elite_440"), meter(3, "elite_500")]
+
+      start_pollers!([
+        endpoint(port, "tcp", meters, %{
+          "retries" => 2,
+          "reconnect_backoff_ms" => %{"min" => 5_000, "max" => 5_000}
+        })
+      ])
+
+      # One try, not three after each backoff, and the round's other meters at once.
+      reasons =
+        for _unit <- 1..3 do
+          [%MissedRead{reason: reason, attempts: attempts} | _] = recorded!(2_000)
+          {reason, attempts}
+        end
+
+      assert reasons == [
+               {{:unreachable, {:socket, :closed}}, 1},
+               {{:unreachable, {:socket, :closed}}, 0},
+               {{:unreachable, {:socket, :closed}}, 0}
+             ]
     end
 
     test "a read on demand queued before is run, one asked after is refused, then it stops" do
@@ -529,5 +565,20 @@ defmodule Alavi.PollerTest do
       [%{endpoint: %{port: port}} | _] = recorded!(5_000)
       first_read_at(ports, Map.put_new(at, port, System.monotonic_time(:millisecond)))
     end
+  end
+
+  # The missed reads in the sink's messages so far, oldest first.
+  defp missed_reads(acc) do
+    receive do
+      {:recorded, events} -> missed_reads(acc ++ for(%MissedRead{} = m <- events, do: m))
+    after
+      0 -> acc
+    end
+  end
+
+  defp close_each(listen) do
+    {:ok, socket} = :gen_tcp.accept(listen)
+    :gen_tcp.close(socket)
+    close_each(listen)
   end
 end

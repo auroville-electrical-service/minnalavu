@@ -909,6 +909,15 @@ defmodule Alavi.Poller do
     {{:ok, words, n}, %{state | client: client, backoff: state.endpoint.reconnect_backoff_ms.min}}
   end
 
+  # Closed on a connection that never sent a byte: the endpoint takes
+  # connections and drops them (a gateway whose one connection another client
+  # held, 2026-11-22). Unreachable for the rest of this job, as a failed connect
+  # is, rather than tried again after each backoff, meter by meter.
+  defp retried({:error, :closed, %Client{answered: false} = client}, state, _read, n) do
+    why = {:socket, :closed}
+    {{:skip_meter, {:unreachable, why}, n}, %{state | client: client, job: down(state.job, why)}}
+  end
+
   defp retried({:error, error, client}, state, read, n) do
     state = %{state | client: client}
 
@@ -1046,8 +1055,11 @@ defmodule Alavi.Poller do
 
   defp connected(%{endpoint: endpoint} = state) do
     case waited(state.reconnect_at - now()) do
-      :ok -> connect(state, endpoint)
-      :retiring -> {:error, :retiring, %{state | job: down(state.job, :retiring)}}
+      :ok ->
+        connect(state, endpoint)
+
+      :retiring ->
+        {:error, {:socket, :retiring}, %{state | job: down(state.job, {:socket, :retiring})}}
     end
   end
 

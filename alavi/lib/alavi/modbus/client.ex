@@ -17,10 +17,14 @@ defmodule Alavi.Modbus.Client do
     transaction_id: 0,
     timeouts: 0,
     buffer: <<>>,
-    anomalies: []
+    anomalies: [],
+    answered: false
   ]
 
-  @typedoc "`timeouts` counts timeouts in a row; `anomalies` are those not yet taken, newest first."
+  @typedoc """
+  `timeouts` counts timeouts in a row; `anomalies` are those not yet taken,
+  newest first; `answered`, whether the connection has sent a byte.
+  """
   @type t :: %__MODULE__{
           socket: :gen_tcp.socket() | nil,
           framing: Framing.t(),
@@ -29,7 +33,8 @@ defmodule Alavi.Modbus.Client do
           transaction_id: Framing.transaction_id(),
           timeouts: non_neg_integer(),
           buffer: binary(),
-          anomalies: [anomaly()]
+          anomalies: [anomaly()],
+          answered: boolean()
         }
 
   @typedoc """
@@ -237,7 +242,12 @@ defmodule Alavi.Modbus.Client do
 
     with true <- remaining > 0,
          {:ok, bytes} <- :gen_tcp.recv(client.socket, 0, remaining) do
-      await(%{client | buffer: client.buffer <> bytes}, expected, deadline, skipped)
+      await(
+        %{client | buffer: client.buffer <> bytes, answered: true},
+        expected,
+        deadline,
+        skipped
+      )
     else
       false -> {:error, expired(skipped), noted(client, expected, skipped)}
       {:error, :timeout} -> {:error, expired(skipped), noted(client, expected, skipped)}
