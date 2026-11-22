@@ -455,6 +455,30 @@ defmodule Alavi.PollerTest do
   end
 
   describe "retire/2" do
+    test "one waiting out a reconnect backoff stops at once, not when the wait ends" do
+      {sim, port} = start_sim!(:tcp)
+      :ok = Simulator.offline(sim)
+
+      sup =
+        start_pollers!([
+          endpoint(port, "tcp", [meter(1, "elite_440")], %{
+            "timeout_ms" => 100,
+            "retry_ms" => 50,
+            "reconnect_backoff_ms" => %{"min" => 5_000, "max" => 5_000}
+          })
+        ])
+
+      # The first connect times out; the retry 50 ms later waits out the backoff.
+      ExUnit.CaptureLog.capture_log(fn ->
+        Process.sleep(600)
+        started = System.monotonic_time(:millisecond)
+        assert Alavi.Pollers.stop(sup, 1_000) == :ok
+        assert System.monotonic_time(:millisecond) - started < 1_000
+      end)
+
+      assert Enum.all?(Alavi.Pollers.pollers(sup), fn {_id, child} -> not is_pid(child) end)
+    end
+
     test "a read on demand queued before is run, one asked after is refused, then it stops" do
       {slow, port} = start_sim!(:tcp)
       Simulator.faults(slow, delay_ms: 30)

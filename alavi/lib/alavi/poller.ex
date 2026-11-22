@@ -53,7 +53,8 @@ defmodule Alavi.Poller do
   under way and the reads on demand already queued are done: at a round
   boundary, never mid-round, and so never inside a selector session, which
   runs within one step, or a copy's, which stops at its next entry boundary
-  and closes its session first. Retired `:removed`, it first puts back any owed
+  and closes its session first. Waiting out a reconnect backoff, it waits no
+  more: the job's reads left are missed, unreachable. Retired `:removed`, it first puts back any owed
   selectors, retrying as before however long that takes; retired
   `:replaced`, it leaves them owed on disk, for the poller that replaces it
   finds them at start; retired `:stopping`, as the collector stops, it leaves
@@ -1044,7 +1045,33 @@ defmodule Alavi.Poller do
   defp connected(%{client: %Client{socket: socket}} = state) when socket != nil, do: {:ok, state}
 
   defp connected(%{endpoint: endpoint} = state) do
-    Process.sleep(max(state.reconnect_at - now(), 0))
+    case waited(state.reconnect_at - now()) do
+      :ok -> connect(state, endpoint)
+      :retiring -> {:error, :retiring, %{state | job: down(state.job, :retiring)}}
+    end
+  end
+
+  # The reconnect backoff is waited out in this process, which answers nothing
+  # meanwhile; a retirement cut it short (an endpoint that closes every
+  # connection kept its poller from stopping for minutes, 2026-11-22). The cast
+  # goes back in the mailbox for the loop, and the job's reads left are missed,
+  # unreachable. With no wait due the job goes on, as a retiring one does.
+  defp waited(ms) when ms <= 0, do: :ok
+
+  defp waited(ms) do
+    receive do
+      {:"$gen_cast", {:retire, _why}} = retire ->
+        send(self(), retire)
+        :retiring
+    after
+      ms -> :ok
+    end
+  end
+
+  defp down(%Job{} = job, reason), do: Job.down(job, reason)
+  defp down(nil, _reason), do: nil
+
+  defp connect(state, endpoint) do
     result = Client.connect(endpoint.host, endpoint.port, endpoint.framing, client_opts(endpoint))
 
     state = %{
