@@ -193,8 +193,9 @@ defmodule Alavi.CopyTest do
 
       assert Store.owed(ctx.tmp_dir, endpoint) == :none
 
+      # A 440's history shows 0 until written, and cannot be written back to 0.
       assert {:ok,
-              %{{1, "elite_440", :history} => 0, {1, "elite_440", :load_survey_day} => 0} = left} =
+              %{{1, "elite_440", :history} => 1, {1, "elite_440", :load_survey_day} => 0} = left} =
                Store.left(ctx.tmp_dir, endpoint)
 
       assert left[{1, "elite_440", :snapshot}] == 0

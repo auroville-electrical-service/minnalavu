@@ -76,7 +76,7 @@ defmodule Alavi.RestoreTest do
       assert Store.owed(dir, %{host: "127.0.0.1", port: port}) == :none
 
       assert Store.left(dir, %{host: "127.0.0.1", port: port}) ==
-               {:ok, %{{1, "elite_440", :history} => 0}}
+               {:ok, %{{1, "elite_440", :history} => 1}}
     end
 
     test "a failing restore is retried, the endpoint shown faulted, and polls go on as before",
@@ -105,7 +105,7 @@ defmodule Alavi.RestoreTest do
       end)
 
       assert Store.owed(dir, endpoint) == :none
-      assert Store.left(dir, endpoint) == {:ok, %{{1, "elite_440", :history} => 0}}
+      assert Store.left(dir, endpoint) == {:ok, %{{1, "elite_440", :history} => 1}}
     end
 
     test "an unreadable record stays owed with values unknown, faulted, and polls go on",

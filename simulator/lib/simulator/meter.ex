@@ -24,7 +24,9 @@ defmodule Simulator.Meter do
   with the model's own function code (06 on the Elite 440 family, 16 on the
   Elite 500), is echoed and the register reads back the new value. Any other
   address is exception 02, and a value naming an entry the meter does not
-  hold, or a parameter it does not support, exception 03. The 440 family
+  hold, or a parameter it does not support, exception 03. The 440 family's
+  history shows 0 (live values) until written, and refuses a write of 0 with
+  exception 03, as every 440 tried did (2026-11-22). The 440 family
   answers 16 with exception 02 and the 500 answers 06 with exception 01, as
   real meters do. On the 500 the load survey shows the new day or parameter
   only 100 ms after the write; until then it shows the previous selection's.
@@ -83,7 +85,8 @@ defmodule Simulator.Meter do
       other: {16, 2},
       addresses: %{history: 520, snapshot: 700, load_survey_parameter: 800, load_survey_day: 801},
       settle_ms: %{},
-      widths: %{}
+      widths: %{},
+      floors: %{history: 1}
     },
     "elite_500" => %{
       function_code: 16,
@@ -96,7 +99,8 @@ defmodule Simulator.Meter do
       },
       settle_ms: %{load_survey_day: 100, load_survey_parameter: 100},
       # The day register keeps its low byte and selects by it (seen 2026-11-18).
-      widths: %{load_survey_day: 0xFF}
+      widths: %{load_survey_day: 0xFF},
+      floors: %{}
     }
   }
 
@@ -203,7 +207,7 @@ defmodule Simulator.Meter do
       {name, _} ->
         kept = value &&& Map.get(model.widths, name, 0xFFFF)
 
-        if Stores.allows?(meter.stores, name, kept),
+        if kept >= Map.get(model.floors, name, 0) and Stores.allows?(meter.stores, name, kept),
           do: {:ok, settle(meter, address, kept, host_ms, Map.get(model.settle_ms, name, 0))},
           else: {:exception, 3}
     end

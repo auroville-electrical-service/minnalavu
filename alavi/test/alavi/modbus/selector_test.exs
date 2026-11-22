@@ -7,7 +7,7 @@ defmodule Alavi.Modbus.SelectorTest do
   # The whole allowlist, written out: a change to any address, function code,
   # range, max or settle time must change this table too.
   @allowlist [
-    {"elite_440", :history, 520, 6, :through_available, 0xFFFF, 0, "elite_440-a"},
+    {"elite_440", :history, 520, 6, :one_through_available, 0xFFFF, 0, "elite_440-a"},
     {"elite_440", :snapshot, 700, 6, :below_available, 0xFFFF, 0, "elite_440-a"},
     {"elite_440", :load_survey_parameter, 800, 6, :supported_bit, 0xFFFF, 0, "elite_440-a"},
     {"elite_440", :load_survey_day, 801, 6, :below_available, 0xFFFF, 0, "elite_440-a"},
@@ -45,8 +45,12 @@ defmodule Alavi.Modbus.SelectorTest do
       assert Selector.bytes(w500) == <<16, 900::16, 1::16, 2, 3::16>>
     end
 
-    test "a history may be 0 (live) through the count available" do
-      assert {:ok, _} = Selector.request("elite_440", :history, 0, 6)
+    test "a 500's history may be 0 (live) through the count available; a 440's only from 1" do
+      assert {:ok, _} = Selector.request("elite_500", :history, 0, 6)
+      assert {:ok, _} = Selector.request("elite_500", :history, 6, 6)
+      assert {:error, :out_of_range} = Selector.request("elite_500", :history, 7, 6)
+      assert {:error, :out_of_range} = Selector.request("elite_440", :history, 0, 6)
+      assert {:ok, _} = Selector.request("elite_440", :history, 1, 6)
       assert {:ok, _} = Selector.request("elite_440", :history, 6, 6)
       assert {:error, :out_of_range} = Selector.request("elite_440", :history, 7, 6)
     end
@@ -92,6 +96,25 @@ defmodule Alavi.Modbus.SelectorTest do
           {:error, _} -> :ok
         end
       end
+    end
+  end
+
+  describe "put_back/4" do
+    test "a value the meter takes is put back as found" do
+      assert {:ok, 3} = Selector.put_back("elite_440", :history, 3, 6)
+      assert {:ok, 0} = Selector.put_back("elite_500", :history, 0, 6)
+      assert {:ok, 0} = Selector.put_back("elite_440", :snapshot, 0, 52)
+    end
+
+    test "a 440's history found at 0 is put back at 1, if it holds one" do
+      assert {:ok, 1} = Selector.put_back("elite_440", :history, 0, 6)
+      assert {:error, :out_of_range} = Selector.put_back("elite_440", :history, 0, 0)
+    end
+
+    test "any other value it would not write is refused" do
+      assert {:error, :out_of_range} = Selector.put_back("elite_440", :history, 7, 6)
+      assert {:error, :out_of_range} = Selector.put_back("elite_440", :snapshot, 52, 52)
+      assert {:error, :not_allowed} = Selector.put_back("elite_440", :tou_history, 0, 6)
     end
   end
 
@@ -149,6 +172,7 @@ defmodule Alavi.Modbus.SelectorTest do
   end
 
   defp in_range?(:through_available, value, available), do: value <= available
+  defp in_range?(:one_through_available, value, available), do: value in 1..available//1
   defp in_range?(:below_available, value, available), do: value < available
 
   defp in_range?(:supported_bit, value, mask),

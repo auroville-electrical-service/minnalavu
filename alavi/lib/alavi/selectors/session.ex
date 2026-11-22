@@ -152,19 +152,27 @@ defmodule Alavi.Selectors.Session do
     end
   end
 
-  # A value the allowlist would not let us write back is never moved from.
-  defp restorable(%Record{model: model, selectors: selectors}) do
-    case Enum.find(
-           selectors,
-           &(Selector.request(model, &1.name, &1.value, &1.bound) |> failed?())
-         ) do
-      nil -> :ok
+  # A value with nothing to put back (`Selector.put_back/4`) is never moved
+  # from. One the meter refuses as a write but has a nearest for (an Elite
+  # 440's history at 0) is: the record keeps the value found, and a selector
+  # moved from it is put back at the nearest.
+  defp restorable(%Record{model: model, selectors: selectors} = record) do
+    case Enum.find(selectors, &match?({:error, _}, target(model, &1))) do
+      nil -> Enum.each(selectors, &substituted(record, &1, target(model, &1)))
       s -> {:error, {:not_restorable, s.name, s.value}}
     end
   end
 
-  defp failed?({:ok, _request}), do: false
-  defp failed?({:error, _reason}), do: true
+  defp target(model, s), do: Selector.put_back(model, s.name, s.value, s.bound)
+
+  defp substituted(_record, %{value: value}, {:ok, value}), do: :ok
+
+  defp substituted(%Record{endpoint: %{host: host, port: port}, unit_id: unit}, s, {:ok, value}) do
+    Logger.warning(
+      "alavi selectors #{host}:#{port} unit #{unit}: #{s.name} found at #{s.value}, " <>
+        "which the meter does not take as a write: once moved, it is put back at #{value}"
+    )
+  end
 
   defp owe(dir, record) do
     case Store.owe(dir, record) do
@@ -207,26 +215,40 @@ defmodule Alavi.Selectors.Session do
     end
   end
 
+  # Each selector is put back where it was found, or, moved from a value the
+  # meter will not take as a write, at the nearest it will; then each is read
+  # back, and what was left recorded.
   defp put_back(client, dir, record) do
-    with {:ok, client} <- each(client, record, &unless_at(&1, record, &2)),
-         {:ok, client} <- each(client, record, &read_back(&1, record, &2.name, &2.value)) do
-      recorded(client, dir, record)
+    with {:ok, left, client} <- each(client, record.selectors, &unless_at(&1, record, &2)),
+         {:ok, _read, client} <-
+           each(client, left, &(read_back(&1, record, &2.name, &2.value) |> kept(&2))) do
+      recorded(client, dir, %{record | selectors: left})
     end
   end
 
-  # The selectors not at their saved value are written back.
-  defp unless_at(client, record, %{name: name, value: value, bound: bound}) do
+  defp unless_at(client, record, %{name: name, value: found} = s) do
     case read(client, record, name) do
-      {:ok, ^value, client} -> {:ok, client}
-      {:ok, _other, client} -> put(client, record, name, value, bound)
+      {:ok, ^found, client} -> {:ok, s, client}
+      {:ok, at, client} -> moved(client, record, s, at)
       {:error, reason, client} -> {:error, reason, client}
     end
   end
 
-  defp each(client, record, step) do
-    Enum.reduce_while(record.selectors, {:ok, client}, fn selector, {:ok, client} ->
+  defp moved(client, record, s, at) do
+    case target(record.model, s) do
+      {:ok, ^at} -> {:ok, %{s | value: at}, client}
+      {:ok, value} -> put(client, record, s.name, value, s.bound) |> kept(%{s | value: value})
+      {:error, reason} -> {:error, reason, client}
+    end
+  end
+
+  defp kept({:ok, client}, s), do: {:ok, s, client}
+  defp kept({:error, _reason, _client} = error, _s), do: error
+
+  defp each(client, selectors, step) do
+    Enum.reduce_while(selectors, {:ok, [], client}, fn selector, {:ok, done, client} ->
       case step.(client, selector) do
-        {:ok, client} -> {:cont, {:ok, client}}
+        {:ok, s, client} -> {:cont, {:ok, done ++ [s], client}}
         {:error, _reason, _client} = error -> {:halt, error}
       end
     end)

@@ -11,6 +11,9 @@ defmodule Alavi.Modbus.Selector do
   from the meter beforehand:
 
   - `:through_available`: 0 to the count of stored entries (0 is live values);
+  - `:one_through_available`: 1 to that count: the Elite 440's history shows
+    0 (live values) until written, and refuses a write of 0 (exception 03,
+    every 440 tried, 2026-11-22);
   - `:below_available`: 0 to that count less one (0 is today);
   - `:supported_bit`: a parameter number whose bit is set in the meter's
     supported-parameter mask.
@@ -36,7 +39,7 @@ defmodule Alavi.Modbus.Selector do
   @type model :: String.t()
   @type name :: :history | :snapshot | :load_survey_day | :load_survey_parameter
   @type function_code :: 6 | 16
-  @type range :: :through_available | :below_available | :supported_bit
+  @type range :: :through_available | :one_through_available | :below_available | :supported_bit
   @type entry :: %{
           model: model(),
           name: name(),
@@ -59,7 +62,7 @@ defmodule Alavi.Modbus.Selector do
       name: :history,
       address: 520,
       function_code: 6,
-      range: :through_available,
+      range: :one_through_available,
       max: 0xFFFF,
       settle_ms: 0,
       source: "elite_440-a"
@@ -158,10 +161,32 @@ defmodule Alavi.Modbus.Selector do
   @spec reachable(model(), name(), non_neg_integer()) :: non_neg_integer()
   def reachable(model, name, count) do
     case entry(model, name) do
-      %{range: :below_available, max: max} -> min(count, max + 1)
-      %{range: :through_available, max: max} -> min(count, max)
+      %{range: :below_available, max: max} ->
+        min(count, max + 1)
+
+      %{range: range, max: max} when range in [:through_available, :one_through_available] ->
+        min(count, max)
     end
   end
+
+  # contract: test/alavi/modbus/selector_test.exs "put_back/4"
+  @doc """
+  The value a session puts back for a selector it found at `value`: that
+  value, or, for one the meter shows but refuses as a write (an Elite 440's
+  history at 0), the lowest it accepts.
+  """
+  @spec put_back(model(), name(), integer(), integer()) ::
+          {:ok, integer()} | {:error, :not_allowed | :out_of_range}
+  def put_back(model, name, value, bound) do
+    case {request(model, name, value, bound), entry(model, name)} do
+      {{:ok, _request}, _entry} -> {:ok, value}
+      {{:error, :out_of_range}, %{range: :one_through_available}} when value == 0 -> lowest(bound)
+      {{:error, reason}, _entry} -> {:error, reason}
+    end
+  end
+
+  defp lowest(bound) when bound >= 1, do: {:ok, 1}
+  defp lowest(_bound), do: {:error, :out_of_range}
 
   defp entry(model, name), do: Enum.find(@allowlist, &(&1.model == model and &1.name == name))
 
@@ -182,6 +207,7 @@ defmodule Alavi.Modbus.Selector do
   defp build(_entry, _value, _bound), do: {:error, :out_of_range}
 
   defp in_range?(:through_available, value, available), do: value <= available
+  defp in_range?(:one_through_available, value, available), do: value in 1..available//1
   defp in_range?(:below_available, value, available), do: value < available
   defp in_range?(:supported_bit, value, mask), do: mask >= 0 and (mask >>> value &&& 1) == 1
 

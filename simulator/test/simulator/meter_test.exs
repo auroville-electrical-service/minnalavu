@@ -137,6 +137,17 @@ defmodule Simulator.MeterTest do
       end
     end
 
+    test "a 440's history shows 0 until written, and refuses a write of 0 with exception 03; a 500's takes it" do
+      meter_440 = Meter.new(1, Profile.load!("elite_440"))
+      meter_500 = Meter.new(3, Profile.load!("elite_500"))
+      assert {:ok, [0]} = Meter.read(meter_440, :holding, 520, 1, @at)
+      assert {:exception, 3} = Meter.write(meter_440, 6, 520, 0, @at)
+      assert {:ok, written} = Meter.write(meter_440, 6, 520, 1, @at)
+      assert {:exception, 3} = Meter.write(written, 6, 520, 0, @at)
+      assert {:ok, [1]} = Meter.read(written, :holding, 520, 1, @at)
+      assert {:ok, _} = Meter.write(meter_500, 16, 900, 0, @at)
+    end
+
     test "a 500's load survey shows the previous selection until 100 ms after the write" do
       meter = Meter.new(3, Profile.load!("elite_500")) |> Meter.anchor(@at)
       %{stamp: %{address: stamp}} = meter.profile.stored.load_survey

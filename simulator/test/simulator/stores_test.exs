@@ -37,10 +37,19 @@ defmodule Simulator.StoresTest do
   defp meter(name, values \\ @live, at \\ @start),
     do: 1 |> Meter.new(Profile.load!(name), values) |> Meter.anchor(at)
 
+  # A selector already at `value` is not written: a 440's history shows 0 from
+  # the start, and refuses a write of 0.
   defp select(meter, selector, value, at \\ @now) do
     %{code: code} = selectors = @selectors[meter.profile.name]
-    {:ok, meter} = Meter.write(meter, code, selectors[selector], value, at)
-    meter
+
+    case Meter.read(meter, :holding, selectors[selector], 1, at) do
+      {:ok, [^value]} ->
+        meter
+
+      {:ok, _other} ->
+        {:ok, meter} = Meter.write(meter, code, selectors[selector], value, at)
+        meter
+    end
   end
 
   defp words(meter, address, count, at \\ @now) do
