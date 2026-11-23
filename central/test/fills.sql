@@ -1,4 +1,4 @@
--- Copy fills (ADR 0025): what admin.request_fill accepts and records, how
+-- Copy fills: what admin.request_fill accepts and records, how
 -- ingest offers a fill to its collector and links what comes back, when a
 -- fill is answered, and the holes admin.copy_holes finds. Who may call what
 -- is in grants.sql.

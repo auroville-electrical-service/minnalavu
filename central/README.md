@@ -563,7 +563,7 @@ notice says only "look again": read `jobs.request_status`.
 A collector copies each meter's stored entries newer than its own
 high-water mark, so entries the store lacks behind that mark (a buffer
 segment lost after it was accepted, a store moved or restored) are found and
-filled on request, as the operator (ADR 0025).
+filled on request, as the operator.
 
     SELECT * FROM admin.copy_holes(since => '2026-10-01');   -- meter-clock time
 

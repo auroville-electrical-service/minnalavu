@@ -1,4 +1,4 @@
--- Copy holes, for a session's judgement (ADR 0025; skills/minnalavu-ops/copy-holes.md).
+-- Copy holes, for a session's judgement (skills/minnalavu-ops/copy-holes.md).
 -- Read only. Slots and ranges are meter-clock times, as admin.copy_holes
 -- gives them.
 --   bin/dev central sh -c 'psql "$MINNALAVU_DB_URL" -X -v since=2026-10-01 -f ../skills/minnalavu-ops/holes.sql'

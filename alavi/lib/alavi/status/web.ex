@@ -3,7 +3,8 @@ defmodule Alavi.Status.Web do
 
   @moduledoc """
   The status page's HTTP server, on OTP's `:httpd`. It binds 127.0.0.1 here,
-  in code, whatever the settings say (ADR 0016): only the port is configured.
+  in code, whatever the settings say, so the page is never reachable from
+  the network: only the port is configured.
 
   `GET /` is the summary page and `GET /endpoint/<n>` the page of the `n`th
   endpoint in the polling config, from 1 (`Alavi.Status.Page`, each refreshing

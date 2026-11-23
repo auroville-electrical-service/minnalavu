@@ -163,7 +163,7 @@ defmodule Alavi.EndToEndTest do
       """)
 
     by_key = Map.new(readings, &{{&1["meter_serial"], &1["register_key"]}, &1})
-    # Floats as the shortest decimal that round-trips at their width (ADR 0020).
+    # Floats as the shortest decimal that round-trips at their width.
     assert by_key[{"SIM-1", "active_energy_import"}]["value"] == "123456"
     assert by_key[{read_serial, "active_energy_import"}]["value"] == "1234.5"
     # The unit comes from the profile version's catalog row, not the reading.

@@ -3,8 +3,8 @@
 A polled reading cannot be read again. A reading the old store accepted
 after the backup is in neither the new store nor the collector's buffer,
 because the buffer drops what the store has accepted. So the order matters:
-**freeze, back up, restore, repoint, fill** (ADR 0025,
-`central/README.md` *Copy fills*).
+**freeze, back up, restore, repoint, fill** (`central/README.md`
+*Copy fills*).
 
 This file is the procedure. Where the stores run, and how to reach them, is
 the deployment's own business, and none of it goes in this repo.

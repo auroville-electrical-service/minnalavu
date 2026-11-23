@@ -2,7 +2,7 @@
 
 A collector copies each meter's stored entries newer than its own mark, so
 entries the store lacks behind that mark stay missing until someone asks
-for them (ADR 0025, `central/README.md` *Copy fills*). No threshold or
+for them (`central/README.md` *Copy fills*). No threshold or
 health problem raises them. A session judges them, with this procedure.
 
 `holes.sql` beside this file runs every query below, read only:

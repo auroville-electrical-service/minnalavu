@@ -206,7 +206,7 @@ SELECT pg_temp.is(
   0::bigint,
   'with no stored quantities');
 
--- The kind rules (ADR 0019, D4): only a cumulative quantity may be
+-- The kind rules: only a cumulative quantity may be
 -- differenced as energy, and energy per interval is never one.
 SELECT pg_temp.is(pg_temp.load(d), '23514: new row for relation "profile_stored" violates check '
                   || 'constraint "' || con || '"',
