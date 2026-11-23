@@ -80,7 +80,9 @@ The directory is not named `minnalavu/`, since that is the repo itself.
   collector's polling config (below).
 - `admin`: operator functions, run as the database owner.
 - `registry`: the device registry (below).
-- `health`: views of collection health, the only thing the role `monitor` may read.
+- `health`: views of collection health, read by the role `monitor`.
+- `meter_stores`: the meters' own stores as an interface for readers, read
+  by `monitor` (below).
 - `jobs`: requests for reads on demand, the only thing the role
   `minkanakku_staff` may touch (below).
 
@@ -464,12 +466,36 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
   a meter's drift between reads), `meter_clock_far_after` (15 minutes) and
   `copy_failing_interval` (30 minutes, the 440's load-survey interval).
 
-The role `monitor` may select from these views and nothing else: no raw
+The role `monitor` may select from these views and those in
+`meter_stores` (below), and nothing else: no raw
 table, no registry table, nothing in `api` or `admin`, no function, no writes
 (`test/grants.sql`). It cannot log in; a login is a member of it, one per
 person or job:
 
     CREATE ROLE alert_job LOGIN PASSWORD '…' IN ROLE monitor;
+
+## The meters' own stores, for readers
+
+`meter_stores` is an interface: `minkanakku` reads it, so change it with the
+same care as the collector contract. A row is keyed on `(meter_serial,
+register_key, meter_time)` and never changes once shown, so a reader may
+keep the key as a pointer and read through it later.
+
+- `meter_stores.history`: every quantity of every history entry copied, as
+  first stored: the key, `value` (unrounded, as sent), `unit`, `profile`,
+  `profile_version`, `product_code`, `copied_at` and `collector_id`,
+  `received_at` (when its batch first arrived, so a late copy is found by
+  arrival), and `conflicts`, how many copies under the same key said
+  otherwise. `meter_time` is the meter's own stamp, local, no zone, and not
+  only a month's start: a meter closes a history entry at other times too.
+  The value stands as first stored whatever `conflicts` says, which is not a
+  verdict that it is the right one.
+- `meter_stores.history_conflicts`: each of those copies, once per batch that
+  brought it: the key, `value`, `unit`, the decode, the copy and its
+  `received_at`.
+
+The evidence of each copy (slot, address, batch, request) stays in
+`health.stored_entries`.
 
 ## The alert job
 
@@ -539,9 +565,8 @@ cannot log in; a login is a member of it, as for `monitor`. One login may
 hold both roles, and so reach what each grants; it may hold no other role,
 own nothing, and be granted nothing by name.
 
-`minkanakku`'s read-only role, not built yet, will read `stored_entries`,
-`stored_entry_conflicts`, `meter_clock_reads` and `meter_clock_read_conflicts`
-beside the readings and the catalog: a widening of that interface, to be changed with the same care.
+Snapshots, the load survey, readings and the catalog are not yet in
+`meter_stores` or any reader's interface; each is a widening of it.
 
     SELECT jobs.request_job(collector_id => 'pilot_01', kind => 'read_on_demand',
       meters => ARRAY['…'], requester => '…');          -- returns the request id

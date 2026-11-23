@@ -1,6 +1,7 @@
 -- What the roles PostgREST uses may do: call api.ingest and
 -- api.collector_config, and nothing else;
--- what monitor may do: read the health views, and nothing else; and what
+-- what monitor may do: read the health and meter_stores views, and nothing
+-- else; and what
 -- minkanakku_staff may do: request a job and read the requests, and nothing
 -- else. Above all, no such role may read, change or delete raw readings.
 
@@ -97,7 +98,7 @@ SELECT pg_temp.is(
    FROM postgrest_roles r
    CROSS JOIN pg_proc f
    JOIN pg_namespace n ON n.oid = f.pronamespace
-   WHERE n.nspname IN ('store', 'api', 'admin', 'registry', 'health')
+   WHERE n.nspname IN ('store', 'api', 'admin', 'registry', 'health', 'meter_stores')
      AND has_function_privilege(r.role, f.oid, 'EXECUTE')),
   (SELECT string_agg(format('%s may execute %s', role, f), '; ' ORDER BY role, f)
    FROM collector_roles
@@ -260,7 +261,7 @@ FROM unnest(ARRAY[
 ]) q;
 
 -- The role monitor, and a login that holds it alone: it may read the health
--- views, and nothing else. Real logins (the operator's, the alert job's) are
+-- and meter_stores views, and nothing else. Real logins (the operator's, the alert job's) are
 -- checked below to add nothing to the roles they hold.
 CREATE ROLE sqltest_monitor_login IN ROLE monitor;
 
@@ -286,6 +287,12 @@ SELECT pg_temp.is(
   'health holds nothing but views');
 
 SELECT pg_temp.is(
+  (SELECT string_agg(format('%s %s', c.relname, c.relkind), ', ' ORDER BY c.relname)
+   FROM pg_class c WHERE c.relnamespace = 'meter_stores'::regnamespace),
+  'history v, history_conflicts v',
+  'meter_stores holds exactly these views, and nothing else');
+
+SELECT pg_temp.is(
   (SELECT string_agg(format('%s has %s on %s.%s', r.role, p, c.nspname, c.relname), '; '
                      ORDER BY r.role, c.nspname, c.relname, p)
    FROM monitor_roles r
@@ -296,10 +303,13 @@ SELECT pg_temp.is(
      AND CASE WHEN p IN ('SELECT', 'INSERT', 'UPDATE', 'REFERENCES')
               THEN has_any_column_privilege(r.role, c.oid, p)
               ELSE has_table_privilege(r.role, c.oid, p) END),
-  (SELECT string_agg(format('%s has SELECT on health.%s', r.role, c.relname), '; '
-                     ORDER BY r.role, c.relname)
-   FROM monitor_roles r CROSS JOIN pg_class c WHERE c.relnamespace = 'health'::regnamespace),
-  'monitor may select from the health views and do nothing else to any table or view, chunks included');
+  (SELECT string_agg(format('%s has SELECT on %s.%s', r.role, n.nspname, c.relname), '; '
+                     ORDER BY r.role, n.nspname, c.relname)
+   FROM monitor_roles r
+   CROSS JOIN pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname IN ('health', 'meter_stores')),
+  'monitor may select from the health and meter_stores views and do nothing else to any table '
+  || 'or view, chunks included');
 
 SELECT pg_temp.is(
   (SELECT string_agg(format('%s has %s on %s.%s', r.role, p, c.nspname, c.relname), '; ')
@@ -315,7 +325,7 @@ SELECT pg_temp.is(
    FROM monitor_roles r
    CROSS JOIN pg_proc f
    JOIN pg_namespace n ON n.oid = f.pronamespace
-   WHERE n.nspname IN ('store', 'api', 'admin', 'registry', 'health')
+   WHERE n.nspname IN ('store', 'api', 'admin', 'registry', 'health', 'meter_stores')
      AND has_function_privilege(r.role, f.oid, 'EXECUTE')),
   NULL,
   'monitor may execute none of our functions');
@@ -327,9 +337,9 @@ SELECT pg_temp.is(
    CROSS JOIN user_schemas s
    CROSS JOIN unnest(ARRAY['USAGE', 'CREATE']) p
    WHERE has_schema_privilege(r.role, s.oid, p)),
-  (SELECT string_agg(format('%s has USAGE on schema health', role), '; ' ORDER BY role)
-   FROM monitor_roles),
-  'monitor may use only the health schema, and create nothing in it');
+  (SELECT string_agg(format('%s has USAGE on schema %s', role, s), '; ' ORDER BY role, s)
+   FROM monitor_roles CROSS JOIN unnest(ARRAY['health', 'meter_stores']) s),
+  'monitor may use only the health and meter_stores schemas, and create nothing in them');
 
 SELECT pg_temp.is(
   (SELECT string_agg(format('%s has %s', r.role, p), '; ')
@@ -382,7 +392,9 @@ FROM unnest(ARRAY[
   'SELECT * FROM health.meter_clock_steps',
   'SELECT * FROM health.meter_clocks',
   'SELECT * FROM health.copy_meters',
-  'SELECT * FROM health.meter_rounds'
+  'SELECT * FROM health.meter_rounds',
+  'SELECT * FROM meter_stores.history',
+  'SELECT * FROM meter_stores.history_conflicts'
 ]) q;
 
 SELECT pg_temp.is(pg_temp.sqlstate_as('monitor', q), '42501', 'monitor is refused: ' || q)
@@ -456,7 +468,7 @@ SELECT pg_temp.is(
    FROM staff_roles r
    CROSS JOIN pg_proc f
    JOIN pg_namespace n ON n.oid = f.pronamespace
-   WHERE n.nspname IN ('store', 'api', 'admin', 'registry', 'health', 'jobs')
+   WHERE n.nspname IN ('store', 'api', 'admin', 'registry', 'health', 'meter_stores', 'jobs')
      AND has_function_privilege(r.role, f.oid, 'EXECUTE')),
   (SELECT string_agg(format('%s may execute jobs.request_job(text,text,text[],text)', role), '; '
                      ORDER BY role)
