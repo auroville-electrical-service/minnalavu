@@ -393,6 +393,13 @@ SELECT pg_temp.is(
   'a silent endpoint''s problem says how many units, since its last reading at any, '
   || 'how often they are due, its last missed read and where it is');
 
+SELECT pg_temp.is(pg_temp.keys('endpoint_silent', 'sqlh_g_ep'),
+  'sqlh_d/sqlh_g_ep/10.0.0.5:502/-/-', 'a silent endpoint names the endpoint');
+
+SELECT pg_temp.is(pg_temp.keys('meter_never_read', 'SQLT-0010'),
+  'sqlh_d/sqlh_d_ep/10.0.0.1:502/10/SQLT-0010',
+  'a meter never read names the meter and the target it is placed at');
+
 -- sqlh_g_ep's every unit missed again 5 minutes ago, each connection closed
 -- before a byte.
 INSERT INTO store.missed_reads

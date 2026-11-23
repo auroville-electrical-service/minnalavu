@@ -274,10 +274,10 @@ SELECT pg_temp.is(
   'collector_clocks, collectors, copy_meters, copy_stores, copy_targets, endpoint_latency, '
   || 'endpoint_timeouts, endpoints, energy_drops, meter_clock_offsets, meter_clock_read_conflicts, '
   || 'meter_clock_reads, meter_clock_steps, meter_clocks, meter_firmware, meter_rounds, '
-  || 'meters, misplaced_serials, missed_snapshots, place_serials, problems, stored_entries, '
-  || 'stored_entry_conflicts, targets, thresholds, unregistered_serial_places, '
+  || 'meters, misplaced_serials, missed_snapshots, place_serials, problem_kinds, problems, '
+  || 'stored_entries, stored_entry_conflicts, targets, thresholds, unregistered_serial_places, '
   || 'unregistered_serials',
-  'health holds the twenty-seven health views');
+  'health holds exactly these health views');
 
 SELECT pg_temp.is(
   (SELECT count(*) FROM pg_class c
@@ -357,6 +357,7 @@ SELECT pg_temp.is(
 SELECT pg_temp.is(pg_temp.sqlstate_as('monitor', q), '00000', 'monitor may: ' || q)
 FROM unnest(ARRAY[
   'SELECT * FROM health.problems',
+  'SELECT * FROM health.problem_kinds',
   'SELECT * FROM health.collectors',
   'SELECT * FROM health.meters',
   'SELECT * FROM health.unregistered_serials',

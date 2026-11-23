@@ -365,61 +365,76 @@ Read over an SSH tunnel; nothing is exposed. All of them are as of `now()`.
   host, port and unit but no `endpoint_id`; one gathered over a meter's
   readings from anywhere (`unregistered_serial`, `misplaced_serial`,
   `serial_at_several_places`, `energy_backwards`, `meter_clock_step`) has
-  only its serial. Kinds: `collector_silent` (no upload for
-  `collector_silent_after`), `clock_unchecked` (unchecked in
-  `health.collector_clocks`; its detail says since when and what the last check
-  was), `endpoint_silent` (every expected unit of the endpoint silent, as
-  below; not listed when its collector is silent; its detail gives the
-  units, the last reading at any, the last missed read and the address),
-  `target_silent` (no reading at the unit for `meter_silent_intervals` × its
-  interval, counted from when it came into service if later, whatever missed
-  reads there were; not listed when its collector or its endpoint is silent;
-  its subject is `<endpoint> unit <n>`, its detail the last missed read, the
-  address, profile and meter placed), `meter_silent` (no reading for
-  `meter_silent_intervals` × its interval, counted from when it came into
-  service if later; not listed when its collector or its target is silent).
-  Each of the three is `*_never_read` instead (`endpoint_never_read`,
-  `target_never_read`, `meter_never_read`) when its subject has had no reading
-  since it last came into service, so a meter that stopped reads apart from
-  one that never answered.
-  `endpoint_errors` (erroring in `health.endpoints`, and not silent; its
-  detail gives the failed and due reads, the rate, the missed reads by reason
-  and the address), `endpoint_closes_connections` (in place of the
-  endpoint's `endpoint_silent`, `endpoint_never_read` or `endpoint_errors`
-  when its last missed read within the lookback was a connection closed
-  before a byte, `unreachable` with detail `closed`, and nothing at it has
-  been read since: a gateway whose one connection another client holds; its
-  detail gives that time, the last reading within the lookback and the
-  address), `backlog_near_capacity` (bytes at or above
-  `backlog_near_capacity` of the buffer), `backlog_refused`,
-  `backlog_discarded`, `backlog_quarantined` (above zero in the latest
-  upload; `refused` counts since the collector started, so it clears on a
-  restart), `config_refused` (the latest upload reports a served config the
-  collector refused; its detail gives that digest, the reason and the digest
-  it still applies), `unregistered_serial`, `misplaced_serial` (one
-  per serial, every place it was read in its detail),
-  `serial_at_several_places` (an unregistered serial read at more than one
-  place: two meters reporting one serial, one meter reachable two ways, or a
-  move; every place in its detail), `several_serials_at_place` (a place whose
-  readings carry more than one serial: a swap, or two meters answering one
-  address; each serial's readings and times in its detail, so a handover
-  shows apart from interleaving), `firmware_changed` (a serial whose
-  latest names differ from an earlier record, while the batch that first
-  brought the latest names arrived within the lookback, so a weeks-late change
-  is flagged when it arrives, and a resend neither hides nor renews it),
-  `energy_backwards` (a serial with a drop in `health.energy_drops`; each drop,
-  both readings' clock signals and whether it is suspect in its detail),
-  `snapshot_missed` (a serial in `health.missed_snapshots`; its meter days,
-  the meter's clock as last read and the address in its detail) and
-  `copy_behind` (a store behind in `health.copy_stores`, subject
-  `<serial> <store>`; its newest entry copied and the threshold in its
-  detail). Both are measured at the collector's last upload, so a collector
-  gone quiet shows as `collector_silent`, not as copies missed. Then
-  `meter_clock_step` (a serial in `health.meter_clock_steps`; each step, the
-  reads either side and the address in its detail), `meter_clock_far` (far in
-  `health.meter_clocks`; its offset, its distance from the median and of how
-  many meters) and `copy_failing_polled_slowly` (polled slowly in
-  `health.copy_meters`; what fails, its interval and the threshold).
+  only its serial. What each kind means, and what an operator does about
+  it, is in `health.problem_kinds`, below. For a developer, when each is
+  raised, when it is not listed, and what its detail holds:
+  - `collector_silent`: no upload for `collector_silent_after`.
+  - `clock_unchecked`: unchecked in `health.collector_clocks`; detail: since
+    when, and what the last check was.
+  - `endpoint_silent`: every expected unit of the endpoint silent, as
+    `target_silent` counts it; not listed when its collector is silent;
+    detail: the units, the last reading at any, the last missed read, the
+    address.
+  - `target_silent`: no reading at the unit for `meter_silent_intervals` ×
+    its interval, counted from when it came into service if later, whatever
+    missed reads there were; not listed when its collector or its endpoint is
+    silent; subject `<endpoint> unit <n>`; detail: the last missed read, the
+    address, the profile and the meter placed.
+  - `meter_silent`: no reading for `meter_silent_intervals` × its interval,
+    counted from when it came into service if later; not listed when its
+    collector or its target is silent.
+  - `endpoint_never_read`, `target_never_read`, `meter_never_read`: each in
+    place of the `*_silent` above when its subject has had no reading since
+    it last came into service.
+  - `endpoint_errors`: erroring in `health.endpoints`, and not silent;
+    detail: the failed and due reads, the rate, the missed reads by reason,
+    the address.
+  - `endpoint_closes_connections`: in place of the endpoint's
+    `endpoint_silent`, `endpoint_never_read` or `endpoint_errors` when its
+    last missed read within the lookback was `unreachable` with detail
+    `closed` and nothing at it has been read since; detail: that time, the
+    last reading within the lookback, the address.
+  - `backlog_near_capacity`: bytes at or above `backlog_near_capacity` of the
+    buffer. `backlog_refused`, `backlog_discarded`, `backlog_quarantined`:
+    above zero in the latest upload; `refused` counts since the collector
+    started, so it clears on a restart.
+  - `config_refused`: the latest upload reports a served config the collector
+    refused; detail: that digest, the reason, the digest it still applies.
+  - `unregistered_serial`, `misplaced_serial`: one per serial; detail: every
+    place it was read.
+  - `serial_at_several_places`: an unregistered serial read at more than one
+    place; detail: every place.
+  - `several_serials_at_place`: a place whose readings carry more than one
+    serial; detail: each serial's readings and times, so a handover shows
+    apart from interleaving.
+  - `firmware_changed`: a serial whose latest names differ from an earlier
+    record, while the batch that first brought the latest names arrived
+    within the lookback, so a weeks-late change is flagged when it arrives,
+    and a resend neither hides nor renews it.
+  - `energy_backwards`: a serial with a drop in `health.energy_drops`;
+    detail: each drop, both readings' clock signals, whether it is suspect.
+  - `snapshot_missed`: a serial in `health.missed_snapshots`; detail: its
+    meter days, the meter's clock as last read, the address.
+    `copy_behind`: a store behind in `health.copy_stores`; subject
+    `<serial> <store>`; detail: its newest entry copied and the threshold.
+    Both are measured at the collector's last upload, so a collector gone
+    quiet shows as `collector_silent`, not as copies missed.
+  - `meter_clock_step`: a serial in `health.meter_clock_steps`; detail: each
+    step, the reads either side, the address. `meter_clock_far`: far in
+    `health.meter_clocks`; detail: its offset, its distance from the median
+    and of how many meters.
+  - `copy_failing_polled_slowly`: polled slowly in `health.copy_meters`;
+    detail: what fails, its interval, the threshold.
+
+  A kind added to the view needs a row in `health.problem_kinds`, and a test
+  of its key columns through `pg_temp.keys` (`test/lib/problems.sql`), which
+  checks the row.
+- `health.problem_kinds`: one row per kind `health.problems` raises:
+  `kind`; `level`, what its subject names (`collector`, `endpoint`, `target`,
+  `meter` for a serial, `meter_store` for a serial and one of its stores,
+  `place` for an address as read); `meaning`, one sentence for an operator;
+  and `action`, what to do. Literal rows in a migration, so the words change
+  only through the repo; readers show them rather than keep a copy.
 - `health.stored_entries`, `health.stored_entry_conflicts`,
   `health.meter_clock_reads` and `health.meter_clock_read_conflicts`: every
   row of their `store` tables, the first and third with `received_at`, when
