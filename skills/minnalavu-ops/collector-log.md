@@ -71,6 +71,10 @@ Also read the top of `status.json`: `buffer.backlog` (`refused`,
 `quarantined`, `discarded_files` all 0; `bytes` against `max_bytes`), and
 `uplink` (last result and next attempt).
 
+A meter's `next_due_at` is in the collector's local time with its offset
+(`+05:30`), as its poll slots are; `last_read_at` and `as_of` are UTC
+(`Z`). Both are exact instants, so compare them parsed, not as text.
+
 ## 5. Report
 
 Per finding: the shape, how many times, which endpoints and units, the first
