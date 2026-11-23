@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+if ((BASH_VERSINFO[0] < 5)); then
+  echo "needs bash 5+, found $BASH_VERSION" >&2
+  exit 1
+fi
+set -euo pipefail
+# Run a PowerShell script, read from stdin, on a Windows collector host over
+# SSH. The script goes as -EncodedCommand (UTF-16LE, base64), so neither the
+# local shell nor the remote one rewrites its $ signs or quotes. The host's
+# progress records (CLIXML) are dropped from the output.
+#   skills/minnalavu-ops/pcps <ssh-alias> <<'EOF'
+#   Get-Service alavi_alavi
+#   EOF
+if (($# != 1)); then
+  echo "usage: pcps <ssh-alias> < script.ps1" >&2
+  exit 2
+fi
+enc=$(iconv -f UTF-8 -t UTF-16LE | base64 | tr -d '\n')
+# shellcheck disable=SC2029 # the encoded script is meant to expand here
+ssh "$1" "powershell -NoProfile -NonInteractive -EncodedCommand $enc" 2>&1 |
+  grep -v -e '^#< CLIXML' -e '^<Objs '

@@ -1,8 +1,3 @@
----
-name: copy-holes
-description: Judge the holes in what minnalavu's store holds of the meters' copied stores (history, snapshot, load survey) and request fills for them. Covers listing the holes with admin.copy_holes, setting aside those already settled (gone, pending, answered), finding each hole's cause, shaping admin.request_fill requests, and following them up. Load after a store move or restore, after a collector reports discarded or quarantined buffer segments, after a meter clock step, or when asked to check the copies.
----
-
 # Judging copy holes
 
 A collector copies each meter's stored entries newer than its own mark, so
@@ -12,7 +7,7 @@ health problem raises them. A session judges them, with this procedure.
 
 `holes.sql` beside this file runs every query below, read only:
 
-    bin/dev central sh -c 'psql "$MINNALAVU_DB_URL" -X -v since=2026-10-01 -f ../skills/copy-holes/holes.sql'
+    bin/dev central sh -c 'psql "$MINNALAVU_DB_URL" -X -v since=2026-10-01 -f ../skills/minnalavu-ops/holes.sql'
 
 That is the dev store. A deployed store runs the same file as its operator.
 

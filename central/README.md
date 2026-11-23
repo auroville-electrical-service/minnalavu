@@ -556,7 +556,7 @@ with `gone` (a fill result showed the meter no longer held it) and
 `pending_request` (a fill offered now that will copy it). A store with no
 entry of the serial has no holes: `health.problems` shows it as
 `copy_behind`. Judging which holes to fill is the operator's, and a session
-does it with the `copy-holes` skill (`skills/copy-holes/`).
+does it with the `minnalavu-ops` skill (`skills/minnalavu-ops/copy-holes.md`).
 
     SELECT admin.request_fill(collector_id => 'pilot_01', meters => ARRAY['…'],
       stores => ARRAY['load_survey', 'history'], from_time => '2026-10-01',
@@ -577,7 +577,7 @@ To move a store, freeze the collector's uploads (it buffers, as offline),
 back up, restore into the new store, point the collector at it, then make
 one fill per collector for what its meters hold. Without the freeze, readings
 the old store accepted after the backup are in neither store nor buffer. The
-steps are the `store-move` skill (`skills/store-move/`).
+steps are the `minnalavu-ops` skill (`skills/minnalavu-ops/store-move.md`).
 
 ## The served polling config
 

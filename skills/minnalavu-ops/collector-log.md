@@ -1,26 +1,19 @@
----
-name: collector-log
-description: Read a collector's log and status file for lines that point at a code fix. Covers fetching `alavi.log`, its rotations and `status.json` into `data/`, joining multi-line entries, grouping warnings by shape, setting aside the classes known to be benign, and cross-checking a unit's copy failures against its polls. Load on a site visit, after an upgrade, or when asked what the collector has been doing.
----
-
 # Reading a collector's log
 
 The log says what went wrong; `status.json` says what went right, since the
 poller does not log a successful read. Read both, and judge a warning only
 against what the status says about the same unit.
 
-`<pc>` is the collector host's SSH alias. Its value is the operator's own,
-not in this repo.
+Placeholders are in `SKILL.md`; reaching the host is `collector-host.md`.
 
 ## 1. Fetch
 
-The service writes `log\alavi.log` under its install directory (`C:\alavi`
-on Windows), rotated at 10 MB to `alavi.log.0` and `.1`, with
-`status.json` beside it. Copy them into the gitignored `data/`, one folder
-per visit:
+The service writes `log\alavi.log` under `<root>`, rotated at
+`log.max_file_bytes` to `alavi.log.0` and `.1`, with `status.json` beside
+it. Copy them into the gitignored `data/`, one folder per visit:
 
     d=data/pc-run-$(date +%Y%m%d); mkdir -p "$d"
-    ssh <pc> 'powershell -NoProfile -Command "Get-ChildItem C:\alavi\log | Format-Table Name,Length,LastWriteTime"'
+    skills/minnalavu-ops/pcps <pc> <<<'Get-ChildItem C:\alavi\log | Format-Table Name,Length,LastWriteTime'
     scp -q '<pc>:C:/alavi/log/alavi.log' '<pc>:C:/alavi/log/status.json' "$d/"
 
 Fetch a rotation too when the current file starts after the time you need.
