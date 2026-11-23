@@ -25,7 +25,7 @@ Under `<root>`:
   `log\status.json`, rewritten as the collector runs. Its `buffer.backlog`
   (batches, bytes, `refused`, `quarantined`, `discarded_files`) and `uplink`
   (last result, next attempt) are the first things to read; `settings` lists
-  every setting, the token included, so filter it.
+  every setting but the token, which it never shows.
 
 The scripts are in `<src>\alavi\rel\windows\`, not in `<root>`. The service is
 `alavi_alavi`.
