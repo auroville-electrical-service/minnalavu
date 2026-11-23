@@ -13,6 +13,9 @@ The directory is not named `minnalavu/`, since that is the repo itself.
   (one static binary; it records applied versions in `public.schema_migrations`).
   Forward only: a rollback would drop raw data, so a mistake is undone by a new
   migration. Never edit one that has been applied anywhere that matters.
+  `0038_baseline.sql` is the schema the first 38 migrations left, in one file
+  with a comment on every object; a store already at 0038 has nothing
+  pending, and the old files are in git history.
 - `test/*.sql`: the SQL tests, each a transaction that is rolled back; helpers in
   `test/lib/assert.sql`.
 - `bin/`: `migrate`, `load-profiles`, `test`, `dev-db` (dev only),
